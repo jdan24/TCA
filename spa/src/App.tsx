@@ -1,11 +1,22 @@
+import { useEffect } from "react";
 import { Header } from "@/components/layout/Header";
 import { FileDropZone } from "@/components/upload/FileDropZone";
 import { useTCAStore } from "@/store/useTCAStore";
+import { computeAll } from "@/tca/compute";
 
 function App() {
   const rawTrades = useTCAStore((s) => s.rawTrades);
+  const enrichment = useTCAStore((s) => s.enrichment);
   const setRawTrades = useTCAStore((s) => s.setRawTrades);
+  const setResults = useTCAStore((s) => s.setResults);
   const reset = useTCAStore((s) => s.reset);
+
+  // Re-run TCA metrics whenever trades or Bloomberg enrichment changes
+  useEffect(() => {
+    if (rawTrades.length > 0) {
+      setResults(computeAll(rawTrades, enrichment));
+    }
+  }, [rawTrades, enrichment, setResults]);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
