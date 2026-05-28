@@ -12,6 +12,7 @@
 
 import type { EnrichProgress } from "@/bloomberg/enrichmentService";
 import type { TCAResult, TradeRecord } from "@/types";
+import { TradeTable } from "@/components/table/TradeTable";
 import { ReversionChart } from "./ReversionChart";
 import { SlippageChart } from "./SlippageChart";
 import { SpreadScatter } from "./SpreadScatter";
@@ -116,6 +117,9 @@ export function Dashboard({
         <ReversionChart trades={trades} results={results} />
         <SpreadScatter results={results} />
       </div>
+
+      {/* ── Trade detail table (full width) ──────────────────────────────── */}
+      <TradeTable trades={trades} results={results} />
     </div>
   );
 }
