@@ -16,6 +16,7 @@ export const useTCAStore = create<TCAStore>((set) => ({
   setResults: (results) => set({ results }),
   setEnrichment: (orderId, data) =>
     set((s) => ({ enrichment: { ...s.enrichment, [orderId]: data } })),
+  setAllEnrichment: (enrichment) => set({ enrichment }),
   setBloombergConnected: (v) => set({ bloombergConnected: v }),
   setProcessing: (v) => set({ isProcessing: v }),
   setParseError: (msg) => set({ parseError: msg }),

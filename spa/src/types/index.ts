@@ -81,6 +81,8 @@ export interface TCAStore {
   setRawTrades: (trades: TradeRecord[]) => void;
   setResults: (results: TCAResult[]) => void;
   setEnrichment: (orderId: string, data: BloombergEnrichment) => void;
+  /** Replace the entire enrichment map at once (used after a full enrichment run). */
+  setAllEnrichment: (enrichment: Record<string, BloombergEnrichment>) => void;
   setBloombergConnected: (v: boolean) => void;
   setProcessing: (v: boolean) => void;
   setParseError: (msg: string | null) => void;

@@ -1,50 +1,164 @@
-// TODO Phase 4 — fetch() calls to the local Bloomberg FastAPI bridge
-// Bridge runs at http://localhost:8000 — no proxy needed (same-machine deployment)
-// All functions return null/false gracefully when the bridge is unreachable
+/**
+ * Bloomberg Bridge HTTP client.
+ *
+ * Thin, typed wrappers around the FastAPI bridge running at localhost:8000.
+ * Every function returns a safe empty/null value instead of throwing when the
+ * bridge is unreachable — callers treat missing data as N/A in the dashboard.
+ *
+ * Bridge endpoints:
+ *   GET /health            → { status: "ok", blpapi: boolean }
+ *   GET /snapshot          → { arrivalPrice: number }
+ *   GET /intraday-bars     → IntradayBar[]
+ *   GET /reference         → Record<string, unknown>
+ *   GET /bid-ask-ticks     → BridgeTick[]
+ */
 
 const BRIDGE_BASE = "http://localhost:8000";
 
-/** Ping /health — returns true if the bridge is up. */
-export async function checkHealth(): Promise<boolean> {
+/** Matches the bridge's _drain timeout (15 s). Add a small buffer. */
+const TIMEOUT_MS = 17_000;
+
+// ── Response shapes (mirror the Python bridge) ────────────────────────────────
+
+export interface IntradayBar {
+  /** ISO-8601 string: bar open time, no timezone suffix (UTC implied). */
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  numEvents: number;
+}
+
+/** A paired bid/ask quote as returned by the bridge. */
+export interface BridgeTick {
+  /** ISO-8601 string (UTC implied). */
+  time: string;
+  bid: number;
+  ask: number;
+}
+
+// ── Internal fetch helper ─────────────────────────────────────────────────────
+
+async function bridgeGet<T>(
+  path: string,
+  params: Record<string, string>,
+  fallback: T,
+  timeoutMs = TIMEOUT_MS,
+): Promise<T> {
   try {
-    const res = await fetch(`${BRIDGE_BASE}/health`, { signal: AbortSignal.timeout(2000) });
-    return res.ok;
+    const url = new URL(`${BRIDGE_BASE}${path}`);
+    for (const [k, v] of Object.entries(params)) {
+      url.searchParams.set(k, v);
+    }
+    const res = await fetch(url.toString(), {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return fallback;
+    return (await res.json()) as T;
   } catch {
-    return false;
+    return fallback;
   }
 }
 
-/** GET /snapshot — arrival prices and reference data for a set of securities. */
-export async function fetchSnapshot(
-  _securities: string[],
-  _fields: string[]
-): Promise<Record<string, Record<string, unknown>>> {
-  return {};
+// ── Public API ────────────────────────────────────────────────────────────────
+
+/**
+ * Ping /health.
+ * Returns true only when the bridge is up AND blpapi is installed.
+ */
+export async function checkHealth(): Promise<boolean> {
+  type HealthResp = { status: string; blpapi: boolean };
+  const data = await bridgeGet<HealthResp>(
+    "/health",
+    {},
+    { status: "", blpapi: false },
+    2_000, // short timeout for status badge
+  );
+  return data.status === "ok" && data.blpapi;
 }
 
-/** GET /intraday-bars — VWAP, reversion marks, vol, ADV. */
+/**
+ * GET /snapshot — arrival price at a specific datetime.
+ *
+ * The bridge tries tick-level bid/ask mid first, falls back to the 1-minute
+ * bar open if ticks are unavailable.
+ *
+ * @param security  Bare ticker, e.g. "ESH4"
+ * @param dt        ISO-8601 UTC string, e.g. "2024-03-15T09:30:00.000Z"
+ */
+export async function fetchArrivalPrice(
+  security: string,
+  dt: string,
+): Promise<number | null> {
+  type Resp = { arrivalPrice: number };
+  const data = await bridgeGet<Resp | null>(
+    "/snapshot",
+    { security, dt },
+    null,
+  );
+  return typeof data?.arrivalPrice === "number" ? data.arrivalPrice : null;
+}
+
+/**
+ * GET /intraday-bars — OHLCV bars over [start, end].
+ *
+ * @param security         Bare ticker, e.g. "ESH4"
+ * @param start            ISO-8601 UTC string
+ * @param end              ISO-8601 UTC string
+ * @param intervalMinutes  Bar size in minutes (default 1)
+ */
 export async function fetchIntradayBars(
-  _security: string,
-  _start: string,
-  _end: string,
-  _intervalMinutes: number
-): Promise<unknown[]> {
-  return [];
+  security: string,
+  start: string,
+  end: string,
+  intervalMinutes: number = 1,
+): Promise<IntradayBar[]> {
+  return bridgeGet<IntradayBar[]>(
+    "/intraday-bars",
+    {
+      security,
+      start,
+      end,
+      interval: String(intervalMinutes),
+    },
+    [],
+  );
 }
 
-/** GET /reference — contract multiplier, currency, ADV. */
+/**
+ * GET /reference — Bloomberg reference fields for a security.
+ *
+ * @param security  Bare ticker, e.g. "ESH4"
+ * @param fields    Bloomberg field names; defaults match bridge default
+ */
 export async function fetchReference(
-  _security: string,
-  _fields: string[]
+  security: string,
+  fields: string[] = ["HIST_VOL_30D", "VOLUME_AVG_30D", "FUT_CONT_SIZE", "CRNCY"],
 ): Promise<Record<string, unknown>> {
-  return {};
+  return bridgeGet<Record<string, unknown>>(
+    "/reference",
+    { security, fields: fields.join(",") },
+    {},
+  );
 }
 
-/** GET /bid-ask-ticks — timestamped bid/ask pairs for TWAS calculation. */
+/**
+ * GET /bid-ask-ticks — chronological bid/ask pairs over [start, end].
+ *
+ * @param security  Bare ticker, e.g. "ESH4"
+ * @param start     ISO-8601 UTC string
+ * @param end       ISO-8601 UTC string
+ */
 export async function fetchBidAskTicks(
-  _security: string,
-  _start: string,
-  _end: string
-): Promise<Array<{ time: string; bid: number; ask: number }>> {
-  return [];
+  security: string,
+  start: string,
+  end: string,
+): Promise<BridgeTick[]> {
+  return bridgeGet<BridgeTick[]>(
+    "/bid-ask-ticks",
+    { security, start, end },
+    [],
+  );
 }
