@@ -1,3 +1,18 @@
+// ── Intraday bar (also re-exported from bloombergClient) ─────────────────────
+export interface IntradayBar {
+  /** ISO-8601 string: bar open time (UTC implied). */
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  numEvents: number;
+}
+
+// ── Analysis mode ─────────────────────────────────────────────────────────────
+export type TCAMode = "multi" | "single";
+
 // ── Raw normalized trade record ──────────────────────────────────────────────
 export interface TradeRecord {
   orderId: string;
@@ -11,6 +26,7 @@ export interface TradeRecord {
   lastFillTime: Date;
   contractMultiplier: number;
   currency: string;
+  algo: string | null; // "Algo Policy" column; null when absent
 }
 
 // ── Computed TCA metrics per trade ───────────────────────────────────────────
@@ -25,6 +41,8 @@ export interface TCAResult {
   reversion_30m_bps: number | null;
   reversion_EOD_bps: number | null;
   TWAS_bps: number | null;
+  vol_during_order_price: number | null; // 1σ price std-dev during order window
+  vol_during_order_bps: number | null;   // same expressed in bps
 }
 
 // ── Bloomberg enrichment payload (one per orderId) ───────────────────────────
@@ -44,6 +62,61 @@ export interface BloombergEnrichment {
   reversion30m: number;
   reversionEOD: number;
   bidAskTicks: BidAskTick[];
+  barsSnapshot: IntradayBar[]; // 1-min bars for the order window (used by volatility)
+}
+
+// ── Single-order parent aggregate (Mode 2 only) ───────────────────────────────
+export interface ParentOrderSummary {
+  symbol: string;
+  side: "BUY" | "SELL";
+  totalQty: number;
+  fillVwap: number; // qty-weighted avg fill price across all slices
+  arrivalPrice: number | null;
+  IS_bps: number | null;
+  orderTime: Date; // earliest orderTime across all slices
+  lastFillTime: Date; // latest lastFillTime across all slices
+  duration_ms: number;
+  vol_during_order_price: number | null;
+  vol_during_order_bps: number | null;
+  participationRate: number | null; // totalQty / avgADV
+}
+
+// ── Multi-order aggregation types ─────────────────────────────────────────────
+export type AggGroupType = "symbol" | "algo" | "symbol+algo" | "symbol+side";
+
+export interface AggregateRow {
+  groupKey: string; // display label, e.g. "ESH5" or "ESH5 / VWAP"
+  count: number;
+  totalQty: number;
+  avgIS_bps: number | null;
+  avgVWAP_dev_bps: number | null;
+  avgMI_bps: number | null;
+  avgTWAS_bps: number | null;
+  avgTTF_ms: number;
+  winRate: number | null; // fraction [0,1] of orders where IS_bps <= 0
+  bestIS_bps: number | null; // most favourable (min) IS in group
+  worstIS_bps: number | null; // most adverse (max) IS in group
+  orderIds: string[]; // pre-computed for TradeTable pre-filter
+}
+
+export interface AggregationFilter {
+  type: AggGroupType;
+  key: string; // groupKey value that was clicked
+  orderIds: string[];
+}
+
+export interface AggregationSet {
+  bySymbol: AggregateRow[];
+  byAlgo: AggregateRow[];
+  bySymbolAlgo: AggregateRow[];
+  bySymbolSide: AggregateRow[];
+}
+
+// ── RIC → Bloomberg symbol mapping ────────────────────────────────────────────
+export interface SymbolMapping {
+  ric: string; // e.g. "ESc1", "ES=F"
+  bbgTicker: string; // e.g. "ES1", "CL1"
+  bbgYellowKey: string; // "Index" | "Comdty" | "Equity" | "Curncy" | etc.
 }
 
 // ── Column-mapping types ──────────────────────────────────────────────────────
@@ -58,7 +131,7 @@ export type RequiredField =
   | "firstFillTime"
   | "lastFillTime";
 
-export type OptionalField = "arrivalPrice" | "contractMultiplier" | "currency";
+export type OptionalField = "arrivalPrice" | "contractMultiplier" | "currency" | "algo";
 
 export type ColumnMapping = Record<RequiredField, string> &
   Partial<Record<OptionalField, string>>;
@@ -72,12 +145,15 @@ export interface RawFileData {
 
 // ── Zustand store shape ───────────────────────────────────────────────────────
 export interface TCAStore {
+  mode: TCAMode;
   rawTrades: TradeRecord[];
   results: TCAResult[];
   enrichment: Record<string, BloombergEnrichment>; // keyed by orderId
   bloombergConnected: boolean;
   isProcessing: boolean;
   parseError: string | null;
+  aggregationFilter: AggregationFilter | null;
+  setMode: (m: TCAMode) => void;
   setRawTrades: (trades: TradeRecord[]) => void;
   setResults: (results: TCAResult[]) => void;
   setEnrichment: (orderId: string, data: BloombergEnrichment) => void;
@@ -86,6 +162,7 @@ export interface TCAStore {
   setBloombergConnected: (v: boolean) => void;
   setProcessing: (v: boolean) => void;
   setParseError: (msg: string | null) => void;
+  setAggregationFilter: (f: AggregationFilter | null) => void;
   reset: () => void;
 }
 

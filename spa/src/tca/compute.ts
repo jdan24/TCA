@@ -1,20 +1,25 @@
 /**
  * TCA computation orchestrator.
  *
- * computeAll() runs all six metric modules over a set of trades and
- * returns a TCAResult[] in the same order as the input trades array.
+ * computeAll() runs all metric modules over a set of trades and returns
+ * a TCAResult[] in the same order as the input trades array.
  *
- * Bloomberg-dependent metrics (VWAP deviation, market impact, reversion, TWAS)
- * return null when enrichment data is not available for a given orderId —
- * the dashboard renders those cells as "N/A".
+ * Bloomberg-dependent metrics (VWAP deviation, market impact, reversion,
+ * TWAS, vol) return null when enrichment data is not available for a given
+ * orderId — the dashboard renders those cells as "N/A".
+ *
+ * computeParentOrderSummary() aggregates all trades into a single parent-order
+ * view for Mode 2 (Single Order TCA).
  */
-import type { BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
+import type { BloombergEnrichment, ParentOrderSummary, TCAResult, TradeRecord } from "@/types";
 import { computeMarketImpact } from "./marketImpact";
 import { computeReversion } from "./reversion";
 import { computeSlippage } from "./slippage";
 import { computeTWAS } from "./spread";
 import { computeTimeToFill } from "./timing";
+import { computeOrderVol } from "./volatility";
 import { computeVWAPDeviation } from "./vwapTwap";
+import { sideSign } from "./tcaUtils";
 
 export function computeAll(
   trades: TradeRecord[],
@@ -24,6 +29,11 @@ export function computeAll(
     // enrichment is keyed by orderId; undefined when Bloomberg bridge is offline
     const e = enrichment[trade.orderId];
     const rev = computeReversion(trade, e);
+
+    // computeOrderVol is called once per trade and destructured
+    const vol = e
+      ? computeOrderVol(trade, e.barsSnapshot, e.bidAskTicks)
+      : { price: null, bps: null };
 
     return {
       orderId: trade.orderId,
@@ -36,6 +46,99 @@ export function computeAll(
       reversion_30m_bps: rev.reversion_30m_bps,
       reversion_EOD_bps: rev.reversion_EOD_bps,
       TWAS_bps: computeTWAS(trade, e?.bidAskTicks ?? []),
+      vol_during_order_price: vol.price,
+      vol_during_order_bps: vol.bps,
     };
   });
+}
+
+/**
+ * Aggregate all trades into a single parent-order summary (Mode 2).
+ *
+ * Returns null when the trades array is empty or has inconsistent sides.
+ * `enrichment` is used for arrival price fallback and participation rate.
+ */
+export function computeParentOrderSummary(
+  trades: TradeRecord[],
+  results: TCAResult[],
+  enrichment: Record<string, BloombergEnrichment>
+): ParentOrderSummary | null {
+  if (trades.length === 0) return null;
+
+  // Use the first trade's side; warn if mixed (we proceed anyway)
+  const firstTrade = trades[0];
+  if (!firstTrade) return null;
+  const side = firstTrade.side;
+
+  // ── Aggregate quantities and VWAP ────────────────────────────────────────
+  const totalQty = trades.reduce((s, t) => s + t.orderQty, 0);
+  const totalNotional = trades.reduce((s, t) => s + t.avgFillPrice * t.orderQty, 0);
+  const fillVwap = totalQty > 0 ? totalNotional / totalQty : 0;
+
+  // ── Time bounds ───────────────────────────────────────────────────────────
+  const orderTime = trades.reduce(
+    (min, t) => (t.orderTime < min ? t.orderTime : min),
+    firstTrade.orderTime
+  );
+  const lastFillTime = trades.reduce(
+    (max, t) => (t.lastFillTime > max ? t.lastFillTime : max),
+    firstTrade.lastFillTime
+  );
+  const duration_ms = lastFillTime.getTime() - orderTime.getTime();
+
+  // ── Arrival price: from first trade's field, then first enrichment found ──
+  const arrivalPrice: number | null =
+    firstTrade.arrivalPrice ??
+    (() => {
+      for (const t of trades) {
+        const e = enrichment[t.orderId];
+        if (e) return e.arrivalPrice;
+      }
+      return null;
+    })();
+
+  // ── IS bps at parent level ────────────────────────────────────────────────
+  const IS_bps =
+    arrivalPrice !== null && arrivalPrice > 0
+      ? ((fillVwap - arrivalPrice) / arrivalPrice) * sideSign(side) * 10_000
+      : null;
+
+  // ── Vol: average of per-slice vol bps ────────────────────────────────────
+  const volBpsVals = results
+    .map((r) => r.vol_during_order_bps)
+    .filter((v): v is number => v !== null);
+  const volPriceVals = results
+    .map((r) => r.vol_during_order_price)
+    .filter((v): v is number => v !== null);
+
+  const vol_during_order_bps = volBpsVals.length > 0
+    ? volBpsVals.reduce((a, b) => a + b, 0) / volBpsVals.length
+    : null;
+  const vol_during_order_price = volPriceVals.length > 0
+    ? volPriceVals.reduce((a, b) => a + b, 0) / volPriceVals.length
+    : null;
+
+  // ── Participation rate: totalQty / avgADV ────────────────────────────────
+  const advVals = trades
+    .map((t) => enrichment[t.orderId]?.adv)
+    .filter((v): v is number => typeof v === "number" && v > 0);
+  const avgAdv = advVals.length > 0
+    ? advVals.reduce((a, b) => a + b, 0) / advVals.length
+    : null;
+  const participationRate = avgAdv !== null && avgAdv > 0 ? totalQty / avgAdv : null;
+
+  return {
+    symbol: firstTrade.symbol,
+    side,
+    totalQty,
+    fillVwap,
+    arrivalPrice,
+    IS_bps,
+    orderTime,
+    lastFillTime,
+    duration_ms,
+    vol_during_order_price,
+    vol_during_order_bps,
+    participationRate,
+  };
 }

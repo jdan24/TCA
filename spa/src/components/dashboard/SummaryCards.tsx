@@ -73,12 +73,16 @@ export function SummaryCards({ results }: SummaryCardsProps) {
   const avgMI = safeAvg(miVals);
   const miCount = miVals.filter((v) => v !== null).length;
 
+  const volVals = results.map((r) => r.vol_during_order_bps);
+  const avgVol = safeAvg(volVals);
+  const volCount = volVals.filter((v) => v !== null).length;
+
   function subOf(count: number) {
     return count === n ? `${n} trade${n !== 1 ? "s" : ""}` : `${count} of ${n} trades`;
   }
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
       <KpiCard
         label="Avg IS"
         value={fmtBps(avgIS)}
@@ -108,6 +112,12 @@ export function SummaryCards({ results }: SummaryCardsProps) {
         value={fmtBps(avgMI)}
         sub={subOf(miCount)}
         sentiment={avgMI !== null && avgMI > 0 ? "bad" : "neutral"}
+      />
+      <KpiCard
+        label="Avg Vol (1σ)"
+        value={fmtBps(avgVol)}
+        sub={volCount > 0 ? subOf(volCount) : "requires Bloomberg"}
+        sentiment="neutral"
       />
     </div>
   );

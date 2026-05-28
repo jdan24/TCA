@@ -43,6 +43,7 @@ export function ColumnMapper({
       arrivalPrice: suggested.arrivalPrice ?? UNMAPPED,
       contractMultiplier: suggested.contractMultiplier ?? UNMAPPED,
       currency: suggested.currency ?? UNMAPPED,
+      algo: suggested.algo ?? UNMAPPED,
     };
     return init;
   });
@@ -68,6 +69,7 @@ export function ColumnMapper({
     if (state.arrivalPrice) mapping.arrivalPrice = state.arrivalPrice;
     if (state.contractMultiplier) mapping.contractMultiplier = state.contractMultiplier;
     if (state.currency) mapping.currency = state.currency;
+    if (state.algo) mapping.algo = state.algo;
     onConfirm(mapping);
   }
 

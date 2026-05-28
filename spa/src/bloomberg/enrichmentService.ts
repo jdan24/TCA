@@ -29,13 +29,12 @@
  * which is the conservative "no data" signal rather than a misleading number.
  */
 
-import type { BidAskTick, BloombergEnrichment, TradeRecord } from "@/types";
+import type { BidAskTick, BloombergEnrichment, IntradayBar, TradeRecord } from "@/types";
 import {
   fetchArrivalPrice,
   fetchBidAskTicks,
   fetchIntradayBars,
   fetchReference,
-  type IntradayBar,
 } from "./bloombergClient";
 
 // ── Time constants ────────────────────────────────────────────────────────────
@@ -133,8 +132,10 @@ function annualizedPctToDaily(raw: unknown): number {
 async function enrichOneTrade(
   trade: TradeRecord,
   refData: Record<string, unknown>,
+  bbgSymbol: string,
 ): Promise<BloombergEnrichment | null> {
-  const { symbol, orderTime, lastFillTime, avgFillPrice } = trade;
+  const { orderTime, lastFillTime, avgFillPrice } = trade;
+  const symbol = bbgSymbol; // may be mapped RIC → Bloomberg ticker+yellowKey
 
   // ── Parallel data fetch ──────────────────────────────────────────────────
   const barStart = new Date(orderTime.getTime() - FIVE_MIN_MS);
@@ -198,6 +199,7 @@ async function enrichOneTrade(
     reversion30m: rev30mPrice ?? avgFillPrice,
     reversionEOD: eodPrice ?? avgFillPrice,
     bidAskTicks,
+    barsSnapshot: bars,
   };
 }
 
@@ -222,13 +224,14 @@ export interface EnrichProgress {
 export async function enrichAllTrades(
   trades: TradeRecord[],
   onProgress?: (progress: EnrichProgress) => void,
+  resolveSymbol: (ric: string) => string = (s) => s,
 ): Promise<Record<string, BloombergEnrichment>> {
   const result: Record<string, BloombergEnrichment> = {};
   const total = trades.length;
   if (total === 0) return result;
 
-  // ── Step 1: batch reference data (one call per unique symbol) ─────────────
-  const uniqueSymbols = [...new Set(trades.map((t) => t.symbol))];
+  // ── Step 1: batch reference data (one call per unique mapped symbol) ───────
+  const uniqueSymbols = [...new Set(trades.map((t) => resolveSymbol(t.symbol)))];
   const refMap: Record<string, Record<string, unknown>> = {};
 
   await Promise.all(
@@ -245,10 +248,11 @@ export async function enrichAllTrades(
       continue;
     }
 
-    const ref = refMap[trade.symbol] ?? {};
+    const bbgSymbol = resolveSymbol(trade.symbol);
+    const ref = refMap[bbgSymbol] ?? {};
 
     try {
-      const enriched = await enrichOneTrade(trade, ref);
+      const enriched = await enrichOneTrade(trade, ref, bbgSymbol);
       if (enriched !== null) {
         result[trade.orderId] = enriched;
       }

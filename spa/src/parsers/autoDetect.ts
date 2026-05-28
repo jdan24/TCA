@@ -58,6 +58,12 @@ const FIELD_ALIASES: Record<RequiredField | OptionalField, string[]> = {
     "currency", "ccy", "curr", "tradecurrency", "trade_currency",
     "settlecurrency", "settle_currency",
   ],
+  algo: [
+    "algopolicy", "algo_policy", "algo", "algorithm", "strategy",
+    "strategyname", "strategy_name", "algoname", "algo_name",
+    "executionalgo", "execution_algo", "algocode", "algo_code",
+    "algostrategypolicy",
+  ],
 };
 
 // Strip everything except a-z and 0-9 for comparison
@@ -125,6 +131,7 @@ export const OPTIONAL_FIELDS: OptionalField[] = [
   "arrivalPrice",
   "contractMultiplier",
   "currency",
+  "algo",
 ];
 
 /** Human-readable labels and descriptions for the ColumnMapper UI */
@@ -151,5 +158,9 @@ export const FIELD_META: Record<
   currency: {
     label: "Currency",
     description: "Settlement currency (default: USD if not in file)",
+  },
+  algo: {
+    label: "Algo / Strategy",
+    description: "Algo Policy or execution strategy name (e.g. VWAP, TWAP, POV)",
   },
 };

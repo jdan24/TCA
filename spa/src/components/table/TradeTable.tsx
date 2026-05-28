@@ -2,11 +2,13 @@
  * Trade detail table — TanStack Table v8.
  *
  * Features:
+ *   • Aggregation filter chip: when an AggregationFilter is active, shows a
+ *     dismissal chip and pre-filters the table to matching orderIds.
  *   • Global search on symbol and order ID
  *   • Click-to-sort on every column (null values sort to bottom)
- *   • Column visibility toggle (three reversion columns hidden by default)
+ *   • Column visibility toggle
  *   • Pagination: 10 / 25 / 50 rows per page
- *   • Color-coded bps cells (green = favorable, red = adverse, gray = N/A)
+ *   • Color-coded bps cells
  */
 
 import { useMemo, useState } from "react";
@@ -24,6 +26,7 @@ import {
   type VisibilityState,
 } from "@tanstack/react-table";
 import type { TCAResult, TradeRecord } from "@/types";
+import { useTCAStore } from "@/store/useTCAStore";
 
 // ── Merged row type ───────────────────────────────────────────────────────────
 
@@ -34,6 +37,7 @@ interface TableRow {
   orderQty: number;
   avgFillPrice: number;
   orderTime: Date;
+  algo: string | null;
   timeToFill_ms: number;
   IS_bps: number | null;
   VWAP_dev_bps: number | null;
@@ -43,6 +47,8 @@ interface TableRow {
   reversion_30m_bps: number | null;
   reversion_EOD_bps: number | null;
   TWAS_bps: number | null;
+  vol_during_order_price: number | null;
+  vol_during_order_bps: number | null;
 }
 
 function mergeRows(trades: TradeRecord[], results: TCAResult[]): TableRow[] {
@@ -57,6 +63,7 @@ function mergeRows(trades: TradeRecord[], results: TCAResult[]): TableRow[] {
       orderQty: t.orderQty,
       avgFillPrice: t.avgFillPrice,
       orderTime: t.orderTime,
+      algo: t.algo,
       timeToFill_ms: r?.timeToFill_ms ?? 0,
       IS_bps: r?.IS_bps ?? null,
       VWAP_dev_bps: r?.VWAP_dev_bps ?? null,
@@ -66,6 +73,8 @@ function mergeRows(trades: TradeRecord[], results: TCAResult[]): TableRow[] {
       reversion_30m_bps: r?.reversion_30m_bps ?? null,
       reversion_EOD_bps: r?.reversion_EOD_bps ?? null,
       TWAS_bps: r?.TWAS_bps ?? null,
+      vol_during_order_price: r?.vol_during_order_price ?? null,
+      vol_during_order_bps: r?.vol_during_order_bps ?? null,
     };
   });
 }
@@ -79,6 +88,7 @@ const COLUMN_LABELS: Record<string, string> = {
   orderQty: "Qty",
   avgFillPrice: "Fill Price",
   orderTime: "Order Time",
+  algo: "Algo",
   timeToFill_ms: "TTF",
   IS_bps: "IS",
   VWAP_dev_bps: "VWAP Dev",
@@ -88,6 +98,8 @@ const COLUMN_LABELS: Record<string, string> = {
   reversion_30m_bps: "Rev +30m",
   reversion_EOD_bps: "Rev EOD",
   TWAS_bps: "TWAS",
+  vol_during_order_price: "Vol σ (price)",
+  vol_during_order_bps: "Vol σ (bps)",
 };
 
 // ── Null-safe sort: null values always go to bottom ───────────────────────────
@@ -117,12 +129,6 @@ function fmtTtf(ms: number): string {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-/**
- * Color-coded bps display cell.
- *   default  — positive = red (adverse), negative = green (favorable)
- *   invert   — positive = green (favorable), used for post-trade reversion
- *   neutral  — no sentiment, used for TWAS (spread width)
- */
 function BpsCell({
   value,
   invert = false,
@@ -134,9 +140,7 @@ function BpsCell({
 }) {
   if (value === null) {
     return (
-      <span className="text-gray-300 dark:text-gray-600 text-xs select-none">
-        N/A
-      </span>
+      <span className="text-gray-300 dark:text-gray-600 text-xs select-none">N/A</span>
     );
   }
   let cls: string;
@@ -151,8 +155,7 @@ function BpsCell({
   const sign = value > 0 ? "+" : "";
   return (
     <span className={`tabular-nums text-xs font-medium ${cls}`}>
-      {sign}
-      {value.toFixed(1)}
+      {sign}{value.toFixed(1)}
     </span>
   );
 }
@@ -172,7 +175,6 @@ function SortIcon({ direction }: { direction: "asc" | "desc" | false }) {
 
 const col = createColumnHelper<TableRow>();
 
-// Defined outside the component so it's stable across renders.
 const COLUMNS = [
   col.accessor("orderId", {
     header: "Order ID",
@@ -239,6 +241,18 @@ const COLUMNS = [
     sortingFn: "datetime",
     enableGlobalFilter: false,
   }),
+  col.accessor("algo", {
+    header: "Algo",
+    cell: (i) => {
+      const v = i.getValue();
+      return v ? (
+        <span className="text-xs text-gray-700 dark:text-gray-300">{v}</span>
+      ) : (
+        <span className="text-[10px] text-gray-300 dark:text-gray-600 italic select-none">—</span>
+      );
+    },
+    enableGlobalFilter: false,
+  }),
   col.accessor("timeToFill_ms", {
     header: "TTF",
     cell: (i) => (
@@ -296,6 +310,27 @@ const COLUMNS = [
     sortingFn: nullableSort,
     enableGlobalFilter: false,
   }),
+  col.accessor("vol_during_order_price", {
+    header: "Vol σ (price)",
+    cell: (i) => {
+      const v = i.getValue();
+      return v !== null ? (
+        <span className="tabular-nums text-xs text-gray-700 dark:text-gray-300">
+          {v.toFixed(4)}
+        </span>
+      ) : (
+        <span className="text-gray-300 dark:text-gray-600 text-xs select-none">N/A</span>
+      );
+    },
+    sortingFn: nullableSort,
+    enableGlobalFilter: false,
+  }),
+  col.accessor("vol_during_order_bps", {
+    header: "Vol σ (bps)",
+    cell: (i) => <BpsCell value={i.getValue()} neutral />,
+    sortingFn: nullableSort,
+    enableGlobalFilter: false,
+  }),
 ];
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -303,20 +338,35 @@ const COLUMNS = [
 interface TradeTableProps {
   trades: TradeRecord[];
   results: TCAResult[];
+  /** Optional title override for Mode 2 (Single Order). */
+  title?: string;
 }
 
 const PAGE_SIZES = [10, 25, 50] as const;
 
-// Reversion sub-columns hidden by default to reduce horizontal scroll;
-// users can re-enable via the Columns toggle.
 const DEFAULT_VISIBILITY: VisibilityState = {
   reversion_5m_bps: false,
   reversion_30m_bps: false,
   reversion_EOD_bps: false,
+  vol_during_order_price: false,
+  vol_during_order_bps: false,
 };
 
-export function TradeTable({ trades, results }: TradeTableProps) {
-  const data = useMemo(() => mergeRows(trades, results), [trades, results]);
+export function TradeTable({ trades, results, title = "Trade Detail" }: TradeTableProps) {
+  const aggregationFilter = useTCAStore((s) => s.aggregationFilter);
+  const setAggregationFilter = useTCAStore((s) => s.setAggregationFilter);
+
+  // Pre-filter rows by aggregation selection
+  const filteredIds = useMemo(
+    () => (aggregationFilter ? new Set(aggregationFilter.orderIds) : null),
+    [aggregationFilter],
+  );
+
+  const allData = useMemo(() => mergeRows(trades, results), [trades, results]);
+  const data = useMemo(
+    () => (filteredIds ? allData.filter((r) => filteredIds.has(r.orderId)) : allData),
+    [allData, filteredIds],
+  );
 
   const [sorting, setSorting] = useState<SortingState>([
     { id: "orderTime", desc: true },
@@ -337,7 +387,6 @@ export function TradeTable({ trades, results }: TradeTableProps) {
     onSortingChange: setSorting,
     onGlobalFilterChange: (v: unknown) => {
       setGlobalFilter(String(v ?? ""));
-      // Reset to page 1 on filter change
       setPagination((p) => ({ ...p, pageIndex: 0 }));
     },
     onColumnVisibilityChange: setColumnVisibility,
@@ -358,13 +407,32 @@ export function TradeTable({ trades, results }: TradeTableProps) {
   return (
     <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
 
+      {/* ── Aggregation filter chip ────────────────────────────────────── */}
+      {aggregationFilter !== null && (
+        <div className="flex items-center gap-2 px-4 pt-3 pb-0">
+          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 text-xs text-blue-700 dark:text-blue-300">
+            <span>Filtered: {aggregationFilter.key}</span>
+            <span className="text-blue-400 dark:text-blue-500">
+              ({aggregationFilter.orderIds.length} order{aggregationFilter.orderIds.length !== 1 ? "s" : ""})
+            </span>
+            <button
+              type="button"
+              onClick={() => setAggregationFilter(null)}
+              className="ml-0.5 hover:text-blue-900 dark:hover:text-blue-100 transition-colors font-semibold leading-none"
+              aria-label="Clear filter"
+            >
+              ×
+            </button>
+          </span>
+        </div>
+      )}
+
       {/* ── Toolbar ───────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-800">
         <h3 className="text-sm font-semibold text-gray-900 dark:text-white shrink-0">
-          Trade Detail
+          {title}
         </h3>
 
-        {/* Search */}
         <input
           type="search"
           value={globalFilter}
@@ -376,7 +444,6 @@ export function TradeTable({ trades, results }: TradeTableProps) {
           className="flex-1 min-w-[160px] max-w-xs px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
 
-        {/* Column visibility */}
         <div className="relative">
           <button
             type="button"
@@ -387,7 +454,7 @@ export function TradeTable({ trades, results }: TradeTableProps) {
           </button>
 
           {colMenuOpen && (
-            <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-2 z-20 min-w-[164px]">
+            <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-2 z-20 min-w-[180px]">
               {table
                 .getAllColumns()
                 .filter((c) => c.getCanHide())
@@ -417,7 +484,6 @@ export function TradeTable({ trades, results }: TradeTableProps) {
           )}
         </div>
 
-        {/* Trade count */}
         <span className="ml-auto text-xs text-gray-400 dark:text-gray-600 whitespace-nowrap">
           {totalFiltered !== data.length
             ? `${totalFiltered.toLocaleString()} of ${data.length.toLocaleString()} trades`
@@ -427,7 +493,7 @@ export function TradeTable({ trades, results }: TradeTableProps) {
 
       {/* ── Table ─────────────────────────────────────────────────────── */}
       <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse min-w-[860px]">
+        <table className="w-full text-left border-collapse min-w-[900px]">
           <thead>
             {table.getHeaderGroups().map((hg) => (
               <tr
@@ -446,10 +512,7 @@ export function TradeTable({ trades, results }: TradeTableProps) {
                         : "",
                     ].join(" ")}
                   >
-                    {flexRender(
-                      header.column.columnDef.header,
-                      header.getContext()
-                    )}
+                    {flexRender(header.column.columnDef.header, header.getContext())}
                     <SortIcon direction={header.column.getIsSorted()} />
                   </th>
                 ))}
@@ -493,7 +556,6 @@ export function TradeTable({ trades, results }: TradeTableProps) {
 
       {/* ── Pagination ────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-gray-100 dark:border-gray-800">
-        {/* Rows per page */}
         <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
           <span>Rows per page</span>
           <select
@@ -504,14 +566,11 @@ export function TradeTable({ trades, results }: TradeTableProps) {
             className="rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 px-1.5 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             {PAGE_SIZES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
+              <option key={s} value={s}>{s}</option>
             ))}
           </select>
         </div>
 
-        {/* Page navigation */}
         <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
           {totalFiltered > 0 && (
             <span className="tabular-nums">
@@ -526,9 +585,7 @@ export function TradeTable({ trades, results }: TradeTableProps) {
           >
             ◄
           </button>
-          <span className="tabular-nums">
-            {pageIndex + 1} / {pageCount}
-          </span>
+          <span className="tabular-nums">{pageIndex + 1} / {pageCount}</span>
           <button
             type="button"
             disabled={!table.getCanNextPage()}

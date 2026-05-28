@@ -1,19 +1,24 @@
 /**
- * Dashboard — full analytics view shown after trades are loaded.
+ * Dashboard — Multi-order TCA analytics view (Mode 1).
  *
  * Layout:
  *   ┌─ Toolbar ─────────────────────────────────────────────────────────┐
  *   │ trade count · enriched count · [Fetch Bloomberg] · [↺ New file]  │
- *   ├─ SummaryCards (5 KPI tiles, full width) ──────────────────────────┤
+ *   ├─ SummaryCards (6 KPI tiles, full width) ──────────────────────────┤
  *   ├─ SlippageChart ──── VWAPDeviation ────────────────────────────────┤
  *   ├─ TimingHeatmap (full width) ──────────────────────────────────────┤
- *   └─ ReversionChart ── SpreadScatter ─────────────────────────────────┘
+ *   ├─ ReversionChart ── SpreadScatter ─────────────────────────────────┤
+ *   ├─ AggregationSection (By Symbol / Algo / Symbol+Algo / Symbol+Side)┤
+ *   └─ TradeTable (full width) ──────────────────────────────────────────┘
  */
 
+import { useMemo } from "react";
 import type { EnrichProgress } from "@/bloomberg/enrichmentService";
-import type { TCAResult, TradeRecord } from "@/types";
+import type { AggregationSet, TCAResult, TradeRecord } from "@/types";
+import { buildAggregations } from "@/tca/aggregate";
 import { ExportBar } from "@/components/export/ExportBar";
 import { TradeTable } from "@/components/table/TradeTable";
+import { AggregationSection } from "./AggregationSection";
 import { ReversionChart } from "./ReversionChart";
 import { SlippageChart } from "./SlippageChart";
 import { SpreadScatter } from "./SpreadScatter";
@@ -46,6 +51,11 @@ export function Dashboard({
       ? Math.round((enrichProgress.done / enrichProgress.total) * 100)
       : 0;
 
+  const aggregations: AggregationSet = useMemo(
+    () => buildAggregations(trades, results),
+    [trades, results],
+  );
+
   return (
     <div className="w-full max-w-7xl mx-auto px-4 py-6 space-y-4">
       {/* ── Toolbar ─────────────────────────────────────────────────────── */}
@@ -65,7 +75,6 @@ export function Dashboard({
         {/* Right: actions */}
         <div className="flex items-center gap-3">
           {isFetching ? (
-            /* Progress bar */
             <div className="flex items-center gap-2 min-w-[200px]">
               <div className="flex-1 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                 <div
@@ -91,7 +100,7 @@ export function Dashboard({
             </span>
           )}
 
-          <ExportBar trades={trades} results={results} />
+          <ExportBar trades={trades} results={results} aggregations={aggregations} />
 
           <button
             type="button"
@@ -120,6 +129,9 @@ export function Dashboard({
         <ReversionChart trades={trades} results={results} />
         <SpreadScatter results={results} />
       </div>
+
+      {/* ── Aggregation tables ───────────────────────────────────────────── */}
+      <AggregationSection aggregations={aggregations} />
 
       {/* ── Trade detail table (full width) ──────────────────────────────── */}
       <TradeTable trades={trades} results={results} />

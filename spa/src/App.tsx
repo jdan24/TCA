@@ -1,22 +1,16 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { enrichAllTrades, type EnrichProgress } from "@/bloomberg/enrichmentService";
 import { Header } from "@/components/layout/Header";
 import { FileDropZone } from "@/components/upload/FileDropZone";
+import { ModeSelector } from "@/components/upload/ModeSelector";
+import { Dashboard } from "@/components/dashboard/Dashboard";
+import { SingleOrderDashboard } from "@/components/dashboard/single/SingleOrderDashboard";
+import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { useTCAStore } from "@/store/useTCAStore";
 import { computeAll } from "@/tca/compute";
 
-/**
- * Dashboard is lazy-loaded so recharts, @tanstack/react-table, and all chart
- * components are excluded from the initial bundle.  They load as a separate
- * chunk the first time a file is successfully parsed.
- */
-const Dashboard = lazy(() =>
-  import("@/components/dashboard/Dashboard").then((m) => ({
-    default: m.Dashboard,
-  }))
-);
-
 function App() {
+  const mode = useTCAStore((s) => s.mode);
   const rawTrades = useTCAStore((s) => s.rawTrades);
   const results = useTCAStore((s) => s.results);
   const enrichment = useTCAStore((s) => s.enrichment);
@@ -26,6 +20,7 @@ function App() {
   const setAllEnrichment = useTCAStore((s) => s.setAllEnrichment);
   const reset = useTCAStore((s) => s.reset);
 
+  const symbolMap = useSymbolMap();
   const [enrichProgress, setEnrichProgress] = useState<EnrichProgress | null>(null);
 
   // Re-run TCA metrics whenever trades or Bloomberg enrichment changes
@@ -38,7 +33,7 @@ function App() {
   async function handleFetchBloomberg() {
     if (rawTrades.length === 0 || !bloombergConnected || enrichProgress !== null) return;
     setEnrichProgress({ done: 0, total: rawTrades.length });
-    const result = await enrichAllTrades(rawTrades, setEnrichProgress);
+    const result = await enrichAllTrades(rawTrades, setEnrichProgress, symbolMap.resolve);
     setAllEnrichment(result);
     setEnrichProgress(null);
   }
@@ -51,53 +46,37 @@ function App() {
 
       {rawTrades.length === 0 ? (
         <main className="flex-1 flex flex-col items-center justify-center p-8 gap-6">
+          <ModeSelector />
           <FileDropZone onComplete={setRawTrades} />
           <p className="text-sm text-gray-400 dark:text-gray-600">
             Upload a CSV, XLSX, or FIX execution report to begin analysis
           </p>
         </main>
+      ) : mode === "single" ? (
+        <main className="flex-1 overflow-auto">
+          <SingleOrderDashboard
+            trades={rawTrades}
+            results={results}
+            enrichment={enrichment}
+            bloombergConnected={bloombergConnected}
+            enrichedCount={enrichedCount}
+            enrichProgress={enrichProgress}
+            onFetchBloomberg={() => { void handleFetchBloomberg(); }}
+            onReset={reset}
+          />
+        </main>
       ) : (
-        <Suspense
-          fallback={
-            <main className="flex-1 flex items-center justify-center gap-3 text-sm text-gray-400 dark:text-gray-600">
-              <svg
-                className="h-5 w-5 animate-spin text-blue-500"
-                fill="none"
-                viewBox="0 0 24 24"
-                aria-hidden
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                />
-              </svg>
-              Loading dashboard…
-            </main>
-          }
-        >
-          <main className="flex-1 overflow-auto">
-            <Dashboard
-              trades={rawTrades}
-              results={results}
-              bloombergConnected={bloombergConnected}
-              enrichedCount={enrichedCount}
-              enrichProgress={enrichProgress}
-              onFetchBloomberg={() => {
-                void handleFetchBloomberg();
-              }}
-              onReset={reset}
-            />
-          </main>
-        </Suspense>
+        <main className="flex-1 overflow-auto">
+          <Dashboard
+            trades={rawTrades}
+            results={results}
+            bloombergConnected={bloombergConnected}
+            enrichedCount={enrichedCount}
+            enrichProgress={enrichProgress}
+            onFetchBloomberg={() => { void handleFetchBloomberg(); }}
+            onReset={reset}
+          />
+        </main>
       )}
     </div>
   );

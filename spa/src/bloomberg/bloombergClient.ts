@@ -13,6 +13,8 @@
  *   GET /bid-ask-ticks     → BridgeTick[]
  */
 
+import type { IntradayBar } from "@/types";
+
 const BRIDGE_BASE = "http://localhost:8000";
 
 /** Matches the bridge's _drain timeout (15 s). Add a small buffer. */
@@ -20,16 +22,9 @@ const TIMEOUT_MS = 17_000;
 
 // ── Response shapes (mirror the Python bridge) ────────────────────────────────
 
-export interface IntradayBar {
-  /** ISO-8601 string: bar open time, no timezone suffix (UTC implied). */
-  time: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-  numEvents: number;
-}
+// IntradayBar is defined in @/types and re-exported here for consumers that
+// import it from this module (backwards-compatible).
+export type { IntradayBar } from "@/types";
 
 /** A paired bid/ask quote as returned by the bridge. */
 export interface BridgeTick {

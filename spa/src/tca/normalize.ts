@@ -96,6 +96,9 @@ export function normalizeRows(data: RawFileData, mapping: ColumnMapping): TradeR
       const currRaw = get(mapping.currency);
       const currency = currRaw || "USD";
 
+      const algoRaw = get(mapping.algo);
+      const algo = algoRaw !== "" ? algoRaw : null;
+
       if (!symbol) throw new Error(`Symbol is blank`);
       if (isNaN(orderQty) || orderQty <= 0) throw new Error(`Invalid orderQty: "${get(mapping.orderQty)}"`);
       if (isNaN(avgFillPrice) || avgFillPrice <= 0) {
@@ -114,6 +117,7 @@ export function normalizeRows(data: RawFileData, mapping: ColumnMapping): TradeR
         lastFillTime,
         contractMultiplier,
         currency,
+        algo,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

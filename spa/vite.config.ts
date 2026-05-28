@@ -1,43 +1,25 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { viteSingleFile } from "vite-plugin-singlefile";
 import { resolve } from "path";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), viteSingleFile()],
   base: "./",
   resolve: {
     alias: { "@": resolve(__dirname, "src") },
   },
   build: {
-    // Vendor chunks are individually cacheable and excluded from the initial
-    // app bundle.  recharts + @tanstack/react-table are only pulled in when
-    // the lazy Dashboard chunk loads (i.e. after a file is uploaded).
+    // viteSingleFile inlines every chunk into index.html, producing a single
+    // portable file that works from file:// without any dev server.
+    // inlineDynamicImports collapses dynamic import() calls (lazy Dashboard,
+    // xlsx/jspdf dynamic imports) into the single bundle.
     rollupOptions: {
       output: {
-        // Rolldown (Vite 8) requires the function form of manualChunks.
-        // Gives stable, cache-friendly names to heavy third-party modules.
-        manualChunks(id: string): string | undefined {
-          if (id.includes("node_modules/react-dom") || id.includes("node_modules/react/")) {
-            return "vendor-react";
-          }
-          if (id.includes("node_modules/recharts") || id.includes("node_modules/victory")) {
-            return "vendor-charts";
-          }
-          if (id.includes("node_modules/@tanstack")) {
-            return "vendor-table";
-          }
-          if (id.includes("node_modules/xlsx")) {
-            return "vendor-xlsx";
-          }
-          if (id.includes("node_modules/jspdf")) {
-            return "vendor-pdf";
-          }
-          if (id.includes("node_modules/papaparse")) {
-            return "vendor-parsers";
-          }
-          return undefined;
-        },
+        inlineDynamicImports: true,
       },
     },
+    // Raise the inline threshold so images / fonts embed as data URIs.
+    assetsInlineLimit: 100_000_000,
   },
 });
