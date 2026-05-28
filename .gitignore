@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# Keep the compiled single-file app so it can be distributed directly from GitHub
+!spa/dist/
+!spa/dist/index.html
 .env
 .env.*
 __pycache__/
