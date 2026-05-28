@@ -12,6 +12,7 @@
 
 import type { EnrichProgress } from "@/bloomberg/enrichmentService";
 import type { TCAResult, TradeRecord } from "@/types";
+import { ExportBar } from "@/components/export/ExportBar";
 import { TradeTable } from "@/components/table/TradeTable";
 import { ReversionChart } from "./ReversionChart";
 import { SlippageChart } from "./SlippageChart";
@@ -89,6 +90,8 @@ export function Dashboard({
               Bridge offline — no Bloomberg data
             </span>
           )}
+
+          <ExportBar trades={trades} results={results} />
 
           <button
             type="button"
