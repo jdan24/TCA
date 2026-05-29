@@ -165,6 +165,12 @@ def _drain(session, timeout_ms: int = 15_000) -> list:
 # ── blpapi request helpers (unchanged from FastAPI version) ──────────────────
 
 def _get_reference_data(ticker: str, fields: list[str]) -> dict[str, Any]:
+    """
+    ReferenceDataRequest for a single security.
+
+    Handles Bloomberg field errors gracefully: invalid fields are omitted
+    from the result and logged as warnings rather than raising exceptions.
+    """
     session = _create_session()
     try:
         svc = session.getService("//blp/refdata")
@@ -175,15 +181,40 @@ def _get_reference_data(ticker: str, fields: list[str]) -> dict[str, Any]:
         session.sendRequest(req)
         result: dict[str, Any] = {}
         for msg in _drain(session):
+            if not msg.hasElement("securityData"):
+                continue
             sec_arr = msg.getElement("securityData")
             for i in range(sec_arr.numValues()):
-                fld_data = sec_arr.getValueAsElement(i).getElement("fieldData")
-                for j in range(fld_data.numElements()):
-                    el = fld_data.getElement(j)
-                    try:
-                        result[str(el.name())] = el.getValue()
-                    except Exception:
-                        pass
+                sec = sec_arr.getValueAsElement(i)
+
+                # Security-level error (bad ticker, etc.) — skip
+                if sec.hasElement("securityError"):
+                    err_msg = sec.getElement("securityError").getElementAsString("message")
+                    print(f"[WARN] Bloomberg security error for {ticker}: {err_msg}")
+                    continue
+
+                # Valid field values
+                if sec.hasElement("fieldData"):
+                    fld_data = sec.getElement("fieldData")
+                    for j in range(fld_data.numElements()):
+                        el = fld_data.getElement(j)
+                        try:
+                            result[str(el.name())] = el.getValue()
+                        except Exception:
+                            pass
+
+                # Invalid fields — log and skip, don't crash
+                if sec.hasElement("fieldExceptions"):
+                    exc_arr = sec.getElement("fieldExceptions")
+                    for k in range(exc_arr.numValues()):
+                        exc = exc_arr.getValueAsElement(k)
+                        try:
+                            fid = exc.getElement("fieldId").getValueAsString()
+                            msg_str = exc.getElement("errorInfo").getElement("message").getValueAsString()
+                            print(f"[WARN] Bloomberg field not valid for {ticker}: {fid} — {msg_str}")
+                        except Exception:
+                            pass
+
         return result
     finally:
         session.stop()

@@ -160,11 +160,18 @@ async function enrichOneTrade(
   const vwap = computeVwap(bars, orderTime, lastFillTime) ?? arrivalPrice;
 
   // ── Reference fields ─────────────────────────────────────────────────────
-  const dailyVol = annualizedPctToDaily(refData["HIST_VOL_30D"]);
+  // Use HIST_VOL_30D first; fall back to VOLATILITY_30D (Bloomberg's
+  // computed vol, more widely available on fixed-income / commodity futures).
+  const dailyVol = annualizedPctToDaily(
+    refData["HIST_VOL_30D"] ?? refData["VOLATILITY_30D"],
+  );
+  // Prefer 30-day ADV; fall back to 20-day when 30-day is unavailable.
   const adv =
     typeof refData["VOLUME_AVG_30D"] === "number"
       ? (refData["VOLUME_AVG_30D"] as number)
-      : 0;
+      : typeof refData["VOLUME_AVG_20D"] === "number"
+        ? (refData["VOLUME_AVG_20D"] as number)
+        : 0;
 
   // ── Reversion mark prices ────────────────────────────────────────────────
   const rev1mPrice = getPriceAtOrBefore(
@@ -236,7 +243,15 @@ export async function enrichAllTrades(
 
   await Promise.all(
     uniqueSymbols.map(async (sym) => {
-      refMap[sym] = await fetchReference(sym, ["HIST_VOL_30D", "VOLUME_AVG_30D"]);
+      // Request both the primary field and its fallback in one call.
+      // VOLATILITY_30D is tried when HIST_VOL_30D is not valid for the
+      // security type (common for fixed-income and some commodity futures).
+      // VOLUME_AVG_20D backs up VOLUME_AVG_30D for instruments with shorter
+      // available history.
+      refMap[sym] = await fetchReference(
+        sym,
+        ["HIST_VOL_30D", "VOLATILITY_30D", "VOLUME_AVG_30D", "VOLUME_AVG_20D"],
+      );
     }),
   );
 
