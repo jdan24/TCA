@@ -155,11 +155,12 @@ export function normalizeRows(data: RawFileData, mapping: ColumnMapping): TradeR
       const accountDescRaw = get(mapping.accountDescription);
       const accountDescription = accountDescRaw !== "" ? accountDescRaw : null;
 
-      if (!symbol) throw new Error(`Symbol is blank`);
-      if (isNaN(orderQty) || orderQty <= 0) throw new Error(`Invalid orderQty: "${get(mapping.orderQty)}"`);
-      if (isNaN(avgFillPrice) || avgFillPrice <= 0) {
-        throw new Error(`Invalid avgFillPrice: "${get(mapping.avgFillPrice)}"`);
-      }
+      // Hard-required fields: skip the row rather than aborting the whole import.
+      // Rows with a null sentinel ("-", "N/A", etc.) or genuinely blank values
+      // in these columns cannot be analysed and are silently dropped.
+      if (!symbol) continue;
+      if (isNaN(orderQty) || orderQty <= 0) continue;
+      if (isNaN(avgFillPrice) || avgFillPrice <= 0) continue;
 
       trades.push({
         orderId,
