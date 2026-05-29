@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -150,6 +150,59 @@ def blp_dt_to_iso(value: Any) -> str:
         return dt.isoformat()
     except Exception:
         return str(value)
+
+
+# ── Timestamp UTC normalisation ──────────────────────────────────────────────
+
+def _normalize_to_utc(
+    items: list[dict[str, Any]],
+    request_start_utc: datetime,
+) -> list[dict[str, Any]]:
+    """
+    Shift bar/tick timestamps from exchange-local time to UTC and append 'Z'.
+
+    Bloomberg always returns intraday timestamps in the exchange's local
+    timezone as naive ISO strings (no offset), regardless of whether the
+    request datetimes carried a UTC offset.  This means a CME bar at
+    14:40 CDT arrives as "2026-05-28T14:40:00", but the SPA expects UTC.
+
+    We detect the shift by comparing the first item's naive time against
+    the known UTC request start.  The difference, rounded to the nearest
+    hour, is the exchange→UTC offset; we correct every timestamp and
+    append 'Z' so the SPA's `new Date()` calls produce correct UTC epochs.
+
+    Example (CDT = UTC-5, request start 19:40 UTC):
+      First bar  : "2026-05-28T14:40:00" (14:40 CDT)
+      Naive UTC  : 2026-05-28T19:40:00
+      Offset     : 14:40 - 19:40 = -5 h  →  shift = +5 h
+      Result     : "2026-05-28T19:40:00Z"
+    """
+    if not items:
+        return items
+    try:
+        # Strip tzinfo for naive arithmetic; round to minute boundary
+        ref = request_start_utc.replace(tzinfo=None, second=0, microsecond=0)
+        first_naive = datetime.fromisoformat(items[0]["time"])
+        diff_secs = (first_naive - ref).total_seconds()
+        offset_hours = round(diff_secs / 3_600)
+
+        if abs(offset_hours) > 14:
+            # Implausible — don't corrupt data; just stamp Z as-is
+            return [
+                {**item, "time": item["time"] + "Z"}
+                for item in items
+            ]
+
+        shift = timedelta(hours=-offset_hours)
+        return [
+            {
+                **item,
+                "time": (datetime.fromisoformat(item["time"]) + shift).isoformat() + "Z",
+            }
+            for item in items
+        ]
+    except Exception:
+        return items
 
 
 # ── blpapi session helpers ────────────────────────────────────────────────────
@@ -329,7 +382,8 @@ def _get_intraday_bars(
                     })
                 except Exception:
                     pass
-        return bars
+        # Shift exchange-local timestamps → UTC so the SPA can filter correctly
+        return _normalize_to_utc(bars, start)
     finally:
         session.stop()
 
@@ -368,7 +422,8 @@ def _get_intraday_ticks(
                     })
                 except Exception:
                     pass
-        return raw_ticks
+        # Shift exchange-local timestamps → UTC
+        return _normalize_to_utc(raw_ticks, start)
     finally:
         session.stop()
 
@@ -433,7 +488,6 @@ def snapshot(security: str, dt: str):
     target = parse_dt(dt)
 
     # Window: 5 min before dt to 30 sec after
-    from datetime import timedelta
     start = target - timedelta(minutes=5)
     end = target + timedelta(seconds=30)
 

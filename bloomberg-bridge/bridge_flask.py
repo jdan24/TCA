@@ -147,6 +147,29 @@ def _require_blpapi():
         abort(503, description="blpapi SDK is not installed. Run: pip install blpapi")
 
 
+def _normalize_to_utc(
+    items: list[dict[str, Any]],
+    request_start_utc: datetime,
+) -> list[dict[str, Any]]:
+    """Shift bar/tick timestamps from exchange-local time to UTC and append 'Z'."""
+    if not items:
+        return items
+    try:
+        ref = request_start_utc.replace(tzinfo=None, second=0, microsecond=0)
+        first_naive = datetime.fromisoformat(items[0]["time"])
+        diff_secs = (first_naive - ref).total_seconds()
+        offset_hours = round(diff_secs / 3_600)
+        if abs(offset_hours) > 14:
+            return [{**item, "time": item["time"] + "Z"} for item in items]
+        shift = timedelta(hours=-offset_hours)
+        return [
+            {**item, "time": (datetime.fromisoformat(item["time"]) + shift).isoformat() + "Z"}
+            for item in items
+        ]
+    except Exception:
+        return items
+
+
 def _create_session():
     from flask import abort
     options = blpapi.SessionOptions()
@@ -269,7 +292,7 @@ def _get_intraday_bars(
         req.set("endDateTime", to_blp_dt(end))
         req.set("interval", interval)
         session.sendRequest(req)
-        bars = []
+        raw_bars = []
         for msg in _drain(session):
             if not msg.hasElement("barData"):
                 continue
@@ -277,7 +300,7 @@ def _get_intraday_bars(
             for i in range(bar_tick_data.numValues()):
                 bar = bar_tick_data.getValueAsElement(i)
                 try:
-                    bars.append({
+                    raw_bars.append({
                         "time": blp_dt_to_iso(bar.getElement("time").getValue()),
                         "open": float(bar.getElement("open").getValue()),
                         "high": float(bar.getElement("high").getValue()),
@@ -288,7 +311,7 @@ def _get_intraday_bars(
                     })
                 except Exception:
                     pass
-        return bars
+        return _normalize_to_utc(raw_bars, start)
     finally:
         session.stop()
 
@@ -325,7 +348,7 @@ def _get_intraday_ticks(
                     })
                 except Exception:
                     pass
-        return raw_ticks
+        return _normalize_to_utc(raw_ticks, start)
     finally:
         session.stop()
 
