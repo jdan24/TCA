@@ -36,7 +36,10 @@ interface TableRow {
   side: "BUY" | "SELL";
   orderQty: number;
   avgFillPrice: number;
+  arrivalPrice: number | null;
   orderTime: Date;
+  firstFillTime: Date;
+  lastFillTime: Date;
   algo: string | null;
   timeToFill_ms: number;
   IS_bps: number | null;
@@ -64,7 +67,10 @@ function mergeRows(trades: TradeRecord[], results: TCAResult[]): TableRow[] {
       side: t.side,
       orderQty: t.orderQty,
       avgFillPrice: t.avgFillPrice,
+      arrivalPrice: t.arrivalPrice,
       orderTime: t.orderTime,
+      firstFillTime: t.firstFillTime,
+      lastFillTime: t.lastFillTime,
       algo: t.algo,
       timeToFill_ms: r?.timeToFill_ms ?? 0,
       IS_bps: r?.IS_bps ?? null,
@@ -91,7 +97,10 @@ const COLUMN_LABELS: Record<string, string> = {
   side: "Side",
   orderQty: "Qty",
   avgFillPrice: "Fill Price",
+  arrivalPrice: "Arrival Price",
   orderTime: "Order Time",
+  firstFillTime: "First Fill",
+  lastFillTime: "Last Fill",
   algo: "Algo",
   timeToFill_ms: "TTF",
   IS_bps: "IS",
@@ -234,8 +243,52 @@ const COLUMNS = [
     ),
     enableGlobalFilter: false,
   }),
+  col.accessor("arrivalPrice", {
+    header: "Arrival Price",
+    cell: (i) => {
+      const v = i.getValue();
+      return v !== null ? (
+        <span className="tabular-nums text-xs text-gray-700 dark:text-gray-300">
+          {v.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 6,
+          })}
+        </span>
+      ) : (
+        <span className="text-gray-300 dark:text-gray-600 text-xs select-none">N/A</span>
+      );
+    },
+    sortingFn: nullableSort,
+    enableGlobalFilter: false,
+  }),
   col.accessor("orderTime", {
     header: "Order Time",
+    cell: (i) => {
+      const d = i.getValue();
+      return (
+        <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+          {d.toLocaleDateString()} {d.toLocaleTimeString()}
+        </span>
+      );
+    },
+    sortingFn: "datetime",
+    enableGlobalFilter: false,
+  }),
+  col.accessor("firstFillTime", {
+    header: "First Fill",
+    cell: (i) => {
+      const d = i.getValue();
+      return (
+        <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+          {d.toLocaleDateString()} {d.toLocaleTimeString()}
+        </span>
+      );
+    },
+    sortingFn: "datetime",
+    enableGlobalFilter: false,
+  }),
+  col.accessor("lastFillTime", {
+    header: "Last Fill",
     cell: (i) => {
       const d = i.getValue();
       return (
