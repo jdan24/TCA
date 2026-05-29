@@ -106,16 +106,18 @@ def parse_dt(s: str) -> datetime:
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
-def to_blp_dt(dt: datetime):  # type: ignore[return]
-    """Convert a Python datetime to a blpapi.Datetime (UTC)."""
-    if not BLPAPI_AVAILABLE:
-        return None
-    return blpapi.Datetime(
-        dt.year, dt.month, dt.day,
-        dt.hour, dt.minute, dt.second,
-        dt.microsecond // 1000,
-        offset=0,
-    )
+def to_blp_dt(dt: datetime) -> datetime:
+    """
+    Return a naive UTC datetime suitable for blpapi request.set().
+
+    blpapi's Python SDK accepts plain datetime objects for startDateTime /
+    endDateTime fields.  It expects naive UTC — timezone info must be stripped
+    after converting to UTC, otherwise the SDK raises an AttributeError on
+    some versions that do not expose blpapi.Datetime.
+    """
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 def blp_dt_to_iso(value: Any) -> str:
@@ -158,17 +160,57 @@ def _create_session():
 
 
 def _drain(session, timeout_ms: int = 15_000) -> list:
-    """Collect all messages until a RESPONSE event (or timeout)."""
+    """
+    Collect response messages from a Bloomberg session.
+
+    Only appends messages from PARTIAL_RESPONSE and RESPONSE events.
+    SESSION_STATUS, SERVICE_STATUS, ADMIN, and other housekeeping event
+    types are silently ignored — if they were collected, downstream code
+    would crash trying to call .hasElement("securityData") on them.
+
+    Raises HTTPException 502 if Bloomberg explicitly rejects the request
+    (REQUEST_STATUS event).
+    Raises HTTPException 504 if no RESPONSE arrives before the deadline.
+    """
     messages = []
     deadline = time.monotonic() + timeout_ms / 1_000
+
     while time.monotonic() < deadline:
         remaining_ms = max(100, int((deadline - time.monotonic()) * 1_000))
         event = session.nextEvent(remaining_ms)
-        for msg in event:
-            messages.append(msg)
-        if event.eventType() == blpapi.Event.RESPONSE:
-            break
-    return messages
+        event_type = event.eventType()
+
+        if event_type in (blpapi.Event.PARTIAL_RESPONSE, blpapi.Event.RESPONSE):
+            for msg in event:
+                messages.append(msg)
+            if event_type == blpapi.Event.RESPONSE:
+                return messages
+
+        elif event_type == blpapi.Event.REQUEST_STATUS:
+            # Bloomberg explicitly rejected the request — extract the reason
+            for msg in event:
+                try:
+                    reason = msg.getElement("reason")
+                    desc = reason.getElement("description").getValueAsString()
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Bloomberg request failed: {desc}",
+                    )
+                except HTTPException:
+                    raise
+                except Exception:
+                    pass
+            raise HTTPException(
+                status_code=502,
+                detail="Bloomberg request failed (unknown reason)",
+            )
+
+        # Ignore SESSION_STATUS, SERVICE_STATUS, ADMIN, TIMEOUT, etc.
+
+    raise HTTPException(
+        status_code=504,
+        detail="Bloomberg request timed out after 15 seconds",
+    )
 
 
 # ── blpapi request helpers ────────────────────────────────────────────────────
@@ -252,9 +294,9 @@ def _get_intraday_bars(
 
         bars = []
         for msg in _drain(session):
-            bar_tick_data = (
-                msg.getElement("barData").getElement("barTickData")
-            )
+            if not msg.hasElement("barData"):
+                continue
+            bar_tick_data = msg.getElement("barData").getElement("barTickData")
             for i in range(bar_tick_data.numValues()):
                 bar = bar_tick_data.getValueAsElement(i)
                 try:
@@ -295,6 +337,8 @@ def _get_intraday_ticks(
 
         raw_ticks = []
         for msg in _drain(session):
+            if not msg.hasElement("tickData"):
+                continue
             tick_array = msg.getElement("tickData").getElement("tickData")
             for i in range(tick_array.numValues()):
                 tick = tick_array.getValueAsElement(i)

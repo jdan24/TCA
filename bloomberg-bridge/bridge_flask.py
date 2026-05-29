@@ -104,15 +104,11 @@ def parse_dt(s: str) -> datetime:
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
-def to_blp_dt(dt: datetime):  # type: ignore[return]
-    if not BLPAPI_AVAILABLE:
-        return None
-    return blpapi.Datetime(
-        dt.year, dt.month, dt.day,
-        dt.hour, dt.minute, dt.second,
-        dt.microsecond // 1000,
-        offset=0,
-    )
+def to_blp_dt(dt: datetime) -> datetime:
+    """Return a naive UTC datetime suitable for blpapi request.set()."""
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 def blp_dt_to_iso(value: Any) -> str:
@@ -150,16 +146,38 @@ def _create_session():
 
 
 def _drain(session, timeout_ms: int = 15_000) -> list:
+    """
+    Collect response messages, ignoring session/admin housekeeping events.
+    Raises 502 on REQUEST_STATUS (Bloomberg rejection), 504 on timeout.
+    """
+    from flask import abort
     messages = []
     deadline = time.monotonic() + timeout_ms / 1_000
+
     while time.monotonic() < deadline:
         remaining_ms = max(100, int((deadline - time.monotonic()) * 1_000))
         event = session.nextEvent(remaining_ms)
-        for msg in event:
-            messages.append(msg)
-        if event.eventType() == blpapi.Event.RESPONSE:
-            break
-    return messages
+        event_type = event.eventType()
+
+        if event_type in (blpapi.Event.PARTIAL_RESPONSE, blpapi.Event.RESPONSE):
+            for msg in event:
+                messages.append(msg)
+            if event_type == blpapi.Event.RESPONSE:
+                return messages
+
+        elif event_type == blpapi.Event.REQUEST_STATUS:
+            for msg in event:
+                try:
+                    reason = msg.getElement("reason")
+                    desc = reason.getElement("description").getValueAsString()
+                    abort(502, description=f"Bloomberg request failed: {desc}")
+                except Exception:
+                    pass
+            abort(502, description="Bloomberg request failed (unknown reason)")
+
+        # Ignore SESSION_STATUS, SERVICE_STATUS, ADMIN, etc.
+
+    abort(504, description="Bloomberg request timed out after 15 seconds")
 
 
 # ── blpapi request helpers (unchanged from FastAPI version) ──────────────────
@@ -238,6 +256,8 @@ def _get_intraday_bars(
         session.sendRequest(req)
         bars = []
         for msg in _drain(session):
+            if not msg.hasElement("barData"):
+                continue
             bar_tick_data = msg.getElement("barData").getElement("barTickData")
             for i in range(bar_tick_data.numValues()):
                 bar = bar_tick_data.getValueAsElement(i)
@@ -277,6 +297,8 @@ def _get_intraday_ticks(
         session.sendRequest(req)
         raw_ticks = []
         for msg in _drain(session):
+            if not msg.hasElement("tickData"):
+                continue
             tick_array = msg.getElement("tickData").getElement("tickData")
             for i in range(tick_array.numValues()):
                 tick = tick_array.getValueAsElement(i)
