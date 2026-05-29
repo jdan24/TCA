@@ -150,7 +150,9 @@ function aggregate(messages: FixMsg[]): TradeRecord[] {
       lastFillTime,
       contractMultiplier: 1, // sourced from Bloomberg reference data in Phase 4
       currency: "USD",
-      algo: null, // FIX messages do not carry algo policy info
+      algo: null,              // FIX messages do not carry algo policy info
+      accountId: null,         // not present in standard FIX execution reports
+      accountDescription: null,
     });
   }
 

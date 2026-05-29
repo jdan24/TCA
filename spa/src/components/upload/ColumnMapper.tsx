@@ -44,6 +44,8 @@ export function ColumnMapper({
       contractMultiplier: suggested.contractMultiplier ?? UNMAPPED,
       currency: suggested.currency ?? UNMAPPED,
       algo: suggested.algo ?? UNMAPPED,
+      accountId: suggested.accountId ?? UNMAPPED,
+      accountDescription: suggested.accountDescription ?? UNMAPPED,
     };
     return init;
   });
@@ -70,6 +72,8 @@ export function ColumnMapper({
     if (state.contractMultiplier) mapping.contractMultiplier = state.contractMultiplier;
     if (state.currency) mapping.currency = state.currency;
     if (state.algo) mapping.algo = state.algo;
+    if (state.accountId) mapping.accountId = state.accountId;
+    if (state.accountDescription) mapping.accountDescription = state.accountDescription;
     onConfirm(mapping);
   }
 

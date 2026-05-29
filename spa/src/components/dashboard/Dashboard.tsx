@@ -12,13 +12,15 @@
  *   └─ TradeTable (full width) ──────────────────────────────────────────┘
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { EnrichProgress } from "@/bloomberg/enrichmentService";
-import type { AggregationSet, TCAResult, TradeRecord } from "@/types";
+import type { AggregationSet, DataFilter, TCAResult, TradeRecord } from "@/types";
+import { EMPTY_FILTER } from "@/types";
 import { buildAggregations } from "@/tca/aggregate";
 import { ExportBar } from "@/components/export/ExportBar";
 import { TradeTable } from "@/components/table/TradeTable";
 import { AggregationSection } from "./AggregationSection";
+import { FilterBar } from "./FilterBar";
 import { ReversionChart } from "./ReversionChart";
 import { SlippageChart } from "./SlippageChart";
 import { SpreadScatter } from "./SpreadScatter";
@@ -51,10 +53,39 @@ export function Dashboard({
       ? Math.round((enrichProgress.done / enrichProgress.total) * 100)
       : 0;
 
-  const aggregations: AggregationSet = useMemo(
-    () => buildAggregations(trades, results),
-    [trades, results],
+  // ── Dataset filter (local view state; resets when Dashboard unmounts) ────────
+  const [filter, setFilter] = useState<DataFilter>(EMPTY_FILTER);
+
+  const filteredTrades = useMemo(() => {
+    return trades.filter((t) => {
+      if (filter.symbol && t.symbol !== filter.symbol) return false;
+      if (filter.accountId && t.accountId !== filter.accountId) return false;
+      if (filter.accountDescription && t.accountDescription !== filter.accountDescription)
+        return false;
+      if (filter.algo && t.algo !== filter.algo) return false;
+      const d = t.orderTime.toISOString().slice(0, 10); // "YYYY-MM-DD"
+      if (filter.dateFrom && d < filter.dateFrom) return false;
+      if (filter.dateTo && d > filter.dateTo) return false;
+      return true;
+    });
+  }, [trades, filter]);
+
+  const filteredResultSet = useMemo(
+    () => new Set(filteredTrades.map((t) => t.orderId)),
+    [filteredTrades],
   );
+
+  const filteredResults = useMemo(
+    () => results.filter((r) => filteredResultSet.has(r.orderId)),
+    [results, filteredResultSet],
+  );
+
+  const aggregations: AggregationSet = useMemo(
+    () => buildAggregations(filteredTrades, filteredResults),
+    [filteredTrades, filteredResults],
+  );
+
+  const isFiltered = filteredTrades.length !== trades.length;
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 py-6 space-y-4">
@@ -63,7 +94,13 @@ export function Dashboard({
         {/* Left: counts */}
         <div className="flex items-center gap-2 text-sm">
           <span className="font-semibold text-gray-900 dark:text-white">
-            {trades.length.toLocaleString()} trade{trades.length !== 1 ? "s" : ""}
+            {filteredTrades.length.toLocaleString()}
+            {isFiltered && (
+              <span className="font-normal text-gray-400 dark:text-gray-500">
+                {" "}of {trades.length.toLocaleString()}
+              </span>
+            )}
+            {" "}trade{filteredTrades.length !== 1 ? "s" : ""}
           </span>
           {enrichedCount > 0 && (
             <span className="text-gray-400 dark:text-gray-500">
@@ -100,7 +137,7 @@ export function Dashboard({
             </span>
           )}
 
-          <ExportBar trades={trades} results={results} aggregations={aggregations} />
+          <ExportBar trades={filteredTrades} results={filteredResults} aggregations={aggregations} />
 
           <button
             type="button"
@@ -112,29 +149,32 @@ export function Dashboard({
         </div>
       </div>
 
+      {/* ── Filter bar ──────────────────────────────────────────────────── */}
+      <FilterBar trades={trades} filter={filter} onChange={setFilter} />
+
       {/* ── KPI tiles ───────────────────────────────────────────────────── */}
-      <SummaryCards results={results} />
+      <SummaryCards results={filteredResults} />
 
       {/* ── Scatter charts (2-col) ───────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <SlippageChart trades={trades} results={results} />
-        <VWAPDeviation trades={trades} results={results} />
+        <SlippageChart trades={filteredTrades} results={filteredResults} />
+        <VWAPDeviation trades={filteredTrades} results={filteredResults} />
       </div>
 
       {/* ── Timing heatmap (full width) ──────────────────────────────────── */}
-      <TimingHeatmap trades={trades} results={results} />
+      <TimingHeatmap trades={filteredTrades} results={filteredResults} />
 
       {/* ── Line + scatter (2-col) ───────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ReversionChart trades={trades} results={results} />
-        <SpreadScatter results={results} />
+        <ReversionChart trades={filteredTrades} results={filteredResults} />
+        <SpreadScatter results={filteredResults} />
       </div>
 
       {/* ── Aggregation tables ───────────────────────────────────────────── */}
       <AggregationSection aggregations={aggregations} />
 
       {/* ── Trade detail table (full width) ──────────────────────────────── */}
-      <TradeTable trades={trades} results={results} />
+      <TradeTable trades={filteredTrades} results={filteredResults} />
     </div>
   );
 }

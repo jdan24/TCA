@@ -64,6 +64,15 @@ const FIELD_ALIASES: Record<RequiredField | OptionalField, string[]> = {
     "executionalgo", "execution_algo", "algocode", "algo_code",
     "algostrategypolicy",
   ],
+  accountId: [
+    "accountid", "account_id", "account", "acctid", "acct_id", "acct",
+    "portfolioid", "portfolio_id", "portid", "port_id",
+  ],
+  accountDescription: [
+    "accountdescription", "account_description", "accountdesc", "account_desc",
+    "accountname", "account_name", "clientname", "client_name", "client",
+    "portfolioname", "portfolio_name", "portfoliodesc",
+  ],
 };
 
 // Strip everything except a-z and 0-9 for comparison
@@ -132,6 +141,8 @@ export const OPTIONAL_FIELDS: OptionalField[] = [
   "contractMultiplier",
   "currency",
   "algo",
+  "accountId",
+  "accountDescription",
 ];
 
 /** Human-readable labels and descriptions for the ColumnMapper UI */
@@ -162,5 +173,13 @@ export const FIELD_META: Record<
   algo: {
     label: "Algo / Strategy",
     description: "Algo Policy or execution strategy name (e.g. VWAP, TWAP, POV)",
+  },
+  accountId: {
+    label: "Account ID",
+    description: "Portfolio or account identifier (used for filter bar)",
+  },
+  accountDescription: {
+    label: "Client / Account Name",
+    description: "Account description or client name (used for filter bar)",
   },
 };

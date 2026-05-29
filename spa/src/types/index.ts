@@ -26,7 +26,9 @@ export interface TradeRecord {
   lastFillTime: Date;
   contractMultiplier: number;
   currency: string;
-  algo: string | null; // "Algo Policy" column; null when absent
+  algo: string | null;              // "Algo Policy" column; null when absent
+  accountId: string | null;         // Portfolio / account identifier; null when absent
+  accountDescription: string | null; // Client / account name; null when absent
 }
 
 // ── Computed TCA metrics per trade ───────────────────────────────────────────
@@ -112,6 +114,25 @@ export interface AggregationSet {
   bySymbolSide: AggregateRow[];
 }
 
+// ── Multi-order dashboard filter ─────────────────────────────────────────────
+export interface DataFilter {
+  symbol: string | null;
+  accountId: string | null;
+  accountDescription: string | null;
+  algo: string | null;
+  dateFrom: string | null; // "YYYY-MM-DD" inclusive lower bound on orderTime
+  dateTo: string | null;   // "YYYY-MM-DD" inclusive upper bound on orderTime
+}
+
+export const EMPTY_FILTER: DataFilter = {
+  symbol: null,
+  accountId: null,
+  accountDescription: null,
+  algo: null,
+  dateFrom: null,
+  dateTo: null,
+};
+
 // ── RIC → Bloomberg symbol mapping ────────────────────────────────────────────
 export interface SymbolMapping {
   ric: string; // e.g. "ESc1", "ES=F"
@@ -131,7 +152,13 @@ export type RequiredField =
   | "firstFillTime"
   | "lastFillTime";
 
-export type OptionalField = "arrivalPrice" | "contractMultiplier" | "currency" | "algo";
+export type OptionalField =
+  | "arrivalPrice"
+  | "contractMultiplier"
+  | "currency"
+  | "algo"
+  | "accountId"
+  | "accountDescription";
 
 export type ColumnMapping = Record<RequiredField, string> &
   Partial<Record<OptionalField, string>>;
