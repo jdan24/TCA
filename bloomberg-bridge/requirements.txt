@@ -1,3 +1,11 @@
+# Option A — FastAPI (bridge.py)
+# Use if available in your corporate PyPI mirror
 fastapi
 uvicorn[standard]
+
+# Option B — Flask (bridge_flask.py)
+# Widely available; use when FastAPI is not in the registry
+flask
+
+# Bloomberg Python SDK (required by both)
 blpapi
