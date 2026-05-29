@@ -1,6 +1,19 @@
 import { parse as dfnsParse, parseISO, isValid } from "date-fns";
 import type { ColumnMapping, RawFileData, TradeRecord } from "@/types";
 
+// ── Null-sentinel detection ───────────────────────────────────────────────────
+//
+// Many data sources export missing values as a bare hyphen "-", double
+// hyphen "--", "N/A", "null", "none", etc.  Treat all of these as empty.
+
+const NULL_SENTINELS = new Set([
+  "-", "--", "n/a", "na", "null", "none", "#n/a", "#null", "#na",
+]);
+
+function isNullSentinel(raw: string): boolean {
+  return raw === "" || NULL_SENTINELS.has(raw.toLowerCase());
+}
+
 // ── Timestamp parsing ─────────────────────────────────────────────────────────
 
 const FIX_TS_RE = /^\d{8}-\d{2}:\d{2}:\d{2}/;
@@ -43,6 +56,21 @@ export function parseTimestamp(value: unknown): Date {
   throw new Error(`Unrecognized timestamp format: "${s}"`);
 }
 
+/**
+ * Like parseTimestamp but returns null instead of throwing.
+ * Treats null-sentinel values ("-", "N/A", etc.) as null without attempting
+ * to parse them.
+ */
+function tryParseTimestamp(value: unknown): Date | null {
+  const s = String(value ?? "").trim();
+  if (isNullSentinel(s)) return null;
+  try {
+    return parseTimestamp(value);
+  } catch {
+    return null;
+  }
+}
+
 // ── Side normalization ────────────────────────────────────────────────────────
 
 const BUY_VALUES = new Set(["buy", "b", "1", "long", "purchase", "bid"]);
@@ -71,9 +99,15 @@ export function normalizeRows(data: RawFileData, mapping: ColumnMapping): TradeR
     const row = data.rows[i];
     if (!row) continue;
 
-    /** Pull a trimmed string from the mapped column, defaulting to "". */
-    const get = (col: string | undefined): string =>
-      col ? (row[col] ?? "").toString().trim() : "";
+    /**
+     * Pull a trimmed string from the mapped column.
+     * Null sentinels ("-", "N/A", etc.) are normalised to "".
+     */
+    const get = (col: string | undefined): string => {
+      if (!col) return "";
+      const raw = (row[col] ?? "").toString().trim();
+      return isNullSentinel(raw) ? "" : raw;
+    };
 
     try {
       const orderId = get(mapping.orderId) || `ROW-${i + 1}`;
@@ -86,9 +120,25 @@ export function normalizeRows(data: RawFileData, mapping: ColumnMapping): TradeR
       const arrivalRaw = get(mapping.arrivalPrice);
       const arrivalPrice = arrivalRaw !== "" ? (parseFloat(arrivalRaw) || null) : null;
 
-      const orderTime = parseTimestamp(row[mapping.orderTime]);
-      const firstFillTime = parseTimestamp(row[mapping.firstFillTime]);
-      const lastFillTime = parseTimestamp(row[mapping.lastFillTime]);
+      // Time fields: try each independently, then cross-fill with whichever
+      // values did parse.  Many data sources export missing times as "-".
+      const rawOrderTime = tryParseTimestamp(row[mapping.orderTime]);
+      const rawFirstFill = tryParseTimestamp(row[mapping.firstFillTime]);
+      const rawLastFill  = tryParseTimestamp(row[mapping.lastFillTime]);
+
+      // At least one must be valid to produce a usable record.
+      const anyTime = rawOrderTime ?? rawFirstFill ?? rawLastFill;
+      if (!anyTime) {
+        throw new Error(
+          "All time columns (orderTime, firstFillTime, lastFillTime) are empty or unrecognised — " +
+          "at least one must contain a valid timestamp",
+        );
+      }
+
+      // Fill missing fields from the nearest available time.
+      const orderTime    = rawOrderTime ?? rawFirstFill ?? rawLastFill ?? anyTime;
+      const firstFillTime = rawFirstFill ?? rawOrderTime ?? rawLastFill ?? anyTime;
+      const lastFillTime  = rawLastFill  ?? rawFirstFill ?? rawOrderTime ?? anyTime;
 
       const multRaw = get(mapping.contractMultiplier);
       const contractMultiplier = multRaw ? parseFloat(multRaw) || 1 : 1;
