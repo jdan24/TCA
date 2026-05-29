@@ -89,9 +89,19 @@ def extract_root(symbol: str) -> str:
 
 
 def resolve_ticker(symbol: str) -> str:
-    root = extract_root(symbol)
+    """
+    Return the full Bloomberg ticker string, e.g. 'ESH4' → 'ESH4 Index'.
+
+    If the symbol already contains a space it is already a complete Bloomberg
+    security string (e.g. 'FVU6 Comdty' from the RIC→Bloomberg mapping table).
+    In that case return it uppercased without appending another yellow key.
+    """
+    s = symbol.strip()
+    if " " in s:
+        return s.upper()
+    root = extract_root(s)
     key = YELLOW_KEY.get(root, "Index")
-    return f"{symbol.upper()} {key}"
+    return f"{s.upper()} {key}"
 
 
 # ── DateTime helpers ──────────────────────────────────────────────────────────
