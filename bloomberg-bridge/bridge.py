@@ -273,16 +273,17 @@ def _get_reference_data(ticker: str, fields: list[str]) -> dict[str, Any]:
                         except Exception:
                             pass
 
-                # Invalid fields return fieldExceptions — log and skip, don't crash
+                # Invalid fields return fieldExceptions — skip gracefully.
+                # These are expected for fields not available on a given security
+                # type (e.g. HIST_VOL_30D on fixed-income futures); the SPA falls
+                # back to alternative fields or bar-derived vol automatically.
                 if sec.hasElement("fieldExceptions"):
                     exc_arr = sec.getElement("fieldExceptions")
                     for k in range(exc_arr.numValues()):
                         exc = exc_arr.getValueAsElement(k)
                         try:
                             fid = exc.getElement("fieldId").getValueAsString()
-                            err_info = exc.getElement("errorInfo")
-                            msg_str = err_info.getElement("message").getValueAsString()
-                            print(f"[WARN] Bloomberg field not valid for {ticker}: {fid} — {msg_str}")
+                            print(f"[INFO] Field not available for {ticker}: {fid} (handled by fallback)")
                         except Exception:
                             pass
 

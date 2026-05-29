@@ -246,14 +246,16 @@ async function enrichOneTrade(
   const vwap = computeVwap(bars, orderTime, lastFillTime) ?? arrivalPrice;
 
   // ── Reference fields ─────────────────────────────────────────────────────
-  // Use HIST_VOL_30D first; fall back to VOLATILITY_30D (Bloomberg's
-  // computed vol, more widely available on fixed-income / commodity futures).
-  // Last resort: derive daily vol from the intraday bars (close-to-close
-  // returns, annualised).  This ensures MI_bps is never N/A just because
-  // Bloomberg reference fields are unavailable for the security type.
+  // Vol fallback chain — try each Bloomberg field in order; if none returns a
+  // value, derive daily vol from the intraday bars (close-to-close returns,
+  // annualised).  This ensures MI_bps is never N/A due to missing ref data.
   const dailyVol =
-    annualizedPctToDaily(refData["HIST_VOL_30D"] ?? refData["VOLATILITY_30D"]) ||
-    computeDailyVolFromBars(bars);
+    annualizedPctToDaily(
+      refData["HIST_VOL_30D"] ??
+      refData["VOLATILITY_30D"] ??
+      refData["RETURN_VOL_30D_MID"] ??
+      refData["CLOSE_TO_CLOSE_HIST_VOL_30D"],
+    ) || computeDailyVolFromBars(bars);
   // Prefer 30-day ADV; fall back to 20-day when 30-day is unavailable.
   const adv =
     typeof refData["VOLUME_AVG_30D"] === "number"
@@ -337,10 +339,18 @@ export async function enrichAllTrades(
       // security type (common for fixed-income and some commodity futures).
       // VOLUME_AVG_20D backs up VOLUME_AVG_30D for instruments with shorter
       // available history.
-      refMap[sym] = await fetchReference(
-        sym,
-        ["HIST_VOL_30D", "VOLATILITY_30D", "VOLUME_AVG_30D", "VOLUME_AVG_20D"],
-      );
+      // Vol fields in priority order — different security types expose different
+      // fields.  Equity-style: HIST_VOL_30D.  Futures/fixed-income: one of the
+      // RETURN_VOL or CLOSE_TO_CLOSE variants tends to work.  If none returns a
+      // value, dailyVol is computed from intraday bars as a final fallback.
+      refMap[sym] = await fetchReference(sym, [
+        "HIST_VOL_30D",           // equities, some equity-index futures
+        "VOLATILITY_30D",         // Bloomberg-computed 30-day realized vol
+        "RETURN_VOL_30D_MID",     // 30-day price-return vol — works broadly for futures
+        "CLOSE_TO_CLOSE_HIST_VOL_30D", // close-to-close 30D, common for rates/FI futures
+        "VOLUME_AVG_30D",
+        "VOLUME_AVG_20D",
+      ]);
     }),
   );
 
