@@ -115,10 +115,16 @@ def parse_dt(s: str) -> datetime:
 
 
 def to_blp_dt(dt: datetime) -> datetime:
-    """Return a naive UTC datetime suitable for blpapi request.set()."""
+    """
+    Return a UTC-aware datetime for blpapi request.set().
+
+    Preserving tzinfo=UTC is critical: without it Bloomberg interprets naive
+    datetimes as exchange local time, shifting the bar window by the exchange
+    UTC offset and returning the wrong session's data.
+    """
     if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt
+        return dt.astimezone(timezone.utc)
+    return dt.replace(tzinfo=timezone.utc)
 
 
 def blp_dt_to_iso(value: Any) -> str:

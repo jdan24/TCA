@@ -43,6 +43,86 @@ const ONE_MIN_MS = 60_000;
 const FIVE_MIN_MS = 5 * ONE_MIN_MS;
 const THIRTY_MIN_MS = 30 * ONE_MIN_MS;
 
+// ── Timezone normalisation ────────────────────────────────────────────────────
+
+/**
+ * Bloomberg returns bar and tick timestamps in the exchange's local timezone
+ * as naive ISO strings (no 'Z', no offset).  The browser interprets them as
+ * the *user's* local timezone, introducing an offset that breaks any filter
+ * comparing bar times to UTC-based Date objects (order time, last fill time).
+ *
+ * This function detects the mismatch by comparing the first item's timestamp
+ * (mis-parsed as browser-local) to the known UTC request start.  If they
+ * differ by a whole number of hours (a valid timezone offset), it shifts all
+ * timestamps by that amount and appends 'Z' so subsequent `new Date()` calls
+ * correctly produce UTC-epoch values.
+ *
+ * Example: CME futures (CDT = UTC−5), browser in EDT (UTC−4).
+ *   Bridge sends: requestStart = "2026-05-28T19:40:00Z" (UTC)
+ *   Bloomberg returns first bar: "2026-05-28T14:40:00" (14:40 CDT)
+ *   Browser reads as: 14:40 EDT = 18:40 UTC  →  1 h behind actual UTC
+ *   Correction: +1 h  →  "2026-05-28T19:40:00.000Z"  ✓
+ */
+function shiftToUtc<T extends { time: string }>(
+  items: T[],
+  requestedStartUtcMs: number,
+): T[] {
+  if (items.length === 0) return items;
+  const first = items[0];
+  if (!first) return items;
+
+  // Parse first item's naive time string using browser's local interpretation
+  const firstAsLocalMs = new Date(first.time).getTime();
+
+  // Round requested start to the nearest minute (Bloomberg aligns bars to minutes)
+  const startRoundedMs = Math.floor(requestedStartUtcMs / 60_000) * 60_000;
+
+  const diffMs = firstAsLocalMs - startRoundedMs;
+  const diffHours = Math.round(diffMs / 3_600_000);
+
+  // No correction needed, or the offset is implausibly large
+  if (diffHours === 0 || Math.abs(diffHours) > 14) return items;
+
+  const correctionMs = -diffHours * 3_600_000;
+
+  return items.map((item) => ({
+    ...item,
+    // Shift and append 'Z' so new Date() treats the result as UTC
+    time: new Date(new Date(item.time).getTime() + correctionMs).toISOString(),
+  }));
+}
+
+// ── Vol from bars fallback ────────────────────────────────────────────────────
+
+/**
+ * Estimate annualised daily volatility from 1-min bar close-to-close returns.
+ * Used when Bloomberg reference fields (HIST_VOL_30D, VOLATILITY_30D) are not
+ * available for a security type (e.g. many fixed-income futures).
+ *
+ * Returns 0 when there are fewer than 10 bars (insufficient sample).
+ */
+function computeDailyVolFromBars(bars: IntradayBar[]): number {
+  if (bars.length < 10) return 0;
+
+  const returns: number[] = [];
+  for (let i = 1; i < bars.length; i++) {
+    const prev = bars[i - 1];
+    const curr = bars[i];
+    if (prev && curr && prev.close > 0 && curr.close > 0) {
+      returns.push((curr.close - prev.close) / prev.close);
+    }
+  }
+  if (returns.length < 10) return 0;
+
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance =
+    returns.reduce((s, r) => s + (r - mean) ** 2, 0) / (returns.length - 1);
+  const sigmaPerBar = Math.sqrt(variance);
+
+  // Annualise: 1-min bars, ~1440 trading min/day for near-24h futures, 252 days/year
+  return sigmaPerBar * Math.sqrt(1_440 * 252);
+}
+
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 function toIso(d: Date): string {
@@ -144,11 +224,17 @@ async function enrichOneTrade(
   const tickStart = new Date(orderTime.getTime() - 2 * ONE_MIN_MS);
   const tickEnd = new Date(lastFillTime.getTime() + 30_000);
 
-  const [bars, rawTicks, bridgeArrival] = await Promise.all([
+  const [rawBars, rawTickData, bridgeArrival] = await Promise.all([
     fetchIntradayBars(symbol, toIso(barStart), toIso(barEnd), 1),
     fetchBidAskTicks(symbol, toIso(tickStart), toIso(tickEnd)),
     fetchArrivalPrice(symbol, toIso(orderTime)),
   ]);
+
+  // Normalise bar and tick timestamps from exchange-local to UTC.
+  // Bloomberg returns naive ISO timestamps in the exchange's local timezone;
+  // without correction the time-window filters in TWAP/vol/TWAS are wrong.
+  const bars = shiftToUtc(rawBars, barStart.getTime());
+  const rawTicks = shiftToUtc(rawTickData, tickStart.getTime());
 
   // ── Arrival price ────────────────────────────────────────────────────────
   // Bridge handles tick-mid vs bar-open fallback internally.
@@ -162,9 +248,12 @@ async function enrichOneTrade(
   // ── Reference fields ─────────────────────────────────────────────────────
   // Use HIST_VOL_30D first; fall back to VOLATILITY_30D (Bloomberg's
   // computed vol, more widely available on fixed-income / commodity futures).
-  const dailyVol = annualizedPctToDaily(
-    refData["HIST_VOL_30D"] ?? refData["VOLATILITY_30D"],
-  );
+  // Last resort: derive daily vol from the intraday bars (close-to-close
+  // returns, annualised).  This ensures MI_bps is never N/A just because
+  // Bloomberg reference fields are unavailable for the security type.
+  const dailyVol =
+    annualizedPctToDaily(refData["HIST_VOL_30D"] ?? refData["VOLATILITY_30D"]) ||
+    computeDailyVolFromBars(bars);
   // Prefer 30-day ADV; fall back to 20-day when 30-day is unavailable.
   const adv =
     typeof refData["VOLUME_AVG_30D"] === "number"

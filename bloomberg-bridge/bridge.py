@@ -120,16 +120,21 @@ def parse_dt(s: str) -> datetime:
 
 def to_blp_dt(dt: datetime) -> datetime:
     """
-    Return a naive UTC datetime suitable for blpapi request.set().
+    Return a UTC-aware datetime for blpapi request.set().
 
-    blpapi's Python SDK accepts plain datetime objects for startDateTime /
-    endDateTime fields.  It expects naive UTC — timezone info must be stripped
-    after converting to UTC, otherwise the SDK raises an AttributeError on
-    some versions that do not expose blpapi.Datetime.
+    Preserving tzinfo=UTC is critical: without it, blpapi sends a naive
+    datetime which Bloomberg interprets as *exchange local time* rather than
+    UTC.  For a CME contract (CDT = UTC-5) this shifts the window by 5 hours
+    — bars for the overnight session are returned instead of the afternoon
+    execution window, breaking TWAP and intraday-vol calculations.
+
+    Modern blpapi Python SDK (≥ 3.16) accepts timezone-aware datetimes.
+    If an older SDK raises on tzinfo, strip it as a last resort:
+      return dt.astimezone(timezone.utc).replace(tzinfo=None)
     """
     if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt
+        return dt.astimezone(timezone.utc)
+    return dt.replace(tzinfo=timezone.utc)
 
 
 def blp_dt_to_iso(value: Any) -> str:
