@@ -45,6 +45,8 @@ export interface TCAResult {
   TWAS_bps: number | null;
   vol_during_order_price: number | null; // 1σ price std-dev during order window
   vol_during_order_bps: number | null;   // same expressed in bps
+  TWAP_dev_bps: number | null;           // slippage vs market TWAP during [orderTime, lastFillTime]
+  marketVWAP_price: number | null;       // raw market VWAP price during [orderTime, lastFillTime]
 }
 
 // ── Bloomberg enrichment payload (one per orderId) ───────────────────────────

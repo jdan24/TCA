@@ -18,7 +18,7 @@ import { computeSlippage } from "./slippage";
 import { computeTWAS } from "./spread";
 import { computeTimeToFill } from "./timing";
 import { computeOrderVol } from "./volatility";
-import { computeVWAPDeviation } from "./vwapTwap";
+import { computeMarketTWAP, computeTWAPDeviation, computeVWAPDeviation } from "./vwapTwap";
 import { sideSign } from "./tcaUtils";
 
 export function computeAll(
@@ -35,6 +35,11 @@ export function computeAll(
       ? computeOrderVol(trade, e.barsSnapshot, e.bidAskTicks)
       : { price: null, bps: null };
 
+    // Market TWAP: avg of close prices within [orderTime, lastFillTime]
+    const marketTWAP = e
+      ? computeMarketTWAP(e.barsSnapshot, e.bidAskTicks, trade.orderTime, trade.lastFillTime)
+      : null;
+
     return {
       orderId: trade.orderId,
       IS_bps: computeSlippage(trade),
@@ -48,6 +53,8 @@ export function computeAll(
       TWAS_bps: computeTWAS(trade, e?.bidAskTicks ?? []),
       vol_during_order_price: vol.price,
       vol_during_order_bps: vol.bps,
+      TWAP_dev_bps: computeTWAPDeviation(trade, marketTWAP),
+      marketVWAP_price: e?.vwap ?? null,
     };
   });
 }

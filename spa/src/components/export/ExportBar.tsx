@@ -49,7 +49,9 @@ function buildTradeRows(trades: TradeRecord[], results: TCAResult[]): ExportRow[
       "Last Fill": t.lastFillTime.toISOString(),
       "TTF (ms)": r?.timeToFill_ms ?? "",
       "IS (bps)": fmt(r?.IS_bps ?? null),
-      "VWAP Dev (bps)": fmt(r?.VWAP_dev_bps ?? null),
+      "vs Mkt VWAP (bps)": fmt(r?.VWAP_dev_bps ?? null),
+      "Mkt VWAP": fmt(r?.marketVWAP_price ?? null),
+      "vs Mkt TWAP (bps)": fmt(r?.TWAP_dev_bps ?? null),
       "Mkt Impact (bps)": fmt(r?.MI_bps ?? null),
       "Rev +1m (bps)": fmt(r?.reversion_1m_bps ?? null),
       "Rev +5m (bps)": fmt(r?.reversion_5m_bps ?? null),
@@ -95,9 +97,14 @@ async function doExcelExport(
 
   // ── Trades sheet ──────────────────────────────────────────────────────────
   const ws = XLSX.utils.json_to_sheet(tradeRows);
+  // Order ID, Symbol, Side, Algo, Qty, Fill Price, Arrival Price,
+  // Order Time, First Fill, Last Fill, TTF,
+  // IS, vs Mkt VWAP, Mkt VWAP, vs Mkt TWAP, Mkt Impact,
+  // Rev +1m, Rev +5m, Rev +30m, Rev EOD, TWAS, Vol σ (price), Vol σ (bps)
   const colWidths = [
     20, 10, 6, 10, 8, 12, 12, 22, 22, 22,
-    10, 10, 12, 14, 12, 12, 13, 12, 10, 12, 10,
+    10, 10, 14, 12, 14, 14,
+    12, 12, 13, 12, 10, 12, 10,
   ];
   ws["!cols"] = colWidths.map((wch) => ({ wch }));
   XLSX.utils.book_append_sheet(wb, ws, "Trades");

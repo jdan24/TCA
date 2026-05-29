@@ -49,6 +49,8 @@ interface TableRow {
   TWAS_bps: number | null;
   vol_during_order_price: number | null;
   vol_during_order_bps: number | null;
+  TWAP_dev_bps: number | null;
+  marketVWAP_price: number | null;
 }
 
 function mergeRows(trades: TradeRecord[], results: TCAResult[]): TableRow[] {
@@ -75,6 +77,8 @@ function mergeRows(trades: TradeRecord[], results: TCAResult[]): TableRow[] {
       TWAS_bps: r?.TWAS_bps ?? null,
       vol_during_order_price: r?.vol_during_order_price ?? null,
       vol_during_order_bps: r?.vol_during_order_bps ?? null,
+      TWAP_dev_bps: r?.TWAP_dev_bps ?? null,
+      marketVWAP_price: r?.marketVWAP_price ?? null,
     };
   });
 }
@@ -91,7 +95,9 @@ const COLUMN_LABELS: Record<string, string> = {
   algo: "Algo",
   timeToFill_ms: "TTF",
   IS_bps: "IS",
-  VWAP_dev_bps: "VWAP Dev",
+  VWAP_dev_bps: "vs Mkt VWAP",
+  marketVWAP_price: "Mkt VWAP",
+  TWAP_dev_bps: "vs Mkt TWAP",
   MI_bps: "Mkt Impact",
   reversion_1m_bps: "Rev +1m",
   reversion_5m_bps: "Rev +5m",
@@ -269,7 +275,28 @@ const COLUMNS = [
     enableGlobalFilter: false,
   }),
   col.accessor("VWAP_dev_bps", {
-    header: "VWAP Dev",
+    header: "vs Mkt VWAP",
+    cell: (i) => <BpsCell value={i.getValue()} />,
+    sortingFn: nullableSort,
+    enableGlobalFilter: false,
+  }),
+  col.accessor("marketVWAP_price", {
+    header: "Mkt VWAP",
+    cell: (i) => {
+      const v = i.getValue();
+      return v !== null ? (
+        <span className="tabular-nums text-xs text-gray-700 dark:text-gray-300">
+          {v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
+        </span>
+      ) : (
+        <span className="text-gray-300 dark:text-gray-600 text-xs select-none">N/A</span>
+      );
+    },
+    sortingFn: nullableSort,
+    enableGlobalFilter: false,
+  }),
+  col.accessor("TWAP_dev_bps", {
+    header: "vs Mkt TWAP",
     cell: (i) => <BpsCell value={i.getValue()} />,
     sortingFn: nullableSort,
     enableGlobalFilter: false,
@@ -348,8 +375,8 @@ const DEFAULT_VISIBILITY: VisibilityState = {
   reversion_5m_bps: false,
   reversion_30m_bps: false,
   reversion_EOD_bps: false,
-  vol_during_order_price: false,
-  vol_during_order_bps: false,
+  // vol_during_order_price, vol_during_order_bps, marketVWAP_price, TWAP_dev_bps
+  // all visible by default — omitting from this map means visible
 };
 
 export function TradeTable({ trades, results, title = "Trade Detail" }: TradeTableProps) {
