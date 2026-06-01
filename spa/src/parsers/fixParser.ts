@@ -167,6 +167,74 @@ function safeParseDate(s: string): Date {
   }
 }
 
+// ── Per-fill aggregation (Single Order / Mode 2) ─────────────────────────────
+
+/**
+ * Emit one TradeRecord per individual fill execution report.
+ *
+ * Used in Single Order TCA (Mode 2) so each fill becomes a separate data
+ * point on the Execution Timeline, plotted at its own TransactTime (tag 60).
+ *
+ * Each TradeRecord:
+ *   orderId        = ExecID (tag 17) when present, else ClOrdID + "_" + index
+ *   orderTime      = fill's TransactTime (tag 60)
+ *   firstFillTime  = same
+ *   lastFillTime   = same
+ *   avgFillPrice   = fill's LastPx (tag 31) — THIS fill's price, not cumulative AvgPx
+ *   orderQty       = fill's LastQty (tag 32) — quantity filled in THIS execution
+ */
+function aggregatePerFill(messages: FixMsg[]): TradeRecord[] {
+  const trades: TradeRecord[] = [];
+  let fillIndex = 0;
+
+  for (const msg of messages) {
+    if (tag(msg, FIX_TAGS.MsgType) !== "8") continue;
+
+    const lastQty = parseFloat(tag(msg, FIX_TAGS.LastQty) || "0");
+    const lastPx  = parseFloat(tag(msg, FIX_TAGS.LastPx)  || "0");
+
+    // Only process messages that represent an actual fill
+    if (lastQty <= 0 || lastPx <= 0) continue;
+
+    const clOrdId      = tag(msg, FIX_TAGS.ClOrdID);
+    const execId       = msg["17"]; // ExecID — not in FIX_TAGS, read directly
+    const transactTime = tag(msg, FIX_TAGS.TransactTime);
+    const symbol       = tag(msg, FIX_TAGS.Symbol);
+    const sideRaw      = tag(msg, FIX_TAGS.Side);
+
+    if (!symbol || !transactTime) continue;
+
+    const fillTime = safeParseDate(transactTime);
+    const orderId  = execId || (clOrdId ? `${clOrdId}_${fillIndex}` : `fill_${fillIndex}`);
+    const sideStr  = sideRaw === "1" ? "BUY" : sideRaw === "2" ? "SELL" : sideRaw;
+
+    try {
+      trades.push({
+        orderId,
+        symbol,
+        side: normalizeSide(sideStr),
+        orderQty: lastQty,
+        avgFillPrice: lastPx,
+        arrivalPrice: null,
+        orderTime:     fillTime,
+        firstFillTime: fillTime,
+        lastFillTime:  fillTime,
+        contractMultiplier: 1,
+        currency: "USD",
+        algo: null,
+        accountId: null,
+        accountDescription: null,
+      });
+    } catch {
+      // Skip fills with unrecognised side or other parse issues
+    }
+
+    fillIndex++;
+  }
+
+  return trades;
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -205,6 +273,60 @@ export function parseFixFile(file: File): Promise<TradeRecord[]> {
             new Error(
               "No Execution Reports (MsgType=8) found. " +
                 "Ensure the file contains FIX tag 35=8 messages."
+            )
+          );
+          return;
+        }
+
+        resolve(trades);
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    };
+
+    reader.onerror = () => reject(new Error("FileReader error while reading FIX file"));
+    reader.readAsText(file);
+  });
+}
+
+/**
+ * Single Order variant — one TradeRecord per individual fill execution.
+ * Each record is timestamped with tag 60 TransactTime of that specific fill.
+ * Used in Mode 2 (Single Order TCA) so the Execution Timeline can plot
+ * every fill as a separate point at its actual execution time.
+ */
+export function parseFixFileSingleOrder(file: File): Promise<TradeRecord[]> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result;
+        if (typeof text !== "string") {
+          reject(new Error("Failed to read FIX file as text"));
+          return;
+        }
+
+        const lines = text.split(/\r?\n/);
+        const messages: FixMsg[] = [];
+
+        for (const line of lines) {
+          const msg = parseLine(line);
+          if (msg) messages.push(msg);
+        }
+
+        if (messages.length === 0) {
+          reject(new Error("No valid FIX messages found in file"));
+          return;
+        }
+
+        const trades = aggregatePerFill(messages);
+
+        if (trades.length === 0) {
+          reject(
+            new Error(
+              "No fill executions (MsgType=8 with LastQty > 0) found. " +
+                "Ensure the file contains FIX execution reports with tag 32 (LastQty)."
             )
           );
           return;

@@ -47,7 +47,7 @@ function App() {
       {rawTrades.length === 0 ? (
         <main className="flex-1 flex flex-col items-center justify-center p-8 gap-6">
           <ModeSelector />
-          <FileDropZone onComplete={setRawTrades} />
+          <FileDropZone onComplete={setRawTrades} mode={mode} />
           <p className="text-sm text-gray-400 dark:text-gray-600">
             Upload a CSV, XLSX, or FIX execution report to begin analysis
           </p>

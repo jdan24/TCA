@@ -1,10 +1,10 @@
 import { useCallback, useRef, useState } from "react";
 import { autoDetectMapping, REQUIRED_FIELDS } from "@/parsers/autoDetect";
 import { parseCsvFile } from "@/parsers/csvParser";
-import { parseFixFile } from "@/parsers/fixParser";
+import { parseFixFile, parseFixFileSingleOrder } from "@/parsers/fixParser";
 import { parseXlsxFile } from "@/parsers/xlsxParser";
 import { normalizeRows } from "@/tca/normalize";
-import type { ColumnMapping, RawFileData, TradeRecord } from "@/types";
+import type { ColumnMapping, RawFileData, TCAMode, TradeRecord } from "@/types";
 import { ColumnMapper } from "./ColumnMapper";
 
 // ── State machine ─────────────────────────────────────────────────────────────
@@ -43,9 +43,11 @@ function isConfidentMapping(
 
 interface FileDropZoneProps {
   onComplete: (trades: TradeRecord[]) => void;
+  /** Controls how FIX files are parsed. "single" emits one record per fill. */
+  mode?: TCAMode;
 }
 
-export function FileDropZone({ onComplete }: FileDropZoneProps) {
+export function FileDropZone({ onComplete, mode = "multi" }: FileDropZoneProps) {
   const [phase, setPhase] = useState<Phase>({ tag: "idle" });
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -58,7 +60,11 @@ export function FileDropZone({ onComplete }: FileDropZoneProps) {
         const type = detectFileType(file);
 
         if (type === "fix") {
-          const trades = await parseFixFile(file);
+          // Mode 2 (single order): one TradeRecord per fill, each with its
+          // own TransactTime (tag 60) so the Execution Timeline can plot
+          // every fill at the correct time.
+          const parser = mode === "single" ? parseFixFileSingleOrder : parseFixFile;
+          const trades = await parser(file);
           onComplete(trades);
           setPhase({ tag: "idle" });
           return;
