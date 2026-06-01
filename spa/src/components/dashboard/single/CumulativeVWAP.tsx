@@ -28,8 +28,8 @@ import { ChartCard, EmptyState } from "@/components/dashboard/dashboardUtils";
 interface CumulativeVWAPProps {
   trades: TradeRecord[];
   arrivalPrice: number | null;
-  /** Bloomberg market VWAP over [orderTime, lastFillTime]. null = not yet enriched. */
-  marketVwap: number | null;
+  /** Per-fill running market VWAP from order start to each fill. null/empty = not yet enriched. */
+  runningMarketVwap: Array<{ t: number; vwap: number }> | null;
 }
 
 interface DataPoint {
@@ -47,7 +47,10 @@ function fmtUtc(ms: number): string {
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
 }
 
-function buildData(trades: TradeRecord[]): DataPoint[] {
+function buildData(
+  trades: TradeRecord[],
+  vwapByTime: Map<number, number>,
+): DataPoint[] {
   if (trades.length === 0) return [];
 
   const sorted = [...trades].sort(
@@ -62,13 +65,14 @@ function buildData(trades: TradeRecord[]): DataPoint[] {
     cumQty += t.orderQty;
     const runningFillAvg = cumQty > 0 ? cumNotional / cumQty : t.avgFillPrice;
     const tMs = t.lastFillTime.getTime();
+    const marketVwapAtFill = vwapByTime.get(tMs);
     return {
       t: tMs,
       timeLabel: fmtUtc(tMs),
       runningFillAvg,
       fillPrice: t.avgFillPrice,
       cumQty,
-      // marketVwapLine is injected after buildData returns (needs the prop value)
+      ...(marketVwapAtFill !== undefined ? { marketVwapLine: marketVwapAtFill } : {}),
     };
   });
 }
@@ -79,14 +83,10 @@ const SERIES: Record<string, { label: string; color: string; dash?: string }> = 
   fillPrice:      { label: "Fill Price",         color: "#8b5cf6", dash: "4 2" },
 };
 
-export function CumulativeVWAP({ trades, arrivalPrice, marketVwap }: CumulativeVWAPProps) {
-  // Inject market VWAP as a constant field on every data point so it
-  // appears in the legend and supports click-to-mute like the other series.
-  const rawData = buildData(trades);
-  const data: DataPoint[] = rawData.map((d) => ({
-    ...d,
-    ...(marketVwap !== null ? { marketVwapLine: marketVwap } : {}),
-  }));
+export function CumulativeVWAP({ trades, arrivalPrice, runningMarketVwap }: CumulativeVWAPProps) {
+  const vwapByTime = new Map((runningMarketVwap ?? []).map((p) => [p.t, p.vwap]));
+  const data = buildData(trades, vwapByTime);
+  const hasMarketVwap = (runningMarketVwap?.length ?? 0) > 0;
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
   if (data.length === 0) {
@@ -99,7 +99,7 @@ export function CumulativeVWAP({ trades, arrivalPrice, marketVwap }: CumulativeV
 
   const allPrices = data.flatMap((d) => [d.runningFillAvg, d.fillPrice]);
   if (arrivalPrice !== null) allPrices.push(arrivalPrice);
-  if (marketVwap !== null) allPrices.push(marketVwap);
+  if (runningMarketVwap) runningMarketVwap.forEach((p) => allPrices.push(p.vwap));
   const pMin = Math.min(...allPrices);
   const pMax = Math.max(...allPrices);
   const pad = (pMax - pMin) * 0.08 || pMin * 0.001;
@@ -207,8 +207,8 @@ export function CumulativeVWAP({ trades, arrivalPrice, marketVwap }: CumulativeV
             activeDot={{ r: 4 }}
             hide={hidden.has("runningFillAvg")}
           />
-          {/* Market VWAP — only rendered when Bloomberg enrichment is available */}
-          {marketVwap !== null && (
+          {/* Running market VWAP — only rendered when Bloomberg enrichment is available */}
+          {hasMarketVwap && (
             <Line
               type="monotone"
               dataKey="marketVwapLine"

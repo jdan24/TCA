@@ -34,6 +34,14 @@ export interface BridgeTick {
   ask: number;
 }
 
+/** A last-traded price/size tick as returned by the bridge /trade-ticks endpoint. */
+export interface BridgeTradeTick {
+  /** ISO-8601 string (UTC implied). */
+  time: string;
+  price: number;
+  size: number;
+}
+
 // ── Internal fetch helper ─────────────────────────────────────────────────────
 
 async function bridgeGet<T>(
@@ -153,6 +161,27 @@ export async function fetchBidAskTicks(
 ): Promise<BridgeTick[]> {
   return bridgeGet<BridgeTick[]>(
     "/bid-ask-ticks",
+    { security, start, end },
+    [],
+  );
+}
+
+/**
+ * GET /trade-ticks — last-traded price and size ticks over [start, end].
+ *
+ * Used for true VWAP (Σ price×size / Σ size) on short orders (≤ 5 min).
+ *
+ * @param security  Bare ticker, e.g. "ESH4"
+ * @param start     ISO-8601 UTC string
+ * @param end       ISO-8601 UTC string
+ */
+export async function fetchTradeTicks(
+  security: string,
+  start: string,
+  end: string,
+): Promise<BridgeTradeTick[]> {
+  return bridgeGet<BridgeTradeTick[]>(
+    "/trade-ticks",
     { security, start, end },
     [],
   );

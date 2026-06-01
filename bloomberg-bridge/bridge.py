@@ -428,6 +428,43 @@ def _get_intraday_ticks(
         session.stop()
 
 
+def _get_trade_ticks(
+    ticker: str,
+    start: datetime,
+    end: datetime,
+) -> list[dict[str, Any]]:
+    """IntradayTickRequest for TRADE events, capturing last price and size."""
+    session = _create_session()
+    try:
+        svc = session.getService("//blp/refdata")
+        req = svc.createRequest("IntradayTickRequest")
+        req.set("security", ticker)
+        req.getElement("eventTypes").appendValue("TRADE")
+        req.set("startDateTime", to_blp_dt(start))
+        req.set("endDateTime", to_blp_dt(end))
+        req.set("includeConditionCodes", False)
+        session.sendRequest(req)
+
+        raw_ticks = []
+        for msg in _drain(session):
+            if not msg.hasElement("tickData"):
+                continue
+            tick_array = msg.getElement("tickData").getElement("tickData")
+            for i in range(tick_array.numValues()):
+                tick = tick_array.getValueAsElement(i)
+                try:
+                    raw_ticks.append({
+                        "time": blp_dt_to_iso(tick.getElement("time").getValue()),
+                        "price": float(tick.getElement("value").getValue()),
+                        "size": int(tick.getElement("size").getValue()),
+                    })
+                except Exception:
+                    pass
+        return _normalize_to_utc(raw_ticks, start)
+    finally:
+        session.stop()
+
+
 def _reconstruct_bid_ask_pairs(
     raw_ticks: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -586,6 +623,24 @@ def bid_ask_ticks(security: str, start: str, end: str):
     ticker = resolve_ticker(security)
     raw = _get_intraday_ticks(ticker, parse_dt(start), parse_dt(end), ["BID", "ASK"])
     return _reconstruct_bid_ask_pairs(raw)
+
+
+@app.get("/trade-ticks")
+def trade_ticks(security: str, start: str, end: str):
+    """
+    Last-traded price and size tick stream for running market VWAP.
+
+    Returns {time, price, size}[] for all TRADE events in [start, end].
+    Used for true VWAP (Σ price×size / Σ size) on short orders (≤ 5 minutes).
+
+    Query params:
+      security  bare ticker, e.g. 'ESH4'
+      start     ISO-8601 or FIX datetime
+      end       ISO-8601 or FIX datetime
+    """
+    _require_blpapi()
+    ticker = resolve_ticker(security)
+    return _get_trade_ticks(ticker, parse_dt(start), parse_dt(end))
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

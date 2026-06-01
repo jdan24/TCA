@@ -117,7 +117,7 @@ export function SingleOrderDashboard({
         <CumulativeVWAP
           trades={trades}
           arrivalPrice={summary?.arrivalPrice ?? null}
-          marketVwap={summary?.marketVwap ?? null}
+          runningMarketVwap={summary?.runningMarketVwap ?? null}
         />
       </div>
 

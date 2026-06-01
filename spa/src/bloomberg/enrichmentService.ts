@@ -29,12 +29,13 @@
  * which is the conservative "no data" signal rather than a misleading number.
  */
 
-import type { BidAskTick, BloombergEnrichment, IntradayBar, TradeRecord } from "@/types";
+import type { BidAskTick, BloombergEnrichment, IntradayBar, TradeTick, TradeRecord } from "@/types";
 import {
   fetchArrivalPrice,
   fetchBidAskTicks,
   fetchIntradayBars,
   fetchReference,
+  fetchTradeTicks,
 } from "./bloombergClient";
 
 // ── Time constants ────────────────────────────────────────────────────────────
@@ -244,9 +245,10 @@ async function enrichOneTrade(
   const tickStart = new Date(orderTime.getTime() - 2 * ONE_MIN_MS);
   const tickEnd = new Date(lastFillTime.getTime() + 30_000);
 
-  const [rawBars, rawTickData, bridgeArrival] = await Promise.all([
+  const [rawBars, rawTickData, rawTradeTickData, bridgeArrival] = await Promise.all([
     fetchIntradayBars(symbol, toIso(barStart), toIso(barEnd), 1),
     fetchBidAskTicks(symbol, toIso(tickStart), toIso(tickEnd)),
+    fetchTradeTicks(symbol, toIso(orderTime), toIso(new Date(lastFillTime.getTime() + 30_000))),
     fetchArrivalPrice(symbol, toIso(orderTime)),
   ]);
 
@@ -255,6 +257,7 @@ async function enrichOneTrade(
   // without correction the time-window filters in TWAP/vol/TWAS are wrong.
   const bars = shiftToUtc(rawBars, barStart.getTime());
   const rawTicks = shiftToUtc(rawTickData, tickStart.getTime());
+  const rawTradeTicks = shiftToUtc(rawTradeTickData, orderTime.getTime());
 
   // ── Arrival price ────────────────────────────────────────────────────────
   // Bridge handles tick-mid vs bar-open fallback internally.
@@ -263,25 +266,24 @@ async function enrichOneTrade(
   if (arrivalPrice === null) return null; // can't enrich without arrival price
 
   // ── VWAP (execution window) ──────────────────────────────────────────────
-  // For short orders (≤ 5 min) use tick midpoints: 1-min bars are too coarse
-  // (only 0–5 bars) and minute-boundary rounding introduces excessive noise.
+  // For short orders (≤ 5 min) use true trade VWAP: Σ(price×size)/Σ(size).
+  // 1-min bars are too coarse (only 0–5 bars) and introduce excessive noise.
   const isShortOrder =
     lastFillTime.getTime() - orderTime.getTime() <= SHORT_ORDER_THRESHOLD_MS;
 
   const vwap = isShortOrder
     ? (() => {
-        // rawTicks is already available; bidAskTicks is declared further below
         const fromMs = orderTime.getTime();
         const toMs   = lastFillTime.getTime();
-        const mids   = rawTicks
-          .filter((tk) => {
-            const ms = new Date(tk.time).getTime();
-            return ms >= fromMs && ms <= toMs;
-          })
-          .map((tk) => (tk.bid + tk.ask) / 2);
-        return mids.length > 0
-          ? mids.reduce((a, b) => a + b, 0) / mids.length
-          : null;
+        let sumPV = 0, sumV = 0;
+        for (const tk of rawTradeTicks) {
+          const ms = new Date(tk.time).getTime();
+          if (ms >= fromMs && ms <= toMs && tk.size > 0) {
+            sumPV += tk.price * tk.size;
+            sumV  += tk.size;
+          }
+        }
+        return sumV > 0 ? sumPV / sumV : null;
       })() ?? arrivalPrice
     : computeVwap(bars, orderTime, lastFillTime) ?? arrivalPrice;
 
@@ -326,6 +328,13 @@ async function enrichOneTrade(
     ask: t.ask,
   }));
 
+  // ── Trade ticks (Date-typed for short-order VWAP) ─────────────────────────
+  const tradeTicks: TradeTick[] = rawTradeTicks.map((t) => ({
+    time: new Date(t.time),
+    price: t.price,
+    size: t.size,
+  }));
+
   return {
     arrivalPrice,
     vwap,
@@ -337,6 +346,7 @@ async function enrichOneTrade(
     reversion30m: rev30mPrice ?? avgFillPrice,
     reversionEOD: eodPrice ?? avgFillPrice,
     bidAskTicks,
+    tradeTicks,
     barsSnapshot: bars,
   };
 }
@@ -471,14 +481,16 @@ export async function enrichSingleOrder(
   const tickStart = new Date(orderTime.getTime() - 2 * ONE_MIN_MS);
   const tickEnd   = new Date(lastFillTime.getTime() + 30_000);
 
-  const [rawBars, rawTickData, bridgeArrival] = await Promise.all([
+  const [rawBars, rawTickData, rawTradeTickData, bridgeArrival] = await Promise.all([
     fetchIntradayBars(bbgSymbol, toIso(barStart), toIso(barEnd), 1),
     fetchBidAskTicks(bbgSymbol, toIso(tickStart), toIso(tickEnd)),
+    fetchTradeTicks(bbgSymbol, toIso(orderTime), toIso(tickEnd)),
     fetchArrivalPrice(bbgSymbol, toIso(orderTime)),
   ]);
 
-  const bars     = shiftToUtc(rawBars,     barStart.getTime());
-  const rawTicks = shiftToUtc(rawTickData, tickStart.getTime());
+  const bars         = shiftToUtc(rawBars,         barStart.getTime());
+  const rawTicks     = shiftToUtc(rawTickData,     tickStart.getTime());
+  const rawTradeTicks = shiftToUtc(rawTradeTickData, orderTime.getTime());
 
   const arrivalPrice = bridgeArrival ?? getPriceAtOrBefore(bars, orderTime);
 
@@ -486,7 +498,7 @@ export async function enrichSingleOrder(
 
   if (arrivalPrice === null) return result; // can't proceed without arrival price
 
-  // ── VWAP (tick-based for short orders, bar-based otherwise) ───────────────
+  // ── VWAP (trade-tick-based for short orders, bar-based otherwise) ───────────
   const isShortOrder =
     lastFillTime.getTime() - orderTime.getTime() <= SHORT_ORDER_THRESHOLD_MS;
 
@@ -494,15 +506,15 @@ export async function enrichSingleOrder(
     ? (() => {
         const fromMs = orderTime.getTime();
         const toMs   = lastFillTime.getTime();
-        const mids   = rawTicks
-          .filter((tk) => {
-            const ms = new Date(tk.time).getTime();
-            return ms >= fromMs && ms <= toMs;
-          })
-          .map((tk) => (tk.bid + tk.ask) / 2);
-        return mids.length > 0
-          ? mids.reduce((a, b) => a + b, 0) / mids.length
-          : null;
+        let sumPV = 0, sumV = 0;
+        for (const tk of rawTradeTicks) {
+          const ms = new Date(tk.time).getTime();
+          if (ms >= fromMs && ms <= toMs && tk.size > 0) {
+            sumPV += tk.price * tk.size;
+            sumV  += tk.size;
+          }
+        }
+        return sumV > 0 ? sumPV / sumV : null;
       })() ?? arrivalPrice
     : computeVwap(bars, orderTime, lastFillTime) ?? arrivalPrice;
 
@@ -527,11 +539,18 @@ export async function enrichSingleOrder(
   const rev30mPrice = getPriceAtOrBefore(bars, new Date(lastFillTime.getTime() + THIRTY_MIN_MS));
   const eodPrice    = getEodClose(bars, lastFillTime);
 
-  // ── Bid/ask ticks (Date-typed) ────────────────────────────────────────────
+  // ── Bid/ask ticks (Date-typed for computeTWAS) ────────────────────────────
   const bidAskTicks: BidAskTick[] = rawTicks.map((t) => ({
     time: new Date(t.time),
     bid: t.bid,
     ask: t.ask,
+  }));
+
+  // ── Trade ticks (Date-typed for short-order VWAP) ─────────────────────────
+  const tradeTicks: TradeTick[] = rawTradeTicks.map((t) => ({
+    time: new Date(t.time),
+    price: t.price,
+    size: t.size,
   }));
 
   // ── One shared enrichment entry applied to every fill ─────────────────────
@@ -545,6 +564,7 @@ export async function enrichSingleOrder(
     reversion30m:  rev30mPrice ?? fillVwap,
     reversionEOD:  eodPrice    ?? fillVwap,
     bidAskTicks,
+    tradeTicks,
     barsSnapshot: bars,
   };
 

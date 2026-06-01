@@ -158,29 +158,39 @@ export function computeParentOrderSummary(
 
   const participationRate = orderWindowVolume > 0 ? totalQty / orderWindowVolume : null;
 
-  // ── Market VWAP over the full parent order window ─────────────────────────
-  // Recompute from barsSnapshot using the full [orderTime, lastFillTime] span.
-  // For short orders (≤ 5 min) use the tick-mid average instead.
+  // ── Market VWAP (scalar) and running market VWAP (per-fill) ─────────────────
+  // Scalar: full-window VWAP shown on the summary card.
+  // Running: one point per fill from orderTime up to that fill, shown as an
+  //          evolving chart line.  Both use tick midpoints for orders ≤ 5 min
+  //          and bar close×volume for longer orders.
   const SHORT_MS_PARENT = 5 * 60_000;
   const isShortParent = lastFillTime.getTime() - orderTime.getTime() <= SHORT_MS_PARENT;
   let marketVwap: number | null = null;
+  let runningMarketVwap: Array<{ t: number; vwap: number }> | null = null;
+
+  const sortedFills = [...trades].sort(
+    (a, b) => a.lastFillTime.getTime() - b.lastFillTime.getTime()
+  );
 
   for (const trade of trades) {
     const e = enrichment[trade.orderId];
     if (!e) continue;
 
     if (isShortParent) {
-      // Use tick midpoints for short orders
+      // Scalar VWAP: true trade VWAP Σ(price×size)/Σ(size) over the full window
       const fromMs = orderTime.getTime();
       const toMs   = lastFillTime.getTime();
-      const mids = e.bidAskTicks
-        .filter((tk) => tk.time.getTime() >= fromMs && tk.time.getTime() <= toMs)
-        .map((tk) => (tk.bid + tk.ask) / 2);
-      marketVwap = mids.length > 0
-        ? mids.reduce((a, b) => a + b, 0) / mids.length
-        : null;
+      let sumPV = 0, sumV = 0;
+      for (const tk of e.tradeTicks) {
+        const ms = tk.time.getTime();
+        if (ms >= fromMs && ms <= toMs && tk.size > 0) {
+          sumPV += tk.price * tk.size;
+          sumV  += tk.size;
+        }
+      }
+      marketVwap = sumV > 0 ? sumPV / sumV : null;
     } else {
-      // Volume-weighted close × volume over the bar window
+      // Scalar VWAP: volume-weighted close × volume over the bar window
       let sumPV = 0, sumV = 0;
       for (const bar of e.barsSnapshot) {
         const barMs = new Date(bar.time).getTime();
@@ -191,6 +201,43 @@ export function computeParentOrderSummary(
       }
       marketVwap = sumV > 0 ? sumPV / sumV : null;
     }
+
+    // Running VWAP: one point per fill, window = [orderTime, fillTime]
+    const points: Array<{ t: number; vwap: number }> = [];
+    for (const fill of sortedFills) {
+      const fillTimeMs = fill.lastFillTime.getTime();
+      let vwap: number | null = null;
+
+      if (isShortParent) {
+        // Up to and including the fill second — true VWAP Σ(price×size)/Σ(size)
+        const fromMs = orderTime.getTime();
+        let sumPV = 0, sumV = 0;
+        for (const tk of e.tradeTicks) {
+          const ms = tk.time.getTime();
+          if (ms >= fromMs && ms <= fillTimeMs && tk.size > 0) {
+            sumPV += tk.price * tk.size;
+            sumV  += tk.size;
+          }
+        }
+        vwap = sumV > 0 ? sumPV / sumV : null;
+      } else {
+        // Up to and including the fill minute — bar close × volume
+        const fillMinuteMs = Math.floor(fillTimeMs / ONE_MIN_MS) * ONE_MIN_MS;
+        let sumPV = 0, sumV = 0;
+        for (const bar of e.barsSnapshot) {
+          const barMs = new Date(bar.time).getTime();
+          if (barMs >= fromBarMs && barMs <= fillMinuteMs) {
+            sumPV += bar.close * bar.volume;
+            sumV  += bar.volume;
+          }
+        }
+        vwap = sumV > 0 ? sumPV / sumV : null;
+      }
+
+      if (vwap !== null) points.push({ t: fillTimeMs, vwap });
+    }
+    runningMarketVwap = points.length > 0 ? points : null;
+
     break; // same security for all slices — first enriched trade suffices
   }
 
@@ -208,5 +255,6 @@ export function computeParentOrderSummary(
     vol_during_order_bps,
     participationRate,
     marketVwap,
+    runningMarketVwap,
   };
 }

@@ -56,6 +56,12 @@ export interface BidAskTick {
   ask: number;
 }
 
+export interface TradeTick {
+  time: Date;
+  price: number;
+  size: number;
+}
+
 export interface BloombergEnrichment {
   arrivalPrice: number;
   vwap: number;
@@ -66,6 +72,7 @@ export interface BloombergEnrichment {
   reversion30m: number;
   reversionEOD: number;
   bidAskTicks: BidAskTick[];
+  tradeTicks: TradeTick[];    // last-traded price+size ticks for short-order VWAP
   barsSnapshot: IntradayBar[]; // 1-min bars for the order window (used by volatility)
 }
 
@@ -84,6 +91,8 @@ export interface ParentOrderSummary {
   vol_during_order_bps: number | null;
   participationRate: number | null; // totalQty / exchange volume during [orderTime, lastFillTime]
   marketVwap: number | null;        // Bloomberg market VWAP over the full order window
+  /** Running market VWAP at each fill timestamp — null when Bloomberg not connected. */
+  runningMarketVwap: Array<{ t: number; vwap: number }> | null;
 }
 
 // ── Multi-order aggregation types ─────────────────────────────────────────────
