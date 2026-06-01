@@ -125,14 +125,30 @@ export function computeParentOrderSummary(
     ? volPriceVals.reduce((a, b) => a + b, 0) / volPriceVals.length
     : null;
 
-  // ── Participation rate: totalQty / avgADV ────────────────────────────────
-  const advVals = trades
-    .map((t) => enrichment[t.orderId]?.adv)
-    .filter((v): v is number => typeof v === "number" && v > 0);
-  const avgAdv = advVals.length > 0
-    ? advVals.reduce((a, b) => a + b, 0) / advVals.length
-    : null;
-  const participationRate = avgAdv !== null && avgAdv > 0 ? totalQty / avgAdv : null;
+  // ── Participation rate: totalQty / exchange volume during order window ──────
+  // Use actual market volume from the 1-min bars that fall within
+  // [orderTime, lastFillTime] (same minute-floor boundary as VWAP/TWAP).
+  // All slices are fills of the same security so we only need bars from
+  // the first enriched trade.
+  const ONE_MIN_MS = 60_000;
+  const fromBarMs = Math.floor(orderTime.getTime() / ONE_MIN_MS) * ONE_MIN_MS;
+  const toBarMs   = Math.floor(lastFillTime.getTime() / ONE_MIN_MS) * ONE_MIN_MS;
+
+  let orderWindowVolume = 0;
+  for (const trade of trades) {
+    const e = enrichment[trade.orderId];
+    if (e?.barsSnapshot && e.barsSnapshot.length > 0) {
+      for (const bar of e.barsSnapshot) {
+        const barMs = new Date(bar.time).getTime();
+        if (barMs >= fromBarMs && barMs <= toBarMs) {
+          orderWindowVolume += bar.volume;
+        }
+      }
+      break; // same security for all slices — first enriched trade's bars suffice
+    }
+  }
+
+  const participationRate = orderWindowVolume > 0 ? totalQty / orderWindowVolume : null;
 
   return {
     symbol: firstTrade.symbol,

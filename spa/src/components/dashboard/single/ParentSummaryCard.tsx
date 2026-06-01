@@ -9,6 +9,14 @@
 import type { ParentOrderSummary } from "@/types";
 import { fmtBps, fmtTtf } from "@/components/dashboard/dashboardUtils";
 
+function fmtUtc(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
+    `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`
+  );
+}
+
 interface ParentSummaryCardProps {
   summary: ParentOrderSummary;
 }
@@ -86,27 +94,20 @@ export function ParentSummaryCard({ summary }: ParentSummaryCardProps) {
         />
         <Stat
           label="Participation Rate"
+          sublabel="% of order-window vol"
           value={
             summary.participationRate !== null
-              ? `${(summary.participationRate * 100).toFixed(1)}%`
-              : "N/A"
+              ? `${(summary.participationRate * 100).toFixed(2)}%`
+              : "N/A (needs BBG)"
           }
         />
         <Stat
-          label="Order Start"
-          value={
-            summary.orderTime.toLocaleDateString() +
-            " " +
-            summary.orderTime.toLocaleTimeString()
-          }
+          label="Order Start (UTC)"
+          value={fmtUtc(summary.orderTime)}
         />
         <Stat
-          label="Last Fill"
-          value={
-            summary.lastFillTime.toLocaleDateString() +
-            " " +
-            summary.lastFillTime.toLocaleTimeString()
-          }
+          label="Last Fill (UTC)"
+          value={fmtUtc(summary.lastFillTime)}
         />
       </div>
     </div>
@@ -115,15 +116,21 @@ export function ParentSummaryCard({ summary }: ParentSummaryCardProps) {
 
 interface StatProps {
   label: string;
+  sublabel?: string;
   value: string;
   valueClass?: string;
 }
 
-function Stat({ label, value, valueClass }: StatProps) {
+function Stat({ label, sublabel, value, valueClass }: StatProps) {
   return (
     <div>
       <p className="text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-0.5">
         {label}
+        {sublabel !== undefined && (
+          <span className="ml-1 normal-case font-normal text-gray-300 dark:text-gray-600">
+            ({sublabel})
+          </span>
+        )}
       </p>
       <p className={`text-sm font-semibold tabular-nums ${valueClass ?? "text-gray-900 dark:text-white"}`}>
         {value}

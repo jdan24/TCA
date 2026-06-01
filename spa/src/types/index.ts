@@ -82,7 +82,7 @@ export interface ParentOrderSummary {
   duration_ms: number;
   vol_during_order_price: number | null;
   vol_during_order_bps: number | null;
-  participationRate: number | null; // totalQty / avgADV
+  participationRate: number | null; // totalQty / exchange volume during [orderTime, lastFillTime]
 }
 
 // ── Multi-order aggregation types ─────────────────────────────────────────────
