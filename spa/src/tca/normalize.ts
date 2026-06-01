@@ -1,4 +1,4 @@
-import { parse as dfnsParse, parseISO, isValid } from "date-fns";
+import { parseISO, isValid } from "date-fns";
 import type { ColumnMapping, RawFileData, TradeRecord } from "@/types";
 
 // ── Null-sentinel detection ───────────────────────────────────────────────────
@@ -35,13 +35,19 @@ export function parseTimestamp(value: unknown): Date {
   if (!s) throw new Error("Empty timestamp value");
 
   // FIX format: YYYYMMDD-HH:mm:ss[.SSS]
+  // The FIX protocol specification (tag 60 TransactTime) mandates UTC.
+  // We construct an explicit UTC ISO-8601 string so that the Date object
+  // carries the correct UTC epoch regardless of the browser's local timezone.
+  // (Using dfnsParse without a reference timezone would produce local time,
+  //  shifting the order time by the browser's UTC offset — e.g. a 19:40 UTC
+  //  FIX time would become 23:40 UTC on an Eastern-time machine.)
   if (FIX_TS_RE.test(s)) {
-    // Ensure milliseconds are present: 20240315-09:30:00 → 20240315-09:30:00.000
     const datePart = s.slice(0, 8); // YYYYMMDD
     const timePart = s.slice(9, 17); // HH:mm:ss
-    const msPart = s.length > 17 && s.charAt(17) === "." ? s.slice(17, 21) : ".000";
-    const normalized = `${datePart}-${timePart}${msPart}`;
-    const d = dfnsParse(normalized, "yyyyMMdd-HH:mm:ss.SSS", new Date());
+    const msPart   = s.length > 17 && s.charAt(17) === "." ? s.slice(17, 21) : ".000";
+    // "20260528-19:40:00.000" → "2026-05-28T19:40:00.000Z"
+    const utcIso = `${datePart.slice(0, 4)}-${datePart.slice(4, 6)}-${datePart.slice(6, 8)}T${timePart}${msPart}Z`;
+    const d = new Date(utcIso);
     if (isValid(d)) return d;
   }
 

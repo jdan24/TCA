@@ -98,9 +98,9 @@ const COLUMN_LABELS: Record<string, string> = {
   orderQty: "Qty",
   avgFillPrice: "Fill Price",
   arrivalPrice: "Arrival Price",
-  orderTime: "Order Time",
-  firstFillTime: "First Fill",
-  lastFillTime: "Last Fill",
+  orderTime: "Order Time (UTC)",
+  firstFillTime: "First Fill (UTC)",
+  lastFillTime: "Last Fill (UTC)",
   algo: "Algo",
   timeToFill_ms: "TTF",
   IS_bps: "IS",
@@ -127,6 +127,21 @@ const nullableSort: SortingFn<TableRow> = (rowA, rowB, colId) => {
   if (b === null) return -1;
   return a - b;
 };
+
+// ── Timestamp formatter (UTC) ─────────────────────────────────────────────────
+
+/**
+ * Format a Date as "YYYY-MM-DD HH:MM:SS UTC" using UTC values so the display
+ * is unambiguous regardless of the viewer's local timezone.
+ * FIX timestamps (and Bloomberg bar timestamps after normalization) are UTC.
+ */
+function fmtUtc(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
+    `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`
+  );
+}
 
 // ── Time-to-fill formatter ────────────────────────────────────────────────────
 
@@ -262,41 +277,32 @@ const COLUMNS = [
     enableGlobalFilter: false,
   }),
   col.accessor("orderTime", {
-    header: "Order Time",
-    cell: (i) => {
-      const d = i.getValue();
-      return (
-        <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-          {d.toLocaleDateString()} {d.toLocaleTimeString()}
-        </span>
-      );
-    },
+    header: "Order Time (UTC)",
+    cell: (i) => (
+      <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap font-mono">
+        {fmtUtc(i.getValue())}
+      </span>
+    ),
     sortingFn: "datetime",
     enableGlobalFilter: false,
   }),
   col.accessor("firstFillTime", {
-    header: "First Fill",
-    cell: (i) => {
-      const d = i.getValue();
-      return (
-        <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-          {d.toLocaleDateString()} {d.toLocaleTimeString()}
-        </span>
-      );
-    },
+    header: "First Fill (UTC)",
+    cell: (i) => (
+      <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap font-mono">
+        {fmtUtc(i.getValue())}
+      </span>
+    ),
     sortingFn: "datetime",
     enableGlobalFilter: false,
   }),
   col.accessor("lastFillTime", {
-    header: "Last Fill",
-    cell: (i) => {
-      const d = i.getValue();
-      return (
-        <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
-          {d.toLocaleDateString()} {d.toLocaleTimeString()}
-        </span>
-      );
-    },
+    header: "Last Fill (UTC)",
+    cell: (i) => (
+      <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap font-mono">
+        {fmtUtc(i.getValue())}
+      </span>
+    ),
     sortingFn: "datetime",
     enableGlobalFilter: false,
   }),
