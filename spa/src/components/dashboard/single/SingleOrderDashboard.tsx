@@ -114,7 +114,11 @@ export function SingleOrderDashboard({
       {/* ── Execution timeline + Cumulative VWAP ────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ExecutionTimeline trades={trades} arrivalPrice={summary?.arrivalPrice ?? null} />
-        <CumulativeVWAP trades={trades} arrivalPrice={summary?.arrivalPrice ?? null} />
+        <CumulativeVWAP
+          trades={trades}
+          arrivalPrice={summary?.arrivalPrice ?? null}
+          marketVwap={summary?.marketVwap ?? null}
+        />
       </div>
 
       {/* ── Qty profile ──────────────────────────────────────────────────── */}

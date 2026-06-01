@@ -158,6 +158,42 @@ export function computeParentOrderSummary(
 
   const participationRate = orderWindowVolume > 0 ? totalQty / orderWindowVolume : null;
 
+  // ── Market VWAP over the full parent order window ─────────────────────────
+  // Recompute from barsSnapshot using the full [orderTime, lastFillTime] span.
+  // For short orders (≤ 5 min) use the tick-mid average instead.
+  const SHORT_MS_PARENT = 5 * 60_000;
+  const isShortParent = lastFillTime.getTime() - orderTime.getTime() <= SHORT_MS_PARENT;
+  let marketVwap: number | null = null;
+
+  for (const trade of trades) {
+    const e = enrichment[trade.orderId];
+    if (!e) continue;
+
+    if (isShortParent) {
+      // Use tick midpoints for short orders
+      const fromMs = orderTime.getTime();
+      const toMs   = lastFillTime.getTime();
+      const mids = e.bidAskTicks
+        .filter((tk) => tk.time.getTime() >= fromMs && tk.time.getTime() <= toMs)
+        .map((tk) => (tk.bid + tk.ask) / 2);
+      marketVwap = mids.length > 0
+        ? mids.reduce((a, b) => a + b, 0) / mids.length
+        : null;
+    } else {
+      // Volume-weighted close × volume over the bar window
+      let sumPV = 0, sumV = 0;
+      for (const bar of e.barsSnapshot) {
+        const barMs = new Date(bar.time).getTime();
+        if (barMs >= fromBarMs && barMs <= toBarMs) {
+          sumPV += bar.close * bar.volume;
+          sumV  += bar.volume;
+        }
+      }
+      marketVwap = sumV > 0 ? sumPV / sumV : null;
+    }
+    break; // same security for all slices — first enriched trade suffices
+  }
+
   return {
     symbol: firstTrade.symbol,
     side,
@@ -171,5 +207,6 @@ export function computeParentOrderSummary(
     vol_during_order_price,
     vol_during_order_bps,
     participationRate,
+    marketVwap,
   };
 }

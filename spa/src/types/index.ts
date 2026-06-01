@@ -83,6 +83,7 @@ export interface ParentOrderSummary {
   vol_during_order_price: number | null;
   vol_during_order_bps: number | null;
   participationRate: number | null; // totalQty / exchange volume during [orderTime, lastFillTime]
+  marketVwap: number | null;        // Bloomberg market VWAP over the full order window
 }
 
 // ── Multi-order aggregation types ─────────────────────────────────────────────

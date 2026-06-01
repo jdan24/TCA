@@ -28,13 +28,16 @@ import { ChartCard, EmptyState } from "@/components/dashboard/dashboardUtils";
 interface CumulativeVWAPProps {
   trades: TradeRecord[];
   arrivalPrice: number | null;
+  /** Bloomberg market VWAP over [orderTime, lastFillTime]. null = not yet enriched. */
+  marketVwap: number | null;
 }
 
 interface DataPoint {
   t: number;
   timeLabel: string;
-  runningFillAvg: number; // cumulative qty-weighted avg fill price
-  fillPrice: number;      // this fill's individual price
+  runningFillAvg: number;          // cumulative qty-weighted avg fill price
+  fillPrice: number;               // this fill's individual price
+  marketVwapLine?: number;         // Bloomberg market VWAP (flat reference, optional)
   cumQty: number;
 }
 
@@ -65,17 +68,25 @@ function buildData(trades: TradeRecord[]): DataPoint[] {
       runningFillAvg,
       fillPrice: t.avgFillPrice,
       cumQty,
+      // marketVwapLine is injected after buildData returns (needs the prop value)
     };
   });
 }
 
 const SERIES: Record<string, { label: string; color: string; dash?: string }> = {
-  runningFillAvg: { label: "Running Avg Fill", color: "#10b981" },
-  fillPrice:      { label: "Fill Price",        color: "#8b5cf6", dash: "4 2" },
+  runningFillAvg: { label: "Running Avg Fill",  color: "#10b981" },
+  marketVwapLine: { label: "Market VWAP (BBG)", color: "#3b82f6", dash: "6 3" },
+  fillPrice:      { label: "Fill Price",         color: "#8b5cf6", dash: "4 2" },
 };
 
-export function CumulativeVWAP({ trades, arrivalPrice }: CumulativeVWAPProps) {
-  const data = buildData(trades);
+export function CumulativeVWAP({ trades, arrivalPrice, marketVwap }: CumulativeVWAPProps) {
+  // Inject market VWAP as a constant field on every data point so it
+  // appears in the legend and supports click-to-mute like the other series.
+  const rawData = buildData(trades);
+  const data: DataPoint[] = rawData.map((d) => ({
+    ...d,
+    ...(marketVwap !== null ? { marketVwapLine: marketVwap } : {}),
+  }));
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
   if (data.length === 0) {
@@ -88,6 +99,7 @@ export function CumulativeVWAP({ trades, arrivalPrice }: CumulativeVWAPProps) {
 
   const allPrices = data.flatMap((d) => [d.runningFillAvg, d.fillPrice]);
   if (arrivalPrice !== null) allPrices.push(arrivalPrice);
+  if (marketVwap !== null) allPrices.push(marketVwap);
   const pMin = Math.min(...allPrices);
   const pMax = Math.max(...allPrices);
   const pad = (pMax - pMin) * 0.08 || pMin * 0.001;
@@ -103,7 +115,7 @@ export function CumulativeVWAP({ trades, arrivalPrice }: CumulativeVWAPProps) {
   return (
     <ChartCard
       title="Cumulative Fill VWAP"
-      subtitle="Running avg fill price vs arrival price — click legend to mute"
+      subtitle="Running avg fill · market VWAP · fill prices — click legend to mute"
     >
       <ResponsiveContainer width="100%" height={260}>
         <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
@@ -132,6 +144,11 @@ export function CumulativeVWAP({ trades, arrivalPrice }: CumulativeVWAPProps) {
                   {!hidden.has("runningFillAvg") && (
                     <p className="text-emerald-600 dark:text-emerald-400">
                       Avg Fill: <span className="font-semibold tabular-nums">{d.runningFillAvg.toFixed(4)}</span>
+                    </p>
+                  )}
+                  {!hidden.has("marketVwapLine") && d.marketVwapLine !== undefined && (
+                    <p className="text-blue-600 dark:text-blue-400">
+                      Mkt VWAP: <span className="font-semibold tabular-nums">{d.marketVwapLine.toFixed(4)}</span>
                     </p>
                   )}
                   {!hidden.has("fillPrice") && (
@@ -190,6 +207,19 @@ export function CumulativeVWAP({ trades, arrivalPrice }: CumulativeVWAPProps) {
             activeDot={{ r: 4 }}
             hide={hidden.has("runningFillAvg")}
           />
+          {/* Market VWAP — only rendered when Bloomberg enrichment is available */}
+          {marketVwap !== null && (
+            <Line
+              type="monotone"
+              dataKey="marketVwapLine"
+              stroke="#3b82f6"
+              strokeWidth={2}
+              strokeDasharray="6 3"
+              dot={false}
+              activeDot={{ r: 4 }}
+              hide={hidden.has("marketVwapLine")}
+            />
+          )}
           <Line
             type="monotone"
             dataKey="fillPrice"
