@@ -41,20 +41,23 @@ export function ExecutionTimeline({ trades, arrivalPrice }: ExecutionTimelinePro
     );
   }
 
+  // Use lastFillTime — the time when the slice completed execution.
+  // firstFillTime falls back to orderTime when only one time column is
+  // mapped, causing every point to cluster at the parent-order creation
+  // time.  lastFillTime is the most reliable per-fill timestamp.
   const points: Point[] = trades.map((t) => ({
-    t: t.firstFillTime.getTime(),
+    t: t.lastFillTime.getTime(),
     price: t.avgFillPrice,
     qty: t.orderQty,
     label: t.orderId,
   }));
 
-  // Format epoch ms as HH:MM:SS for the x-axis
+  // Format epoch ms as HH:MM:SS UTC so it matches the timestamps shown
+  // elsewhere in the tool and is unambiguous for FIX data (which is UTC).
   function fmtTime(ms: number): string {
-    return new Date(ms).toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
+    const d = new Date(ms);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
   }
 
   const maxQty = Math.max(...points.map((p) => p.qty));
@@ -109,7 +112,7 @@ export function ExecutionTimeline({ trades, arrivalPrice }: ExecutionTimelinePro
                   <p className="text-gray-800 dark:text-gray-200">
                     Qty: <span className="font-semibold tabular-nums">{d.qty.toLocaleString()}</span>
                   </p>
-                  <p className="text-gray-500 dark:text-gray-400">{fmtTime(d.t)}</p>
+                  <p className="text-gray-500 dark:text-gray-400 font-mono">{fmtTime(d.t)}</p>
                 </div>
               );
             }}
