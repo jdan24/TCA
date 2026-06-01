@@ -93,7 +93,7 @@ export function FileDropZone({ onComplete, mode = "multi" }: FileDropZoneProps) 
         setPhase({ tag: "error", message });
       }
     },
-    [onComplete]
+    [onComplete, mode]
   );
 
   // ── Mapping confirmed ────────────────────────────────────────────────────

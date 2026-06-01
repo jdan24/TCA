@@ -198,6 +198,7 @@ export interface TCAStore {
 // ── FIX 4.x / 5.0 tag constants ──────────────────────────────────────────────
 export const FIX_TAGS = {
   ClOrdID: 11,
+  ExecID: 17,
   Symbol: 55,
   Side: 54,
   OrderQty: 38,

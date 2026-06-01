@@ -197,7 +197,7 @@ function aggregatePerFill(messages: FixMsg[]): TradeRecord[] {
     if (lastQty <= 0 || lastPx <= 0) continue;
 
     const clOrdId      = tag(msg, FIX_TAGS.ClOrdID);
-    const execId       = msg["17"]; // ExecID — not in FIX_TAGS, read directly
+    const execId       = tag(msg, FIX_TAGS.ExecID);
     const transactTime = tag(msg, FIX_TAGS.TransactTime);
     const symbol       = tag(msg, FIX_TAGS.Symbol);
     const sideRaw      = tag(msg, FIX_TAGS.Side);
