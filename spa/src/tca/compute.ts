@@ -30,14 +30,22 @@ export function computeAll(
     const e = enrichment[trade.orderId];
     const rev = computeReversion(trade, e);
 
-    // computeOrderVol is called once per trade and destructured
+    // For orders ≤ 5 min, 1-min bars are too coarse — pass empty bars to force
+    // tick-midpoint fallback in computeMarketTWAP and computeOrderVol.
+    // e.barsSnapshot is still used below for computeDailyVolFromBars (MI).
+    const SHORT_MS = 5 * 60_000;
+    const isShortOrder =
+      trade.lastFillTime.getTime() - trade.orderTime.getTime() <= SHORT_MS;
+    const barsForBenchmarks = isShortOrder ? [] : (e?.barsSnapshot ?? []);
+
+    // computeOrderVol: use tick fallback for short orders (same as TWAP)
     const vol = e
-      ? computeOrderVol(trade, e.barsSnapshot, e.bidAskTicks)
+      ? computeOrderVol(trade, barsForBenchmarks, e.bidAskTicks)
       : { price: null, bps: null };
 
-    // Market TWAP: avg of close prices within [orderTime, lastFillTime]
+    // Market TWAP: avg of (open+close)/2 per bar (or tick mids for short orders)
     const marketTWAP = e
-      ? computeMarketTWAP(e.barsSnapshot, e.bidAskTicks, trade.orderTime, trade.lastFillTime)
+      ? computeMarketTWAP(barsForBenchmarks, e.bidAskTicks, trade.orderTime, trade.lastFillTime)
       : null;
 
     return {

@@ -426,6 +426,11 @@ interface TradeTableProps {
   results: TCAResult[];
   /** Optional title override for Mode 2 (Single Order). */
   title?: string;
+  /**
+   * When true, only raw input columns are shown (no Bloomberg-dependent
+   * metrics).  Used in the Single Order Fill Detail table.
+   */
+  hideMetrics?: boolean;
 }
 
 const PAGE_SIZES = [10, 25, 50] as const;
@@ -438,7 +443,15 @@ const DEFAULT_VISIBILITY: VisibilityState = {
   // all visible by default — omitting from this map means visible
 };
 
-export function TradeTable({ trades, results, title = "Trade Detail" }: TradeTableProps) {
+// Columns that require Bloomberg enrichment — hidden when hideMetrics=true
+const METRIC_COLUMN_IDS = new Set([
+  "timeToFill_ms", "IS_bps", "VWAP_dev_bps", "marketVWAP_price",
+  "TWAP_dev_bps", "MI_bps", "reversion_1m_bps", "reversion_5m_bps",
+  "reversion_30m_bps", "reversion_EOD_bps", "TWAS_bps",
+  "vol_during_order_price", "vol_during_order_bps",
+]);
+
+export function TradeTable({ trades, results, title = "Trade Detail", hideMetrics = false }: TradeTableProps) {
   const aggregationFilter = useTCAStore((s) => s.aggregationFilter);
   const setAggregationFilter = useTCAStore((s) => s.setAggregationFilter);
 
@@ -466,9 +479,16 @@ export function TradeTable({ trades, results, title = "Trade Detail" }: TradeTab
   });
   const [colMenuOpen, setColMenuOpen] = useState(false);
 
+  const visibleColumns = hideMetrics
+    ? COLUMNS.filter((c) => {
+        const id = (c as { accessorKey?: string }).accessorKey ?? "";
+        return !METRIC_COLUMN_IDS.has(id);
+      })
+    : COLUMNS;
+
   const table = useReactTable({
     data,
-    columns: COLUMNS,
+    columns: visibleColumns,
     state: { sorting, globalFilter, columnVisibility, pagination },
     onSortingChange: setSorting,
     onGlobalFilterChange: (v: unknown) => {

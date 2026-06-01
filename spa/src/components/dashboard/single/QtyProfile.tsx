@@ -17,6 +17,7 @@ import { ChartCard, EmptyState } from "@/components/dashboard/dashboardUtils";
 
 interface QtyProfileProps {
   trades: TradeRecord[];
+  side?: "BUY" | "SELL";
 }
 
 const BUCKET_MS = 5 * 60 * 1_000; // 5 minutes
@@ -30,22 +31,22 @@ interface Bucket {
 function buildBuckets(trades: TradeRecord[]): Bucket[] {
   if (trades.length === 0) return [];
 
-  const firstMs = Math.min(...trades.map((t) => t.firstFillTime.getTime()));
-  const lastMs = Math.max(...trades.map((t) => t.lastFillTime.getTime()));
+  // Use lastFillTime — the time each slice completed — consistent with the
+  // Execution Timeline and matching how per-fill FIX records are parsed.
+  const firstMs = Math.min(...trades.map((t) => t.lastFillTime.getTime()));
+  const lastMs  = Math.max(...trades.map((t) => t.lastFillTime.getTime()));
   const nBuckets = Math.max(1, Math.ceil((lastMs - firstMs) / BUCKET_MS) + 1);
 
   const buckets: Bucket[] = Array.from({ length: nBuckets }, (_, i) => {
     const startMs = firstMs + i * BUCKET_MS;
     const d = new Date(startMs);
-    const label = d.toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const label = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
     return { label, qty: 0, startMs };
   });
 
   for (const t of trades) {
-    const fillMs = t.firstFillTime.getTime();
+    const fillMs = t.lastFillTime.getTime();
     const idx = Math.floor((fillMs - firstMs) / BUCKET_MS);
     const bucket = buckets[Math.min(idx, nBuckets - 1)];
     if (bucket) bucket.qty += t.orderQty;
@@ -54,8 +55,11 @@ function buildBuckets(trades: TradeRecord[]): Bucket[] {
   return buckets;
 }
 
-export function QtyProfile({ trades }: QtyProfileProps) {
+export function QtyProfile({ trades, side }: QtyProfileProps) {
   const buckets = buildBuckets(trades);
+  const resolvedSide = side ?? trades[0]?.side ?? "BUY";
+  // BUY = blue (#3b82f6), SELL = red (#ef4444)
+  const barColor = resolvedSide === "SELL" ? "#ef4444" : "#3b82f6";
 
   if (buckets.length === 0) {
     return (
@@ -66,7 +70,7 @@ export function QtyProfile({ trades }: QtyProfileProps) {
   }
 
   return (
-    <ChartCard title="Qty Profile" subtitle="Filled contracts per 5-min bucket">
+    <ChartCard title="Qty Profile" subtitle={`Filled contracts per 5-min bucket · ${resolvedSide}`}>
       <ResponsiveContainer width="100%" height={220}>
         <BarChart data={buckets} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" vertical={false} />
@@ -97,7 +101,7 @@ export function QtyProfile({ trades }: QtyProfileProps) {
               );
             }}
           />
-          <Bar dataKey="qty" fill="#3b82f6" radius={[3, 3, 0, 0]} maxBarSize={40} />
+          <Bar dataKey="qty" fill={barColor} radius={[3, 3, 0, 0]} maxBarSize={40} />
         </BarChart>
       </ResponsiveContainer>
     </ChartCard>

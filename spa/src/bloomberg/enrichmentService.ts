@@ -136,6 +136,11 @@ function endOfDayUtc(d: Date): Date {
   return eod;
 }
 
+// ── Short-order threshold ─────────────────────────────────────────────────────
+
+/** Orders ≤ this duration use bid/ask tick midpoints for VWAP instead of bars. */
+const SHORT_ORDER_THRESHOLD_MS = 5 * 60_000; // 5 minutes
+
 // ── Bar analysis helpers ──────────────────────────────────────────────────────
 
 /**
@@ -258,7 +263,27 @@ async function enrichOneTrade(
   if (arrivalPrice === null) return null; // can't enrich without arrival price
 
   // ── VWAP (execution window) ──────────────────────────────────────────────
-  const vwap = computeVwap(bars, orderTime, lastFillTime) ?? arrivalPrice;
+  // For short orders (≤ 5 min) use tick midpoints: 1-min bars are too coarse
+  // (only 0–5 bars) and minute-boundary rounding introduces excessive noise.
+  const isShortOrder =
+    lastFillTime.getTime() - orderTime.getTime() <= SHORT_ORDER_THRESHOLD_MS;
+
+  const vwap = isShortOrder
+    ? (() => {
+        // rawTicks is already available; bidAskTicks is declared further below
+        const fromMs = orderTime.getTime();
+        const toMs   = lastFillTime.getTime();
+        const mids   = rawTicks
+          .filter((tk) => {
+            const ms = new Date(tk.time).getTime();
+            return ms >= fromMs && ms <= toMs;
+          })
+          .map((tk) => (tk.bid + tk.ask) / 2);
+        return mids.length > 0
+          ? mids.reduce((a, b) => a + b, 0) / mids.length
+          : null;
+      })() ?? arrivalPrice
+    : computeVwap(bars, orderTime, lastFillTime) ?? arrivalPrice;
 
   // ── Reference fields ─────────────────────────────────────────────────────
   // Vol fallback chain — try each Bloomberg field in order; if none returns a

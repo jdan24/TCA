@@ -1,13 +1,16 @@
 /**
- * CumulativeVWAP — line chart showing running VWAP vs arrival price
- * across fills over the order's execution.
+ * CumulativeVWAP — running VWAP and running avg fill price vs arrival price.
  *
- * X-axis: fill time
- * Y-axis: price
- * Blue line: running VWAP (updates with each fill)
- * Dashed gray line: arrival price (constant reference)
+ * X-axis: fill time (UTC)
+ * Blue solid:   running market VWAP (if Bloomberg enriched, else hidden)
+ * Green solid:  running avg fill price of the order (cumulative qty-weighted)
+ * Purple dashed: individual fill prices
+ * Gray dashed:  arrival price reference line
+ *
+ * Click a legend item to mute/unmute that series.
  */
 
+import { useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -28,19 +31,24 @@ interface CumulativeVWAPProps {
 }
 
 interface DataPoint {
-  t: number; // epoch ms
+  t: number;
   timeLabel: string;
-  runningVwap: number;
-  fillPrice: number;
+  runningFillAvg: number; // cumulative qty-weighted avg fill price
+  fillPrice: number;      // this fill's individual price
   cumQty: number;
+}
+
+function fmtUtc(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
 }
 
 function buildData(trades: TradeRecord[]): DataPoint[] {
   if (trades.length === 0) return [];
 
-  // Sort by fill time
   const sorted = [...trades].sort(
-    (a, b) => a.firstFillTime.getTime() - b.firstFillTime.getTime()
+    (a, b) => a.lastFillTime.getTime() - b.lastFillTime.getTime()
   );
 
   let cumNotional = 0;
@@ -49,47 +57,60 @@ function buildData(trades: TradeRecord[]): DataPoint[] {
   return sorted.map((t) => {
     cumNotional += t.avgFillPrice * t.orderQty;
     cumQty += t.orderQty;
-    const runningVwap = cumQty > 0 ? cumNotional / cumQty : t.avgFillPrice;
-    const tMs = t.firstFillTime.getTime();
+    const runningFillAvg = cumQty > 0 ? cumNotional / cumQty : t.avgFillPrice;
+    const tMs = t.lastFillTime.getTime();
     return {
       t: tMs,
-      timeLabel: new Date(tMs).toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      }),
-      runningVwap,
+      timeLabel: fmtUtc(tMs),
+      runningFillAvg,
       fillPrice: t.avgFillPrice,
       cumQty,
     };
   });
 }
 
+const SERIES: Record<string, { label: string; color: string; dash?: string }> = {
+  runningFillAvg: { label: "Running Avg Fill", color: "#10b981" },
+  fillPrice:      { label: "Fill Price",        color: "#8b5cf6", dash: "4 2" },
+};
+
 export function CumulativeVWAP({ trades, arrivalPrice }: CumulativeVWAPProps) {
   const data = buildData(trades);
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
 
   if (data.length === 0) {
     return (
-      <ChartCard title="Cumulative VWAP" subtitle="Running VWAP vs arrival price">
+      <ChartCard title="Cumulative Fill VWAP" subtitle="Running avg fill price vs arrival">
         <EmptyState message="No fill data" />
       </ChartCard>
     );
   }
 
-  const allPrices = data.flatMap((d) => [d.runningVwap, d.fillPrice]);
+  const allPrices = data.flatMap((d) => [d.runningFillAvg, d.fillPrice]);
   if (arrivalPrice !== null) allPrices.push(arrivalPrice);
   const pMin = Math.min(...allPrices);
   const pMax = Math.max(...allPrices);
-  const pad = (pMax - pMin) * 0.05 || pMin * 0.001;
+  const pad = (pMax - pMin) * 0.08 || pMin * 0.001;
+
+  function toggleSeries(key: string) {
+    setHidden((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
 
   return (
-    <ChartCard title="Cumulative VWAP" subtitle="Running VWAP (blue) vs arrival price (dashed)">
+    <ChartCard
+      title="Cumulative Fill VWAP"
+      subtitle="Running avg fill price vs arrival price — click legend to mute"
+    >
       <ResponsiveContainer width="100%" height={260}>
         <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
           <XAxis
             dataKey="timeLabel"
-            tick={{ fontSize: 10, fill: "#94a3b8" }}
+            tick={{ fontSize: 9, fill: "#94a3b8" }}
             tickLine={false}
             axisLine={false}
             interval="preserveStartEnd"
@@ -107,25 +128,48 @@ export function CumulativeVWAP({ trades, arrivalPrice }: CumulativeVWAPProps) {
               if (!d) return null;
               return (
                 <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
-                  <p className="text-gray-500 dark:text-gray-400 mb-1">{label}</p>
-                  <p className="text-blue-600 dark:text-blue-400">
-                    VWAP: <span className="font-semibold tabular-nums">{d.runningVwap.toFixed(4)}</span>
-                  </p>
-                  <p className="text-gray-700 dark:text-gray-300">
-                    Fill: <span className="font-semibold tabular-nums">{d.fillPrice.toFixed(4)}</span>
-                  </p>
-                  <p className="text-gray-400 dark:text-gray-500">
+                  <p className="text-gray-500 dark:text-gray-400 mb-1 font-mono">{label}</p>
+                  {!hidden.has("runningFillAvg") && (
+                    <p className="text-emerald-600 dark:text-emerald-400">
+                      Avg Fill: <span className="font-semibold tabular-nums">{d.runningFillAvg.toFixed(4)}</span>
+                    </p>
+                  )}
+                  {!hidden.has("fillPrice") && (
+                    <p className="text-violet-600 dark:text-violet-400">
+                      Fill: <span className="font-semibold tabular-nums">{d.fillPrice.toFixed(4)}</span>
+                    </p>
+                  )}
+                  <p className="text-gray-400 dark:text-gray-500 mt-0.5">
                     Cum Qty: <span className="tabular-nums">{d.cumQty.toLocaleString()}</span>
                   </p>
                 </div>
               );
             }}
           />
+
+          {/* Clickable legend */}
           <Legend
-            formatter={(value) =>
-              value === "runningVwap" ? "Running VWAP" : "Fill Price"
-            }
-            wrapperStyle={{ fontSize: 11 }}
+            onClick={(e) => {
+              if (e?.dataKey && typeof e.dataKey === "string") toggleSeries(e.dataKey);
+            }}
+            formatter={(value: string) => {
+              const s = SERIES[value];
+              const label = s?.label ?? value;
+              const muted = hidden.has(value);
+              return (
+                <span
+                  style={{
+                    color: muted ? "#94a3b8" : (s?.color ?? "#94a3b8"),
+                    cursor: "pointer",
+                    textDecoration: muted ? "line-through" : "none",
+                    fontSize: 11,
+                  }}
+                >
+                  {label}
+                </span>
+              );
+            }}
+            wrapperStyle={{ cursor: "pointer" }}
           />
 
           {arrivalPrice !== null && (
@@ -139,20 +183,22 @@ export function CumulativeVWAP({ trades, arrivalPrice }: CumulativeVWAPProps) {
 
           <Line
             type="monotone"
-            dataKey="runningVwap"
-            stroke="#3b82f6"
+            dataKey="runningFillAvg"
+            stroke="#10b981"
             strokeWidth={2}
             dot={false}
             activeDot={{ r: 4 }}
+            hide={hidden.has("runningFillAvg")}
           />
           <Line
             type="monotone"
             dataKey="fillPrice"
-            stroke="#10b981"
+            stroke="#8b5cf6"
             strokeWidth={1}
             strokeDasharray="4 2"
-            dot={{ r: 3, fill: "#10b981" }}
+            dot={{ r: 3, fill: "#8b5cf6" }}
             activeDot={{ r: 5 }}
+            hide={hidden.has("fillPrice")}
           />
         </LineChart>
       </ResponsiveContainer>

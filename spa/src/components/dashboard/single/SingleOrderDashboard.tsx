@@ -121,7 +121,7 @@ export function SingleOrderDashboard({
       <QtyProfile trades={trades} />
 
       {/* ── Fill detail table ────────────────────────────────────────────── */}
-      <TradeTable trades={trades} results={results} title="Fill Detail" />
+      <TradeTable trades={trades} results={results} title="Fill Detail" hideMetrics />
     </div>
   );
 }

@@ -61,9 +61,15 @@ export function ExecutionTimeline({ trades, arrivalPrice }: ExecutionTimelinePro
   }
 
   const maxQty = Math.max(...points.map((p) => p.qty));
+  // BUY = blue (#3b82f6), SELL = red (#ef4444) — matches ParentSummaryCard badge
+  const side = trades[0]?.side ?? "BUY";
+  const fillColor = side === "SELL" ? "#ef4444" : "#3b82f6";
 
   return (
-    <ChartCard title="Execution Timeline" subtitle="Fill price vs time — point size ∝ qty">
+    <ChartCard
+      title="Execution Timeline"
+      subtitle={`Fill price vs time — ${side} · point size ∝ qty`}
+    >
       <ResponsiveContainer width="100%" height={260}>
         <ScatterChart margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
@@ -120,7 +126,7 @@ export function ExecutionTimeline({ trades, arrivalPrice }: ExecutionTimelinePro
 
           <Scatter
             data={points}
-            fill="#3b82f6"
+            fill={fillColor}
             fillOpacity={0.75}
           />
         </ScatterChart>
