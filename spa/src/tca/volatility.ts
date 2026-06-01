@@ -1,13 +1,23 @@
 /**
- * Intraday volatility during the order execution window.
+ * 1σ of market price during the order execution window [orderTime, lastFillTime].
  *
- * computeOrderVol() returns:
- *   price — 1σ (sample std dev) of intraday prices during [orderTime, lastFillTime]
- *   bps   — price / avgFillPrice × 10,000
+ * Answers: "how much did the market price vary while this order was executing?"
+ *
+ * Method
+ * ──────
+ * For each 1-min bar in the window we take (high + low) / 2 — the bar
+ * midpoint.  The midpoint represents where the market genuinely spent time
+ * during that minute, rather than the close (last random tick of the minute)
+ * which is a single noisy endpoint.
+ *
+ * We then compute the sample standard deviation of those midpoints.
+ * Result: σ_price is in the instrument's native price units (handles for
+ * futures); σ_bps normalises by the mean market midpoint so the percentage
+ * is relative to where the market was, not where the order filled.
  *
  * Source priority:
- *   1. Close prices from 1-min bars that fall within the order window
- *   2. Bid/ask mid prices from tick data (fallback when bars are sparse)
+ *   1. Bar midpoints (high + low) / 2 for 1-min bars in the window (≥ 2 bars)
+ *   2. Bid/ask mid prices from tick data (fallback for sub-minute orders)
  *   3. null when fewer than 2 samples are available
  */
 
@@ -21,48 +31,57 @@ function sampleStdDev(values: number[]): number | null {
   return Math.sqrt(variance);
 }
 
+function mean(values: number[]): number {
+  return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
 export function computeOrderVol(
   trade: TradeRecord,
   bars: IntradayBar[],
   ticks: BidAskTick[],
 ): { price: number | null; bps: number | null } {
   const ONE_MIN_MS = 60_000;
-  // Align to bar minute boundaries (same as VWAP/TWAP) so all three
-  // benchmarks cover the identical set of bars.
-  const fromBarMs = Math.floor(trade.orderTime.getTime()   / ONE_MIN_MS) * ONE_MIN_MS;
+  // Align to bar minute boundaries (same as VWAP/TWAP/participation-rate).
+  const fromBarMs = Math.floor(trade.orderTime.getTime()    / ONE_MIN_MS) * ONE_MIN_MS;
   const toBarMs   = Math.floor(trade.lastFillTime.getTime() / ONE_MIN_MS) * ONE_MIN_MS;
 
-  // Keep exact ms for tick fallback (ticks are sub-minute, no rounding needed)
+  // Exact ms used for the tick fallback only (ticks are sub-minute).
   const fromMs = trade.orderTime.getTime();
   const toMs   = trade.lastFillTime.getTime();
 
-  // ── 1. Try close prices from 1-min bars ─────────────────────────────────
-  const barPrices = bars
+  // ── 1. Bar midpoints: (high + low) / 2 ──────────────────────────────────
+  // The midpoint is the centre of the bar's price range and better represents
+  // where the market was during the minute than the close (final random tick).
+  const barMidpoints = bars
     .filter((b) => {
       const t = new Date(b.time).getTime();
       return t >= fromBarMs && t <= toBarMs;
     })
-    .map((b) => b.close);
+    .map((b) => (b.high + b.low) / 2);
 
-  const prices = barPrices.length >= 2 ? barPrices : null;
+  const samples: number[] =
+    barMidpoints.length >= 2
+      ? barMidpoints
+      : (() => {
+          // ── 2. Tick-mid fallback for very short orders ───────────────────
+          return ticks
+            .filter((tk) => {
+              const ms = tk.time.getTime();
+              return ms >= fromMs && ms <= toMs;
+            })
+            .map((tk) => (tk.bid + tk.ask) / 2);
+        })();
 
-  // ── 2. Fallback: mid prices from bid/ask ticks ───────────────────────────
-  const midPrices =
-    prices === null
-      ? ticks
-          .filter((t) => {
-            const ms = t.time.getTime();
-            return ms >= fromMs && ms <= toMs;
-          })
-          .map((t) => (t.bid + t.ask) / 2)
-      : null;
-
-  const samples = prices ?? midPrices ?? [];
   if (samples.length < 2) return { price: null, bps: null };
 
   const sigma = sampleStdDev(samples);
-  if (sigma === null || trade.avgFillPrice === 0) return { price: null, bps: null };
+  if (sigma === null) return { price: null, bps: null };
 
-  const bps = (sigma / trade.avgFillPrice) * 10_000;
+  // Normalise by the mean market price during the window (not the fill price)
+  // so the bps figure reflects market movement, not execution quality.
+  const marketMean = mean(samples);
+  if (marketMean === 0) return { price: sigma, bps: null };
+
+  const bps = (sigma / marketMean) * 10_000;
   return { price: sigma, bps };
 }
