@@ -139,24 +139,39 @@ function endOfDayUtc(d: Date): Date {
 // ── Bar analysis helpers ──────────────────────────────────────────────────────
 
 /**
- * VWAP (typical-price weighted) over 1-min bars in [from, to).
- * Returns null when there are no bars or zero total volume.
+ * Market VWAP (volume-weighted close price) over 1-min bars covering
+ * the window [from, to].
+ *
+ * Boundary alignment: bar timestamps represent the bar's OPEN time, so
+ * a bar at T covers [T, T+60s).  We round both boundaries DOWN to the
+ * nearest minute so we include:
+ *   – the bar that was open when the order was submitted (even if the
+ *     order started 31 seconds into that bar)
+ *   – the bar that was open at the last fill
+ *
+ * Price formula: close × volume.  The close is the last actual trade
+ * price in the bar — a better proxy for true VWAP than the typical
+ * price (H+L+C)/3, which can be skewed by brief spike highs/lows.
+ *
+ * Returns null when no bars fall in the window or total volume is 0.
  */
 function computeVwap(
   bars: IntradayBar[],
   from: Date,
   to: Date,
 ): number | null {
-  const fromMs = from.getTime();
-  const toMs = to.getTime();
+  const ONE_MIN_MS = 60_000;
+  // Align to bar minute boundaries so partial start/end bars are included
+  const fromBarMs = Math.floor(from.getTime() / ONE_MIN_MS) * ONE_MIN_MS;
+  const toBarMs   = Math.floor(to.getTime()   / ONE_MIN_MS) * ONE_MIN_MS;
+
   let sumPV = 0;
-  let sumV = 0;
+  let sumV  = 0;
   for (const bar of bars) {
     const barMs = new Date(bar.time).getTime();
-    if (barMs >= fromMs && barMs < toMs) {
-      const typical = (bar.high + bar.low + bar.close) / 3;
-      sumPV += typical * bar.volume;
-      sumV += bar.volume;
+    if (barMs >= fromBarMs && barMs <= toBarMs) {
+      sumPV += bar.close * bar.volume;
+      sumV  += bar.volume;
     }
   }
   return sumV > 0 ? sumPV / sumV : null;

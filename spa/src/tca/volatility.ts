@@ -26,14 +26,21 @@ export function computeOrderVol(
   bars: IntradayBar[],
   ticks: BidAskTick[],
 ): { price: number | null; bps: number | null } {
+  const ONE_MIN_MS = 60_000;
+  // Align to bar minute boundaries (same as VWAP/TWAP) so all three
+  // benchmarks cover the identical set of bars.
+  const fromBarMs = Math.floor(trade.orderTime.getTime()   / ONE_MIN_MS) * ONE_MIN_MS;
+  const toBarMs   = Math.floor(trade.lastFillTime.getTime() / ONE_MIN_MS) * ONE_MIN_MS;
+
+  // Keep exact ms for tick fallback (ticks are sub-minute, no rounding needed)
   const fromMs = trade.orderTime.getTime();
-  const toMs = trade.lastFillTime.getTime();
+  const toMs   = trade.lastFillTime.getTime();
 
   // ── 1. Try close prices from 1-min bars ─────────────────────────────────
   const barPrices = bars
     .filter((b) => {
       const t = new Date(b.time).getTime();
-      return t >= fromMs && t <= toMs;
+      return t >= fromBarMs && t <= toBarMs;
     })
     .map((b) => b.close);
 

@@ -14,13 +14,21 @@ import type { BidAskTick, BloombergEnrichment, IntradayBar, TradeRecord } from "
 import { sideSign, toBps } from "./tcaUtils";
 
 /**
- * Market TWAP over [from, to].
+ * Market TWAP over the order execution window [from, to].
+ *
+ * Boundary alignment: same minute-floor rule as computeVwap — we include
+ * the bar that was open at order start and the bar open at last fill, not
+ * just bars that started strictly inside (from, to).
+ *
+ * Price per bar: (open + close) / 2 — the midpoint of the first and last
+ * trade in the bar.  This is a better time-weighted estimate than using
+ * only the close (end-of-bar price) because it accounts for where price
+ * spent more time during the minute.
  *
  * Source priority:
- *   1. Simple average of 1-min bar close prices within the window.
- *   2. Average of bid/ask mid prices from ticks (fallback for sub-minute orders
- *      where no complete bar falls inside the window).
- *   3. null when neither source yields any samples.
+ *   1. Bar midpoints ((open + close) / 2) for bars covering the window.
+ *   2. Bid/ask mid prices from ticks (fallback for sub-minute orders).
+ *   3. null when neither source has any samples.
  */
 export function computeMarketTWAP(
   bars: IntradayBar[],
@@ -28,22 +36,25 @@ export function computeMarketTWAP(
   from: Date,
   to: Date,
 ): number | null {
-  const fromMs = from.getTime();
-  const toMs = to.getTime();
+  const ONE_MIN_MS = 60_000;
+  const fromBarMs = Math.floor(from.getTime() / ONE_MIN_MS) * ONE_MIN_MS;
+  const toBarMs   = Math.floor(to.getTime()   / ONE_MIN_MS) * ONE_MIN_MS;
 
-  // Prefer close prices from 1-min bars
-  const closes = bars
+  // Prefer bar midpoints
+  const midpoints = bars
     .filter((b) => {
       const t = new Date(b.time).getTime();
-      return t >= fromMs && t <= toMs;
+      return t >= fromBarMs && t <= toBarMs;
     })
-    .map((b) => b.close);
+    .map((b) => (b.open + b.close) / 2);
 
-  if (closes.length >= 1) {
-    return closes.reduce((a, b) => a + b, 0) / closes.length;
+  if (midpoints.length >= 1) {
+    return midpoints.reduce((a, b) => a + b, 0) / midpoints.length;
   }
 
   // Fallback: average of bid/ask mid prices from ticks
+  const fromMs = from.getTime();
+  const toMs   = to.getTime();
   const mids = ticks
     .filter((tk) => {
       const ms = tk.time.getTime();
