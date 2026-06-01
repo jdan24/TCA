@@ -419,3 +419,138 @@ export async function enrichAllTrades(
 
   return result;
 }
+
+/**
+ * Single Order enrichment — ONE set of Bloomberg calls for the full
+ * parent order window, shared across all fills.
+ *
+ * In multi-order mode, enrichAllTrades calls enrichOneTrade once per
+ * fill → N bar requests + N tick requests + N snapshots.  For a
+ * 50-fill order that is 150 Bloomberg API calls.  Since all fills here
+ * are the same symbol and the relevant window is [firstOrderTime,
+ * lastFillTime], we only need:
+ *   1 reference data call
+ *   1 intraday bar request  (parent window − 5 min → EOD)
+ *   1 bid/ask tick request  (parent window − 2 min → lastFill + 30 s)
+ *   1 arrival-price snapshot (at parent order start)
+ *
+ * The resulting BloombergEnrichment is then stored under every fill's
+ * orderId so computeAll() and computeParentOrderSummary() work unchanged.
+ */
+export async function enrichSingleOrder(
+  trades: TradeRecord[],
+  onProgress?: (progress: EnrichProgress) => void,
+  resolveSymbol: (ric: string) => string = (s) => s,
+): Promise<Record<string, BloombergEnrichment>> {
+  const result: Record<string, BloombergEnrichment> = {};
+  if (trades.length === 0) return result;
+
+  // All fills are the same parent order — derive the full execution window.
+  const firstTrade = trades[0]!;
+  const bbgSymbol  = resolveSymbol(firstTrade.symbol);
+
+  const orderTime    = new Date(Math.min(...trades.map((t) => t.orderTime.getTime())));
+  const lastFillTime = new Date(Math.max(...trades.map((t) => t.lastFillTime.getTime())));
+
+  // Parent fill-VWAP used as the reversion fallback (same as enrichOneTrade uses avgFillPrice)
+  const totalQty      = trades.reduce((s, t) => s + t.orderQty, 0);
+  const totalNotional = trades.reduce((s, t) => s + t.avgFillPrice * t.orderQty, 0);
+  const fillVwap      = totalQty > 0 ? totalNotional / totalQty : firstTrade.avgFillPrice;
+
+  onProgress?.({ done: 0, total: 1 });
+
+  // ── Reference data (one call) ─────────────────────────────────────────────
+  const refData = await fetchReference(bbgSymbol, [
+    "HIST_VOL_30D", "VOLATILITY_30D", "RETURN_VOL_30D_MID",
+    "CLOSE_TO_CLOSE_HIST_VOL_30D", "VOLUME_AVG_30D", "VOLUME_AVG_20D",
+  ]);
+
+  // ── Bars + ticks + snapshot (parallel, one call each) ─────────────────────
+  const barStart  = new Date(orderTime.getTime() - FIVE_MIN_MS);
+  const barEnd    = endOfDayUtc(lastFillTime);
+  const tickStart = new Date(orderTime.getTime() - 2 * ONE_MIN_MS);
+  const tickEnd   = new Date(lastFillTime.getTime() + 30_000);
+
+  const [rawBars, rawTickData, bridgeArrival] = await Promise.all([
+    fetchIntradayBars(bbgSymbol, toIso(barStart), toIso(barEnd), 1),
+    fetchBidAskTicks(bbgSymbol, toIso(tickStart), toIso(tickEnd)),
+    fetchArrivalPrice(bbgSymbol, toIso(orderTime)),
+  ]);
+
+  const bars     = shiftToUtc(rawBars,     barStart.getTime());
+  const rawTicks = shiftToUtc(rawTickData, tickStart.getTime());
+
+  const arrivalPrice = bridgeArrival ?? getPriceAtOrBefore(bars, orderTime);
+
+  onProgress?.({ done: 1, total: 1 });
+
+  if (arrivalPrice === null) return result; // can't proceed without arrival price
+
+  // ── VWAP (tick-based for short orders, bar-based otherwise) ───────────────
+  const isShortOrder =
+    lastFillTime.getTime() - orderTime.getTime() <= SHORT_ORDER_THRESHOLD_MS;
+
+  const vwap = isShortOrder
+    ? (() => {
+        const fromMs = orderTime.getTime();
+        const toMs   = lastFillTime.getTime();
+        const mids   = rawTicks
+          .filter((tk) => {
+            const ms = new Date(tk.time).getTime();
+            return ms >= fromMs && ms <= toMs;
+          })
+          .map((tk) => (tk.bid + tk.ask) / 2);
+        return mids.length > 0
+          ? mids.reduce((a, b) => a + b, 0) / mids.length
+          : null;
+      })() ?? arrivalPrice
+    : computeVwap(bars, orderTime, lastFillTime) ?? arrivalPrice;
+
+  // ── Reference fields ──────────────────────────────────────────────────────
+  const dailyVol = annualizedPctToDaily(
+    refData["HIST_VOL_30D"] ??
+    refData["VOLATILITY_30D"] ??
+    refData["RETURN_VOL_30D_MID"] ??
+    refData["CLOSE_TO_CLOSE_HIST_VOL_30D"],
+  ) || computeDailyVolFromBars(bars);
+
+  const adv =
+    typeof refData["VOLUME_AVG_30D"] === "number"
+      ? (refData["VOLUME_AVG_30D"] as number)
+      : typeof refData["VOLUME_AVG_20D"] === "number"
+        ? (refData["VOLUME_AVG_20D"] as number)
+        : 0;
+
+  // ── Reversion mark prices ─────────────────────────────────────────────────
+  const rev1mPrice  = getPriceAtOrBefore(bars, new Date(lastFillTime.getTime() + ONE_MIN_MS));
+  const rev5mPrice  = getPriceAtOrBefore(bars, new Date(lastFillTime.getTime() + FIVE_MIN_MS));
+  const rev30mPrice = getPriceAtOrBefore(bars, new Date(lastFillTime.getTime() + THIRTY_MIN_MS));
+  const eodPrice    = getEodClose(bars, lastFillTime);
+
+  // ── Bid/ask ticks (Date-typed) ────────────────────────────────────────────
+  const bidAskTicks: BidAskTick[] = rawTicks.map((t) => ({
+    time: new Date(t.time),
+    bid: t.bid,
+    ask: t.ask,
+  }));
+
+  // ── One shared enrichment entry applied to every fill ─────────────────────
+  const shared: BloombergEnrichment = {
+    arrivalPrice,
+    vwap,
+    adv,
+    dailyVol,
+    reversion1m:   rev1mPrice  ?? fillVwap,
+    reversion5m:   rev5mPrice  ?? fillVwap,
+    reversion30m:  rev30mPrice ?? fillVwap,
+    reversionEOD:  eodPrice    ?? fillVwap,
+    bidAskTicks,
+    barsSnapshot: bars,
+  };
+
+  for (const trade of trades) {
+    result[trade.orderId] = shared;
+  }
+
+  return result;
+}

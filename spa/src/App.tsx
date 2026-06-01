@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { enrichAllTrades, type EnrichProgress } from "@/bloomberg/enrichmentService";
+import { enrichAllTrades, enrichSingleOrder, type EnrichProgress } from "@/bloomberg/enrichmentService";
 import { Header } from "@/components/layout/Header";
 import { FileDropZone } from "@/components/upload/FileDropZone";
 import { ModeSelector } from "@/components/upload/ModeSelector";
@@ -32,8 +32,12 @@ function App() {
 
   async function handleFetchBloomberg() {
     if (rawTrades.length === 0 || !bloombergConnected || enrichProgress !== null) return;
-    setEnrichProgress({ done: 0, total: rawTrades.length });
-    const result = await enrichAllTrades(rawTrades, setEnrichProgress, symbolMap.resolve);
+    setEnrichProgress({ done: 0, total: mode === "single" ? 1 : rawTrades.length });
+    // Single Order mode: one set of Bloomberg calls for the full parent window.
+    // Multi-order mode: one call per trade (existing behaviour).
+    const result = mode === "single"
+      ? await enrichSingleOrder(rawTrades, setEnrichProgress, symbolMap.resolve)
+      : await enrichAllTrades(rawTrades, setEnrichProgress, symbolMap.resolve);
     setAllEnrichment(result);
     setEnrichProgress(null);
   }
