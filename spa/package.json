@@ -11,6 +11,7 @@
   "dependencies": {
     "@tanstack/react-table": "^8.21.3",
     "date-fns": "^4.3.0",
+    "html-to-image": "^1.11.13",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "papaparse": "^5.5.3",
