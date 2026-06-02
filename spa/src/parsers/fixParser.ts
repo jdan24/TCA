@@ -274,7 +274,18 @@ export function parseFixFile(file: File): Promise<TradeRecord[]> {
           return;
         }
 
-        const trades = aggregate(messages);
+        // Filter out individual legs of multi-leg orders.
+        // Rule: keep a message if tag 442 (MultiLegReportingType) is absent OR equals "3"
+        //   442 absent → plain single-leg fill → keep
+        //   442 = "3"  → spread-level fill → keep
+        //   442 = "1" or "2" → individual leg fill → drop
+        // If NO message in the file has tag 442, nothing is filtered (backward-compatible).
+        const mlrtKey = String(FIX_TAGS.MultiLegReportingType); // "442"
+        const filteredMessages = messages.filter(
+          (m) => !m[mlrtKey] || m[mlrtKey] === "3",
+        );
+
+        const trades = aggregate(filteredMessages);
 
         if (trades.length === 0) {
           reject(
@@ -328,7 +339,13 @@ export function parseFixFileSingleOrder(file: File): Promise<TradeRecord[]> {
           return;
         }
 
-        const trades = aggregatePerFill(messages);
+        // Same multi-leg filter as parseFixFile: drop individual legs (442=1/2), keep spreads (442=3).
+        const mlrtKey = String(FIX_TAGS.MultiLegReportingType);
+        const filteredMessages = messages.filter(
+          (m) => !m[mlrtKey] || m[mlrtKey] === "3",
+        );
+
+        const trades = aggregatePerFill(filteredMessages);
 
         if (trades.length === 0) {
           reject(

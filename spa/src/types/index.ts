@@ -229,6 +229,8 @@ export const FIX_TAGS = {
   TransactTime: 60,
   ExecType: 150,
   MsgType: 35,
+  /** 1=Single security  2=Individual leg  3=Multi-leg (spread) level — filter to 3 for spread TCA */
+  MultiLegReportingType: 442,
 } as const;
 
 export type FixTagKey = keyof typeof FIX_TAGS;
