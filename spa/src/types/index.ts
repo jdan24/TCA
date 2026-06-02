@@ -93,6 +93,8 @@ export interface ParentOrderSummary {
   marketVwap: number | null;        // Bloomberg market VWAP over the full order window
   /** Running market VWAP at each fill timestamp — null when Bloomberg not connected. */
   runningMarketVwap: Array<{ t: number; vwap: number }> | null;
+  /** Running market TWAP at each fill timestamp — null when Bloomberg not connected. */
+  runningMarketTwap: Array<{ t: number; twap: number }> | null;
 }
 
 // ── Multi-order aggregation types ─────────────────────────────────────────────

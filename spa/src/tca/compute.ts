@@ -167,6 +167,7 @@ export function computeParentOrderSummary(
   const isShortParent = lastFillTime.getTime() - orderTime.getTime() <= SHORT_MS_PARENT;
   let marketVwap: number | null = null;
   let runningMarketVwap: Array<{ t: number; vwap: number }> | null = null;
+  let runningMarketTwap: Array<{ t: number; twap: number }> | null = null;
 
   const sortedFills = [...trades].sort(
     (a, b) => a.lastFillTime.getTime() - b.lastFillTime.getTime()
@@ -238,6 +239,40 @@ export function computeParentOrderSummary(
     }
     runningMarketVwap = points.length > 0 ? points : null;
 
+    // Running TWAP: one point per fill, window = [orderTime, fillTime]
+    // Short orders: simple avg of last-traded prices (trade ticks) up to the fill second.
+    // Long orders: simple avg of bar midpoints ((open+close)/2) up to the fill minute.
+    const twapPoints: Array<{ t: number; twap: number }> = [];
+    for (const fill of sortedFills) {
+      const fillTimeMs = fill.lastFillTime.getTime();
+      let twap: number | null = null;
+
+      if (isShortParent) {
+        const fromMs = orderTime.getTime();
+        const prices: number[] = [];
+        for (const tk of e.tradeTicks) {
+          const ms = tk.time.getTime();
+          if (ms >= fromMs && ms <= fillTimeMs) {
+            prices.push(tk.price);
+          }
+        }
+        twap = prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : null;
+      } else {
+        const fillMinuteMs = Math.floor(fillTimeMs / ONE_MIN_MS) * ONE_MIN_MS;
+        const mids: number[] = [];
+        for (const bar of e.barsSnapshot) {
+          const barMs = new Date(bar.time).getTime();
+          if (barMs >= fromBarMs && barMs <= fillMinuteMs) {
+            mids.push((bar.open + bar.close) / 2);
+          }
+        }
+        twap = mids.length > 0 ? mids.reduce((a, b) => a + b, 0) / mids.length : null;
+      }
+
+      if (twap !== null) twapPoints.push({ t: fillTimeMs, twap });
+    }
+    runningMarketTwap = twapPoints.length > 0 ? twapPoints : null;
+
     break; // same security for all slices — first enriched trade suffices
   }
 
@@ -256,5 +291,6 @@ export function computeParentOrderSummary(
     participationRate,
     marketVwap,
     runningMarketVwap,
+    runningMarketTwap,
   };
 }

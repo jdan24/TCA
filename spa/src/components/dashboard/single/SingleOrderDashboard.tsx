@@ -7,7 +7,7 @@
  *   ┌─ Toolbar ──────────────────────────────────────────────────────────┐
  *   ├─ ParentSummaryCard (full width) ───────────────────────────────────┤
  *   ├─ ExecutionTimeline ──── CumulativeVWAP ────────────────────────────┤
- *   ├─ QtyProfile (full width) ──────────────────────────────────────────┤
+ *   ├─ CumulativeTWAP ──────── QtyProfile ─────────────────────────────┤
  *   └─ TradeTable (fill detail, full width) ─────────────────────────────┘
  */
 
@@ -21,6 +21,7 @@ import { ParentSummaryCard } from "./ParentSummaryCard";
 import { ExecutionTimeline } from "./ExecutionTimeline";
 import { QtyProfile } from "./QtyProfile";
 import { CumulativeVWAP } from "./CumulativeVWAP";
+import { CumulativeTWAP } from "./CumulativeTWAP";
 
 interface SingleOrderDashboardProps {
   trades: TradeRecord[];
@@ -121,8 +122,15 @@ export function SingleOrderDashboard({
         />
       </div>
 
-      {/* ── Qty profile ──────────────────────────────────────────────────── */}
-      <QtyProfile trades={trades} />
+      {/* ── TWAP chart + Qty profile ─────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <CumulativeTWAP
+          trades={trades}
+          arrivalPrice={summary?.arrivalPrice ?? null}
+          runningMarketTwap={summary?.runningMarketTwap ?? null}
+        />
+        <QtyProfile trades={trades} />
+      </div>
 
       {/* ── Fill detail table ────────────────────────────────────────────── */}
       <TradeTable trades={trades} results={results} title="Fill Detail" hideMetrics />
