@@ -195,6 +195,9 @@ export interface TCAStore {
   singleOrderTimeOverride: { start: Date; end: Date } | null;
   /** Bloomberg ticker + yellow key typed directly on the single-order page (e.g. "ESH5 Index"). */
   singleOrderBbgSymbol: string | null;
+  /** Multiplier applied to every fill price from the file before comparing with Bloomberg prices.
+   *  null = 1 (no scaling). Use 0.01 if file prices are 100× Bloomberg, 100 for the reverse. */
+  singleOrderPriceScale: number | null;
   setMode: (m: TCAMode) => void;
   setRawTrades: (trades: TradeRecord[]) => void;
   setResults: (results: TCAResult[]) => void;
@@ -207,6 +210,7 @@ export interface TCAStore {
   setAggregationFilter: (f: AggregationFilter | null) => void;
   setSingleOrderTimeOverride: (v: { start: Date; end: Date } | null) => void;
   setSingleOrderBbgSymbol: (v: string | null) => void;
+  setSingleOrderPriceScale: (v: number | null) => void;
   reset: () => void;
 }
 

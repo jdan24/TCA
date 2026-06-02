@@ -63,10 +63,39 @@ export function SingleOrderDashboard({
   const setSingleOrderTimeOverride = useTCAStore((s) => s.setSingleOrderTimeOverride);
   const singleOrderBbgSymbol       = useTCAStore((s) => s.singleOrderBbgSymbol);
   const setSingleOrderBbgSymbol    = useTCAStore((s) => s.setSingleOrderBbgSymbol);
+  const singleOrderPriceScale      = useTCAStore((s) => s.singleOrderPriceScale);
+  const setSingleOrderPriceScale   = useTCAStore((s) => s.setSingleOrderPriceScale);
+
+  // Controlled input string for the scale field (separate from the parsed store value)
+  const [scaleInputStr, setScaleInputStr] = useState(
+    singleOrderPriceScale !== null ? String(singleOrderPriceScale) : "",
+  );
+
+  function applyScaleInput(s: string) {
+    setScaleInputStr(s);
+    const n = parseFloat(s);
+    if (!s.trim() || isNaN(n) || n <= 0 || n === 1) {
+      setSingleOrderPriceScale(null);
+    } else {
+      setSingleOrderPriceScale(n);
+    }
+  }
+
+  function clearScale() {
+    setSingleOrderPriceScale(null);
+    setScaleInputStr("");
+  }
+
+  // Apply price scale to fill prices only — timestamps, qty, and Bloomberg prices are unchanged.
+  const scale = singleOrderPriceScale ?? 1;
+  const scaledTrades = useMemo(() => {
+    if (scale === 1) return trades;
+    return trades.map((t) => ({ ...t, avgFillPrice: t.avgFillPrice * scale }));
+  }, [trades, scale]);
 
   const summary = useMemo(
-    () => computeParentOrderSummary(trades, enrichment, singleOrderTimeOverride ?? undefined),
-    [trades, enrichment, singleOrderTimeOverride],
+    () => computeParentOrderSummary(scaledTrades, enrichment, singleOrderTimeOverride ?? undefined),
+    [scaledTrades, enrichment, singleOrderTimeOverride],
   );
 
   // Single pass over the first enriched trade's tradeTicks for [orderTime, lastFillTime].
@@ -141,7 +170,7 @@ export function SingleOrderDashboard({
             </span>
           )}
 
-          <ExportBar trades={trades} results={results} summary={summary ?? undefined} />
+          <ExportBar trades={scaledTrades} results={results} summary={summary ?? undefined} />
 
           <button
             type="button"
@@ -214,6 +243,62 @@ export function SingleOrderDashboard({
         );
       })()}
 
+      {/* ── Fill price scale ────────────────────────────────────────────── */}
+      {(() => {
+        const rawSample    = trades[0]?.avgFillPrice ?? null;
+        const scaledSample = rawSample !== null && scale !== 1 ? rawSample * scale : null;
+        const isActive     = singleOrderPriceScale !== null && singleOrderPriceScale !== 1;
+        return (
+          <div className="flex items-center gap-3">
+            <label
+              htmlFor="price-scale-input"
+              className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap"
+            >
+              Fill Price Scale
+            </label>
+            <div className="flex items-center gap-1.5">
+              <input
+                id="price-scale-input"
+                type="text"
+                inputMode="decimal"
+                value={scaleInputStr}
+                placeholder="1.0"
+                onChange={(e) => applyScaleInput(e.target.value)}
+                className={`px-3 py-1.5 text-xs rounded-lg border bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 w-28 font-mono ${
+                  isActive
+                    ? "border-amber-400 dark:border-amber-500"
+                    : "border-gray-200 dark:border-gray-700"
+                }`}
+              />
+              {isActive && (
+                <button
+                  type="button"
+                  onClick={clearScale}
+                  title="Remove scale override"
+                  className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            {isActive && rawSample !== null && scaledSample !== null ? (
+              <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                {rawSample.toFixed(4)} × {singleOrderPriceScale} ={" "}
+                <span className="font-mono">{scaledSample.toFixed(4)}</span>
+              </span>
+            ) : (
+              <span className="text-[11px] text-gray-400 dark:text-gray-600">
+                Multiplier for fill prices — e.g.{" "}
+                <span className="font-mono">0.01</span> to divide by 100,{" "}
+                <span className="font-mono">100</span> to multiply
+              </span>
+            )}
+          </div>
+        );
+      })()}
+
       {/* ── Algo selector ───────────────────────────────────────────────── */}
       <div className="flex items-center gap-3">
         <label
@@ -267,12 +352,12 @@ export function SingleOrderDashboard({
       {/* ── Cumulative TWAP + Cumulative VWAP ──────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <CumulativeTWAP
-          trades={trades}
+          trades={scaledTrades}
           arrivalPrice={summary?.arrivalPrice ?? null}
           runningMarketTwap={summary?.runningMarketTwap ?? null}
         />
         <CumulativeVWAP
-          trades={trades}
+          trades={scaledTrades}
           arrivalPrice={summary?.arrivalPrice ?? null}
           runningMarketVwap={summary?.runningMarketVwap ?? null}
         />
@@ -281,19 +366,19 @@ export function SingleOrderDashboard({
       {/* ── Execution timeline + Running participation rate ──────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ExecutionTimeline
-          trades={trades}
+          trades={scaledTrades}
           arrivalPrice={summary?.arrivalPrice ?? null}
           marketTicks={marketTicks}
         />
         <RunningParticipation
-          trades={trades}
+          trades={scaledTrades}
           marketVolTicks={marketVolTicks}
           marketTicks={marketTicks}
         />
       </div>
 
       {/* ── Fill detail table ────────────────────────────────────────────── */}
-      <TradeTable trades={trades} results={results} title="Fill Detail" hideMetrics />
+      <TradeTable trades={scaledTrades} results={results} title="Fill Detail" hideMetrics />
     </div>
   );
 }

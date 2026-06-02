@@ -19,6 +19,7 @@ const initialState = {
   aggregationFilter: null as AggregationFilter | null,
   singleOrderTimeOverride: null as { start: Date; end: Date } | null,
   singleOrderBbgSymbol: null as string | null,
+  singleOrderPriceScale: null as number | null,
 };
 
 export const useTCAStore = create<TCAStore>((set) => ({
@@ -35,5 +36,6 @@ export const useTCAStore = create<TCAStore>((set) => ({
   setAggregationFilter: (f) => set({ aggregationFilter: f }),
   setSingleOrderTimeOverride: (v) => set({ singleOrderTimeOverride: v }),
   setSingleOrderBbgSymbol: (v) => set({ singleOrderBbgSymbol: v }),
+  setSingleOrderPriceScale: (v) => set({ singleOrderPriceScale: v }),
   reset: () => set(initialState),
 }));
