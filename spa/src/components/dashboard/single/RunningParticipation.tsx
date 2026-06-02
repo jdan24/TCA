@@ -74,7 +74,7 @@ export function RunningParticipation({ trades, marketVolTicks, marketTicks }: Ru
 
   if (!marketVolTicks || marketVolTicks.length === 0) {
     return (
-      <ChartCard title="Running Participation Rate" subtitle="% of market volume — fetch Bloomberg to enable">
+      <ChartCard id="so-chart-participation" title="Running Participation Rate" subtitle="% of market volume — fetch Bloomberg to enable">
         <EmptyState message="Bloomberg trade tick data required" />
       </ChartCard>
     );
@@ -85,7 +85,7 @@ export function RunningParticipation({ trades, marketVolTicks, marketTicks }: Ru
 
   if (partData.length === 0) {
     return (
-      <ChartCard title="Running Participation Rate" subtitle="% of market volume">
+      <ChartCard id="so-chart-participation" title="Running Participation Rate" subtitle="% of market volume">
         <EmptyState message="No fill data" />
       </ChartCard>
     );

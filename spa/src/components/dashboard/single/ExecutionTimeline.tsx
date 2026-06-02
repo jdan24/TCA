@@ -46,7 +46,7 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks }: Executi
 
   if (trades.length === 0) {
     return (
-      <ChartCard title="Execution Timeline" subtitle="Fill price vs time">
+      <ChartCard id="so-chart-timeline" title="Execution Timeline" subtitle="Fill price vs time">
         <EmptyState message="No fill data" />
       </ChartCard>
     );
@@ -116,7 +116,7 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks }: Executi
   };
 
   return (
-    <ChartCard title="Execution Timeline" subtitle={subtitle}>
+    <ChartCard id="so-chart-timeline" title="Execution Timeline" subtitle={subtitle}>
       <ResponsiveContainer width="100%" height={260}>
         <ComposedChart data={marketTicks ?? []} margin={{ top: 8, right: 20, bottom: 8, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />

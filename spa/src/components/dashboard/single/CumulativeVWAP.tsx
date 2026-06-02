@@ -91,7 +91,7 @@ export function CumulativeVWAP({ trades, arrivalPrice, runningMarketVwap }: Cumu
 
   if (data.length === 0) {
     return (
-      <ChartCard title="Cumulative Fill VWAP" subtitle="Running avg fill price vs arrival">
+      <ChartCard id="so-chart-vwap" title="Cumulative Fill VWAP" subtitle="Running avg fill price vs arrival">
         <EmptyState message="No fill data" />
       </ChartCard>
     );

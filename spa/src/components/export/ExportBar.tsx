@@ -19,6 +19,7 @@
 import { useState } from "react";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import html2canvas from "html2canvas";
 import * as XLSX from "xlsx";
 import type { AggregateRow, AggregationSet, ParentOrderSummary, TCAResult, TradeRecord } from "@/types";
 import { fmtBps, fmtTtf } from "@/components/dashboard/dashboardUtils";
@@ -151,22 +152,57 @@ function doPdfExport(rows: ExportRow[]): void {
   doc.save(`tca_${datestamp()}.pdf`);
 }
 
-function doPdfExportSingle(
+// ── Chart capture helper ──────────────────────────────────────────────────────
+
+interface CapturedChart { img: string; w: number; h: number }
+
+async function captureChartById(id: string): Promise<CapturedChart | null> {
+  const el = document.getElementById(id);
+  if (!el) return null;
+  try {
+    const canvas = await html2canvas(el, {
+      backgroundColor: "#ffffff",
+      scale: 2,
+      logging: false,
+      useCORS: true,
+    });
+    return { img: canvas.toDataURL("image/png"), w: canvas.width, h: canvas.height };
+  } catch {
+    return null;
+  }
+}
+
+async function doPdfExportSingle(
   summary: ParentOrderSummary,
   trades: TradeRecord[],
   results: TCAResult[],
-): void {
-  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
-  const pageW = doc.internal.pageSize.getWidth();
+): Promise<void> {
+  // ── Capture charts before opening the PDF ────────────────────────────────
+  // (do this first so the DOM is unmodified while jsPDF is building the doc)
+  const CHART_IDS = [
+    "so-chart-twap",
+    "so-chart-vwap",
+    "so-chart-timeline",
+    "so-chart-participation",
+  ] as const;
+  const [twapCap, vwapCap, timelineCap, partCap] = (await Promise.all(
+    CHART_IDS.map(captureChartById),
+  )).map((c) => c ?? null) as [CapturedChart|null, CapturedChart|null, CapturedChart|null, CapturedChart|null];
 
-  // ── Header ───────────────────────────────────────────────────────────────
+  // ── Create document (landscape A4 throughout) ─────────────────────────────
+  const doc  = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  const PW   = doc.internal.pageSize.getWidth();   // 841.89
+  const MARG = 20;
+  const GAP  = 8;
+  type ATDoc = typeof doc & { lastAutoTable: { finalY: number } };
+
+  // ── Page 1: Header + Summary ──────────────────────────────────────────────
   doc.setFontSize(15); doc.setTextColor(17, 24, 39);
-  doc.text(`Single Order TCA  ·  ${summary.symbol}  ${summary.side}`, 20, 30);
+  doc.text(`Single Order TCA  ·  ${summary.symbol}  ${summary.side}`, MARG, 30);
   doc.setFontSize(8); doc.setTextColor(107, 114, 128);
-  doc.text(`Generated ${new Date().toLocaleString()}`, 20, 42);
-  doc.text(`${trades.length} fill${trades.length !== 1 ? "s" : ""}`, pageW - 60, 30);
+  doc.text(`Generated ${new Date().toLocaleString()}`, MARG, 42);
+  doc.text(`${trades.length} fill${trades.length !== 1 ? "s" : ""}`, PW - 60, 30);
 
-  // ── Summary table ────────────────────────────────────────────────────────
   const summaryBody: string[][] = [
     ["Symbol",            summary.symbol,                     "Side",               summary.side],
     ["Total Qty",         summary.totalQty.toLocaleString(),  "Duration",           fmtTtf(summary.duration_ms)],
@@ -182,32 +218,59 @@ function doPdfExportSingle(
     startY: 52,
     body: summaryBody,
     theme: "plain",
-    styles: { fontSize: 8.5, cellPadding: 4 },
+    styles: { fontSize: 9, cellPadding: 5 },
     columnStyles: {
-      0: { fontStyle: "bold", fillColor: [248,250,252], cellWidth: 110 },
-      1: { cellWidth: 130 },
-      2: { fontStyle: "bold", fillColor: [248,250,252], cellWidth: 110 },
-      3: { cellWidth: 130 },
+      0: { fontStyle: "bold", fillColor: [248, 250, 252], cellWidth: 130 },
+      1: { cellWidth: 160 },
+      2: { fontStyle: "bold", fillColor: [248, 250, 252], cellWidth: 130 },
+      3: { cellWidth: 160 },
     },
-    margin: { left: 20, right: 20 },
+    margin: { left: MARG, right: MARG },
   });
 
-  // ── Running benchmarks table (VWAP, TWAP per fill) ────────────────────────
-  type AutoTableDoc = typeof doc & { lastAutoTable: { finalY: number } };
-  const afterSummary = (doc as AutoTableDoc).lastAutoTable.finalY + 14;
+  // ── Page 2: Charts (2 × 2 grid) ──────────────────────────────────────────
+  doc.addPage();
+  const colW = (PW - 2 * MARG - GAP) / 2; // width of each chart slot
 
-  doc.setFontSize(9); doc.setTextColor(17, 24, 39);
-  doc.text("Running Benchmarks at Each Fill", 20, afterSummary);
+  function placeChart(cap: CapturedChart | null, x: number, y: number): number {
+    if (!cap) return 0;
+    const h = (cap.h / cap.w) * colW;
+    doc.addImage(cap.img, "PNG", x, y, colW, h);
+    return h;
+  }
 
+  // Add a small header on the charts page
+  doc.setFontSize(9); doc.setTextColor(107, 114, 128);
+  doc.text(`${summary.symbol} ${summary.side}  ·  Charts`, MARG, 14);
+
+  let curY = MARG + 4;
+
+  // Row 1: Cumulative TWAP | Cumulative VWAP
+  const r1h = Math.max(
+    placeChart(twapCap,  MARG,            curY),
+    placeChart(vwapCap,  MARG + colW + GAP, curY),
+  );
+  curY += (r1h > 0 ? r1h : 200) + GAP;
+
+  // Row 2: Execution Timeline | Running Participation
+  placeChart(timelineCap,  MARG,            curY);
+  placeChart(partCap,      MARG + colW + GAP, curY);
+
+  // ── Page 3: Data tables ───────────────────────────────────────────────────
+  doc.addPage();
+
+  // Running benchmarks
   const vwapMap = new Map((summary.runningMarketVwap ?? []).map((p) => [p.t, p.vwap]));
   const twapMap = new Map((summary.runningMarketTwap  ?? []).map((p) => [p.t, p.twap]));
-
   const sortedTrades = [...trades].sort((a, b) => a.lastFillTime.getTime() - b.lastFillTime.getTime());
   const resultMap    = new Map(results.map((r) => [r.orderId, r]));
 
+  doc.setFontSize(10); doc.setTextColor(17, 24, 39);
+  doc.text("Running Benchmarks at Each Fill", MARG, 20);
+
   const benchHeaders = ["Time (UTC)", "Fill Price", "Qty", "IS (bps)", "Mkt VWAP", "Mkt TWAP", "vs VWAP (bps)", "vs TWAP (bps)"];
   const benchBody = sortedTrades.map((t) => {
-    const r = resultMap.get(t.orderId);
+    const r  = resultMap.get(t.orderId);
     const ms = t.lastFillTime.getTime();
     return [
       fmtUtcStr(t.lastFillTime),
@@ -222,19 +285,18 @@ function doPdfExportSingle(
   });
 
   autoTable(doc, {
-    startY: afterSummary + 6,
-    head: [benchHeaders],
-    body: benchBody,
+    startY: 26,
+    head: [benchHeaders], body: benchBody,
     styles: { fontSize: 7, cellPadding: 2.5, overflow: "ellipsize" },
     headStyles: { fillColor: [59,130,246], textColor: [255,255,255], fontStyle: "bold", fontSize: 7 },
     alternateRowStyles: { fillColor: [248,250,252] },
-    margin: { left: 20, right: 20 },
+    margin: { left: MARG, right: MARG },
   });
 
-  // ── Full fill detail table ────────────────────────────────────────────────
-  const afterBench = (doc as AutoTableDoc).lastAutoTable.finalY + 14;
-  doc.setFontSize(9); doc.setTextColor(17, 24, 39);
-  doc.text("Full Fill Detail", 20, afterBench);
+  // Full fill detail
+  const afterBench = (doc as ATDoc).lastAutoTable.finalY + 14;
+  doc.setFontSize(10); doc.setTextColor(17, 24, 39);
+  doc.text("Full Fill Detail", MARG, afterBench);
 
   const tradeRows = buildTradeRows(trades, results);
   if (tradeRows.length > 0) {
@@ -242,12 +304,11 @@ function doPdfExportSingle(
     const body    = tradeRows.map((r) => Object.values(r).map((v) => (v === "" ? "—" : String(v))));
     autoTable(doc, {
       startY: afterBench + 6,
-      head: [headers],
-      body,
+      head: [headers], body,
       styles: { fontSize: 6, cellPadding: 2, overflow: "ellipsize" },
       headStyles: { fillColor: [59,130,246], textColor: [255,255,255], fontStyle: "bold", fontSize: 6 },
       alternateRowStyles: { fillColor: [248,250,252] },
-      margin: { left: 20, right: 20 },
+      margin: { left: MARG, right: MARG },
     });
   }
 
@@ -269,12 +330,12 @@ export function ExportBar({ trades, results, aggregations, summary }: ExportBarP
     finally { setExporting(null); }
   }
 
-  function handlePdf() {
+  async function handlePdf() {
     if (exporting !== null) return;
     setExporting("pdf");
     try {
       if (summary) {
-        doPdfExportSingle(summary, trades, results);
+        await doPdfExportSingle(summary, trades, results);
       } else {
         doPdfExport(buildTradeRows(trades, results));
       }
@@ -292,9 +353,10 @@ export function ExportBar({ trades, results, aggregations, summary }: ExportBarP
         {exporting === "excel" ? <Spinner /> : <DownloadIcon />}
         {exporting === "excel" ? "Exporting…" : "Excel"}
       </button>
-      <button type="button" disabled={busy} onClick={handlePdf}
+      <button type="button" disabled={busy}
         className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-wait transition-colors"
-        title="Export to PDF">
+        title="Export to PDF"
+        onClick={() => { void handlePdf(); }}>
         {exporting === "pdf" ? <Spinner /> : <PdfIcon />}
         {exporting === "pdf" ? "Exporting…" : "PDF"}
       </button>

@@ -73,11 +73,13 @@ interface ChartCardProps {
   title: string;
   subtitle?: string;
   children: ReactNode;
+  /** Optional DOM id — used by html2canvas to capture the card for PDF export. */
+  id?: string;
 }
 
-export function ChartCard({ title, subtitle, children }: ChartCardProps) {
+export function ChartCard({ title, subtitle, children, id }: ChartCardProps) {
   return (
-    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+    <div id={id} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
       <div className="mb-3">
         <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h3>
         {subtitle !== undefined && (

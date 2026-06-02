@@ -91,7 +91,7 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap }: Cumu
 
   if (data.length === 0) {
     return (
-      <ChartCard title="Cumulative Fill TWAP" subtitle="Running avg fill price vs arrival">
+      <ChartCard id="so-chart-twap" title="Cumulative Fill TWAP" subtitle="Running avg fill price vs arrival">
         <EmptyState message="No fill data" />
       </ChartCard>
     );
