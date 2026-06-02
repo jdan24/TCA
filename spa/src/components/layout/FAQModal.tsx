@@ -223,17 +223,23 @@ export function FAQModal({ onClose }: FAQModalProps) {
 
           {/* ── Post-Trade Reversion ─────────────────────────────────────── */}
           <Section title="Post-Trade Price Reversion">
-            <Entry name="Reversion at +1 m / +5 m / +30 m / EOD" tag="bps">
+            <Entry name="Reversion at +30 s and +1 m" tag="bps">
               <Formula>Reversion_t = (priceAtT − avgFillPrice) / avgFillPrice × −sideSign × 10,000</Formula>
-              <Row label="priceAtT" value="Bloomberg 1-min bar close price at lastFillTime + t" />
-              <Row label="EOD" value="Last available bar close before market close on the trade date" />
-              <Row label="Fallback" value="If no bar exists at the offset (e.g. market closed), avgFillPrice is used → 0 bps" />
+              <Row
+                label="+30 s price source"
+                value="Last Bloomberg TRADE tick at or before lastFillTime + 30 s — the actual last-traded market price. Tick window is fetched to lastFillTime + 35 s for a 5-second capture buffer."
+              />
+              <Row
+                label="+1 m price source"
+                value="Bloomberg 1-min bar close at lastFillTime + 1 min — last traded price in that minute bar."
+              />
+              <Row label="Fallback" value="If no tick / bar is available at the mark, avgFillPrice is used → 0 bps (conservative no-data signal)" />
               <Row label="Positive" value={<><Pill color="green">favorable</Pill> — price reverted back toward arrival (temporary impact)</>} />
               <Row label="Negative" value={<><Pill color="red">adverse</Pill> — price continued away from fill (permanent impact / information leakage)</>} />
               <p>
-                Measures whether the price moved caused by your order was temporary (it reversed) or permanent (it persisted).
-                A BUY that filled high but saw the price fall back registers positive reversion.
-                A pattern of large negative reversion may indicate information leakage or adverse selection.
+                Measures whether the price movement caused by your order was temporary (it reversed) or permanent (it persisted).
+                A BUY that filled high but saw the price fall back within 30 s or 1 m registers positive reversion.
+                Consistent negative reversion may indicate information leakage or adverse selection.
               </p>
             </Entry>
           </Section>
@@ -284,7 +290,7 @@ export function FAQModal({ onClose }: FAQModalProps) {
                     ["VWAP Deviation (bps)", "negative", "positive"],
                     ["TWAP Deviation (bps)", "negative", "positive"],
                     ["Market Impact (bps)", "—", "positive (always a cost)"],
-                    ["Reversion (bps)", "positive (price reverts)", "negative (price persists)"],
+                    ["Reversion +30s / +1m (bps)", "positive (price reverts)", "negative (price persists)"],
                     ["TWAS (bps)", "context only", "context only"],
                     ["Volatility", "context only", "context only"],
                     ["Participation Rate", "context only", "context only"],

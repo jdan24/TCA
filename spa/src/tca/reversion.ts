@@ -17,10 +17,8 @@ import type { BloombergEnrichment, TradeRecord } from "@/types";
 import { sideSign, toBps } from "./tcaUtils";
 
 export interface ReversionResult {
+  reversion_30s_bps: number | null;
   reversion_1m_bps: number | null;
-  reversion_5m_bps: number | null;
-  reversion_30m_bps: number | null;
-  reversion_EOD_bps: number | null;
 }
 
 function revert(
@@ -38,17 +36,13 @@ export function computeReversion(
 ): ReversionResult {
   if (!enrichment) {
     return {
+      reversion_30s_bps: null,
       reversion_1m_bps: null,
-      reversion_5m_bps: null,
-      reversion_30m_bps: null,
-      reversion_EOD_bps: null,
     };
   }
 
   return {
-    reversion_1m_bps: revert(enrichment.reversion1m, trade.avgFillPrice, trade.side),
-    reversion_5m_bps: revert(enrichment.reversion5m, trade.avgFillPrice, trade.side),
-    reversion_30m_bps: revert(enrichment.reversion30m, trade.avgFillPrice, trade.side),
-    reversion_EOD_bps: revert(enrichment.reversionEOD, trade.avgFillPrice, trade.side),
+    reversion_30s_bps: revert(enrichment.reversion30s, trade.avgFillPrice, trade.side),
+    reversion_1m_bps:  revert(enrichment.reversion1m,  trade.avgFillPrice, trade.side),
   };
 }

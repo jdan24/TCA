@@ -1,7 +1,7 @@
 /**
  * Post-trade reversion line chart.
  *
- * Shows avg reversion (bps) at +1m, +5m, +30m, and EOD, split by BUY vs SELL.
+ * Shows avg reversion (bps) at +30s and +1m, split by BUY vs SELL.
  *
  * Interpretation:
  *   Positive → price reverted toward arrival after the fill (temporary impact, good)
@@ -50,24 +50,14 @@ export function ReversionChart({ trades, results }: ReversionChartProps) {
 
     const rows: RowDatum[] = [
       {
+        label: "+30s",
+        buy: safeAvg(buyR.map((r) => r.reversion_30s_bps)),
+        sell: safeAvg(sellR.map((r) => r.reversion_30s_bps)),
+      },
+      {
         label: "+1m",
         buy: safeAvg(buyR.map((r) => r.reversion_1m_bps)),
         sell: safeAvg(sellR.map((r) => r.reversion_1m_bps)),
-      },
-      {
-        label: "+5m",
-        buy: safeAvg(buyR.map((r) => r.reversion_5m_bps)),
-        sell: safeAvg(sellR.map((r) => r.reversion_5m_bps)),
-      },
-      {
-        label: "+30m",
-        buy: safeAvg(buyR.map((r) => r.reversion_30m_bps)),
-        sell: safeAvg(sellR.map((r) => r.reversion_30m_bps)),
-      },
-      {
-        label: "EOD",
-        buy: safeAvg(buyR.map((r) => r.reversion_EOD_bps)),
-        sell: safeAvg(sellR.map((r) => r.reversion_EOD_bps)),
       },
     ];
 
@@ -79,7 +69,7 @@ export function ReversionChart({ trades, results }: ReversionChartProps) {
     return (
       <ChartCard
         title="Post-Trade Reversion"
-        subtitle="Avg reversion (bps) at +1m / +5m / +30m / EOD — by side"
+        subtitle="Avg reversion (bps) at +30s / +1m — by side"
       >
         <EmptyState message="Bloomberg data required for reversion analysis" />
       </ChartCard>
@@ -89,7 +79,7 @@ export function ReversionChart({ trades, results }: ReversionChartProps) {
   return (
     <ChartCard
       title="Post-Trade Reversion"
-      subtitle="Avg reversion (bps) at +1m / +5m / +30m / EOD — positive = favorable"
+      subtitle="Avg reversion (bps) at +30s / +1m — positive = favorable"
     >
       <ResponsiveContainer width="100%" height={240}>
         <LineChart

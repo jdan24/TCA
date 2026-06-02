@@ -42,7 +42,6 @@ import {
 
 const ONE_MIN_MS = 60_000;
 const FIVE_MIN_MS = 5 * ONE_MIN_MS;
-const THIRTY_MIN_MS = 30 * ONE_MIN_MS;
 
 // ── Timezone normalisation ────────────────────────────────────────────────────
 
@@ -243,12 +242,13 @@ async function enrichOneTrade(
   const barEnd = endOfDayUtc(lastFillTime);
 
   const tickStart = new Date(orderTime.getTime() - 2 * ONE_MIN_MS);
-  const tickEnd = new Date(lastFillTime.getTime() + 30_000);
+  // +35 s gives a 5-second buffer so we reliably capture a trade tick at the +30 s mark
+  const tickEnd = new Date(lastFillTime.getTime() + 35_000);
 
   const [rawBars, rawTickData, rawTradeTickData, bridgeArrival] = await Promise.all([
     fetchIntradayBars(symbol, toIso(barStart), toIso(barEnd), 1),
     fetchBidAskTicks(symbol, toIso(tickStart), toIso(tickEnd)),
-    fetchTradeTicks(symbol, toIso(orderTime), toIso(new Date(lastFillTime.getTime() + 30_000))),
+    fetchTradeTicks(symbol, toIso(orderTime), toIso(tickEnd)),
     fetchArrivalPrice(symbol, toIso(orderTime)),
   ]);
 
@@ -307,19 +307,14 @@ async function enrichOneTrade(
         : 0;
 
   // ── Reversion mark prices ────────────────────────────────────────────────
-  const rev1mPrice = getPriceAtOrBefore(
-    bars,
-    new Date(lastFillTime.getTime() + ONE_MIN_MS),
-  );
-  const rev5mPrice = getPriceAtOrBefore(
-    bars,
-    new Date(lastFillTime.getTime() + FIVE_MIN_MS),
-  );
-  const rev30mPrice = getPriceAtOrBefore(
-    bars,
-    new Date(lastFillTime.getTime() + THIRTY_MIN_MS),
-  );
-  const eodPrice = getEodClose(bars, lastFillTime);
+  // +30 s: last trade tick at or before lastFillTime + 30 s
+  const rev30sTargetMs = lastFillTime.getTime() + 30_000;
+  let rev30sPrice: number | null = null;
+  for (const tk of rawTradeTicks) {
+    if (new Date(tk.time).getTime() <= rev30sTargetMs) rev30sPrice = tk.price;
+  }
+  // +1 m: bar close at lastFillTime + 1 min (1-min bars)
+  const rev1mPrice = getPriceAtOrBefore(bars, new Date(lastFillTime.getTime() + ONE_MIN_MS));
 
   // ── Bid/ask ticks (Date-typed for computeTWAS) ────────────────────────────
   const bidAskTicks: BidAskTick[] = rawTicks.map((t) => ({
@@ -341,10 +336,8 @@ async function enrichOneTrade(
     adv,
     dailyVol,
     // Fall back to avgFillPrice → 0 bps reversion (conservative "no data")
-    reversion1m: rev1mPrice ?? avgFillPrice,
-    reversion5m: rev5mPrice ?? avgFillPrice,
-    reversion30m: rev30mPrice ?? avgFillPrice,
-    reversionEOD: eodPrice ?? avgFillPrice,
+    reversion30s: rev30sPrice ?? avgFillPrice,
+    reversion1m:  rev1mPrice  ?? avgFillPrice,
     bidAskTicks,
     tradeTicks,
     barsSnapshot: bars,
@@ -479,7 +472,8 @@ export async function enrichSingleOrder(
   const barStart  = new Date(orderTime.getTime() - FIVE_MIN_MS);
   const barEnd    = endOfDayUtc(lastFillTime);
   const tickStart = new Date(orderTime.getTime() - 2 * ONE_MIN_MS);
-  const tickEnd   = new Date(lastFillTime.getTime() + 30_000);
+  // +35 s gives a 5-second buffer so we reliably capture a trade tick at the +30 s mark
+  const tickEnd   = new Date(lastFillTime.getTime() + 35_000);
 
   const [rawBars, rawTickData, rawTradeTickData, bridgeArrival] = await Promise.all([
     fetchIntradayBars(bbgSymbol, toIso(barStart), toIso(barEnd), 1),
@@ -534,10 +528,14 @@ export async function enrichSingleOrder(
         : 0;
 
   // ── Reversion mark prices ─────────────────────────────────────────────────
-  const rev1mPrice  = getPriceAtOrBefore(bars, new Date(lastFillTime.getTime() + ONE_MIN_MS));
-  const rev5mPrice  = getPriceAtOrBefore(bars, new Date(lastFillTime.getTime() + FIVE_MIN_MS));
-  const rev30mPrice = getPriceAtOrBefore(bars, new Date(lastFillTime.getTime() + THIRTY_MIN_MS));
-  const eodPrice    = getEodClose(bars, lastFillTime);
+  // +30 s: last trade tick at or before lastFillTime + 30 s
+  const rev30sTargetMs = lastFillTime.getTime() + 30_000;
+  let rev30sPrice: number | null = null;
+  for (const tk of rawTradeTicks) {
+    if (new Date(tk.time).getTime() <= rev30sTargetMs) rev30sPrice = tk.price;
+  }
+  // +1 m: bar close at lastFillTime + 1 min (1-min bars)
+  const rev1mPrice = getPriceAtOrBefore(bars, new Date(lastFillTime.getTime() + ONE_MIN_MS));
 
   // ── Bid/ask ticks (Date-typed for computeTWAS) ────────────────────────────
   const bidAskTicks: BidAskTick[] = rawTicks.map((t) => ({
@@ -559,10 +557,8 @@ export async function enrichSingleOrder(
     vwap,
     adv,
     dailyVol,
-    reversion1m:   rev1mPrice  ?? fillVwap,
-    reversion5m:   rev5mPrice  ?? fillVwap,
-    reversion30m:  rev30mPrice ?? fillVwap,
-    reversionEOD:  eodPrice    ?? fillVwap,
+    reversion30s: rev30sPrice ?? fillVwap,
+    reversion1m:  rev1mPrice  ?? fillVwap,
     bidAskTicks,
     tradeTicks,
     barsSnapshot: bars,

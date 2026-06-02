@@ -38,10 +38,8 @@ export interface TCAResult {
   VWAP_dev_bps: number | null;
   MI_bps: number | null;
   timeToFill_ms: number;
+  reversion_30s_bps: number | null;
   reversion_1m_bps: number | null;
-  reversion_5m_bps: number | null;
-  reversion_30m_bps: number | null;
-  reversion_EOD_bps: number | null;
   TWAS_bps: number | null;
   vol_during_order_price: number | null; // 1σ price std-dev during order window
   vol_during_order_bps: number | null;   // same expressed in bps
@@ -67,10 +65,8 @@ export interface BloombergEnrichment {
   vwap: number;
   adv: number;
   dailyVol: number;
-  reversion1m: number;
-  reversion5m: number;
-  reversion30m: number;
-  reversionEOD: number;
+  reversion30s: number; // last-traded price at lastFillTime + 30 s (from trade ticks)
+  reversion1m: number;  // bar close at lastFillTime + 1 min
   bidAskTicks: BidAskTick[];
   tradeTicks: TradeTick[];    // last-traded price+size ticks for short-order VWAP
   barsSnapshot: IntradayBar[]; // 1-min bars for the order window (used by volatility)

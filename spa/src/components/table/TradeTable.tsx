@@ -45,10 +45,8 @@ interface TableRow {
   IS_bps: number | null;
   VWAP_dev_bps: number | null;
   MI_bps: number | null;
+  reversion_30s_bps: number | null;
   reversion_1m_bps: number | null;
-  reversion_5m_bps: number | null;
-  reversion_30m_bps: number | null;
-  reversion_EOD_bps: number | null;
   TWAS_bps: number | null;
   vol_during_order_price: number | null;
   vol_during_order_bps: number | null;
@@ -76,10 +74,8 @@ function mergeRows(trades: TradeRecord[], results: TCAResult[]): TableRow[] {
       IS_bps: r?.IS_bps ?? null,
       VWAP_dev_bps: r?.VWAP_dev_bps ?? null,
       MI_bps: r?.MI_bps ?? null,
+      reversion_30s_bps: r?.reversion_30s_bps ?? null,
       reversion_1m_bps: r?.reversion_1m_bps ?? null,
-      reversion_5m_bps: r?.reversion_5m_bps ?? null,
-      reversion_30m_bps: r?.reversion_30m_bps ?? null,
-      reversion_EOD_bps: r?.reversion_EOD_bps ?? null,
       TWAS_bps: r?.TWAS_bps ?? null,
       vol_during_order_price: r?.vol_during_order_price ?? null,
       vol_during_order_bps: r?.vol_during_order_bps ?? null,
@@ -108,10 +104,8 @@ const COLUMN_LABELS: Record<string, string> = {
   marketVWAP_price: "Mkt VWAP",
   TWAP_dev_bps: "vs Mkt TWAP",
   MI_bps: "Mkt Impact",
+  reversion_30s_bps: "Rev +30s",
   reversion_1m_bps: "Rev +1m",
-  reversion_5m_bps: "Rev +5m",
-  reversion_30m_bps: "Rev +30m",
-  reversion_EOD_bps: "Rev EOD",
   TWAS_bps: "TWAS",
   vol_during_order_price: "Vol σ (price)",
   vol_during_order_bps: "Vol σ (bps)",
@@ -366,26 +360,14 @@ const COLUMNS = [
     sortingFn: nullableSort,
     enableGlobalFilter: false,
   }),
+  col.accessor("reversion_30s_bps", {
+    header: "Rev +30s",
+    cell: (i) => <BpsCell value={i.getValue()} invert />,
+    sortingFn: nullableSort,
+    enableGlobalFilter: false,
+  }),
   col.accessor("reversion_1m_bps", {
     header: "Rev +1m",
-    cell: (i) => <BpsCell value={i.getValue()} invert />,
-    sortingFn: nullableSort,
-    enableGlobalFilter: false,
-  }),
-  col.accessor("reversion_5m_bps", {
-    header: "Rev +5m",
-    cell: (i) => <BpsCell value={i.getValue()} invert />,
-    sortingFn: nullableSort,
-    enableGlobalFilter: false,
-  }),
-  col.accessor("reversion_30m_bps", {
-    header: "Rev +30m",
-    cell: (i) => <BpsCell value={i.getValue()} invert />,
-    sortingFn: nullableSort,
-    enableGlobalFilter: false,
-  }),
-  col.accessor("reversion_EOD_bps", {
-    header: "Rev EOD",
     cell: (i) => <BpsCell value={i.getValue()} invert />,
     sortingFn: nullableSort,
     enableGlobalFilter: false,
@@ -436,19 +418,14 @@ interface TradeTableProps {
 const PAGE_SIZES = [10, 25, 50] as const;
 
 const DEFAULT_VISIBILITY: VisibilityState = {
-  reversion_5m_bps: false,
-  reversion_30m_bps: false,
-  reversion_EOD_bps: false,
-  // vol_during_order_price, vol_during_order_bps, marketVWAP_price, TWAP_dev_bps
-  // all visible by default — omitting from this map means visible
+  // All reversion columns visible by default; others hidden as needed
 };
 
 // Columns that require Bloomberg enrichment — hidden when hideMetrics=true
 const METRIC_COLUMN_IDS = new Set([
   "timeToFill_ms", "IS_bps", "VWAP_dev_bps", "marketVWAP_price",
-  "TWAP_dev_bps", "MI_bps", "reversion_1m_bps", "reversion_5m_bps",
-  "reversion_30m_bps", "reversion_EOD_bps", "TWAS_bps",
-  "vol_during_order_price", "vol_during_order_bps",
+  "TWAP_dev_bps", "MI_bps", "reversion_30s_bps", "reversion_1m_bps",
+  "TWAS_bps", "vol_during_order_price", "vol_during_order_bps",
 ]);
 
 export function TradeTable({ trades, results, title = "Trade Detail", hideMetrics = false }: TradeTableProps) {
