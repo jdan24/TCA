@@ -7,7 +7,7 @@
  *   ┌─ Toolbar ──────────────────────────────────────────────────────────┐
  *   ├─ ParentSummaryCard (full width) ───────────────────────────────────┤
  *   ├─ CumulativeTWAP ──────── CumulativeVWAP ──────────────────────────┤
- *   ├─ ExecutionTimeline ───── QtyProfile ─────────────────────────────┤
+ *   ├─ ExecutionTimeline ───── RunningParticipation ──────────────────┤
  *   └─ TradeTable (fill detail, full width) ─────────────────────────────┘
  */
 
@@ -19,9 +19,9 @@ import { ExportBar } from "@/components/export/ExportBar";
 import { TradeTable } from "@/components/table/TradeTable";
 import { ParentSummaryCard } from "./ParentSummaryCard";
 import { ExecutionTimeline } from "./ExecutionTimeline";
-import { QtyProfile } from "./QtyProfile";
 import { CumulativeVWAP } from "./CumulativeVWAP";
 import { CumulativeTWAP } from "./CumulativeTWAP";
+import { RunningParticipation } from "./RunningParticipation";
 
 interface SingleOrderDashboardProps {
   trades: TradeRecord[];
@@ -49,24 +49,29 @@ export function SingleOrderDashboard({
     [trades, enrichment],
   );
 
-  // Last-traded price ticks for the ExecutionTimeline market-price line.
-  // Use the first enriched trade's tradeTicks, filtered to [orderTime, lastFillTime].
-  const marketTicks = useMemo<Array<{ t: number; price: number }> | null>(() => {
-    if (summary === null) return null;
+  // Single pass over the first enriched trade's tradeTicks for [orderTime, lastFillTime].
+  // Produces both the price series (ExecutionTimeline) and the size series (RunningParticipation).
+  const { marketTicks, marketVolTicks } = useMemo<{
+    marketTicks: Array<{ t: number; price: number }> | null;
+    marketVolTicks: Array<{ t: number; size: number }> | null;
+  }>(() => {
+    if (summary === null) return { marketTicks: null, marketVolTicks: null };
     const orderMs    = summary.orderTime.getTime();
     const lastFillMs = summary.lastFillTime.getTime();
     for (const trade of trades) {
       const e = enrichment[trade.orderId];
       if (!e || e.tradeTicks.length === 0) continue;
-      const ticks = e.tradeTicks
-        .filter((tk) => {
-          const ms = tk.time.getTime();
-          return ms >= orderMs && ms <= lastFillMs;
-        })
-        .map((tk) => ({ t: tk.time.getTime(), price: tk.price }));
-      return ticks.length > 0 ? ticks : null;
+      const filtered = e.tradeTicks.filter((tk) => {
+        const ms = tk.time.getTime();
+        return ms >= orderMs && ms <= lastFillMs;
+      });
+      if (filtered.length === 0) return { marketTicks: null, marketVolTicks: null };
+      return {
+        marketTicks:    filtered.map((tk) => ({ t: tk.time.getTime(), price: tk.price })),
+        marketVolTicks: filtered.map((tk) => ({ t: tk.time.getTime(), size: tk.size })),
+      };
     }
-    return null;
+    return { marketTicks: null, marketVolTicks: null };
   }, [trades, enrichment, summary]);
 
   const isFetching = enrichProgress !== null;
@@ -146,14 +151,17 @@ export function SingleOrderDashboard({
         />
       </div>
 
-      {/* ── Execution timeline + Qty profile ────────────────────────────── */}
+      {/* ── Execution timeline + Running participation rate ──────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ExecutionTimeline
           trades={trades}
           arrivalPrice={summary?.arrivalPrice ?? null}
           marketTicks={marketTicks}
         />
-        <QtyProfile trades={trades} />
+        <RunningParticipation
+          trades={trades}
+          marketVolTicks={marketVolTicks}
+        />
       </div>
 
       {/* ── Fill detail table ────────────────────────────────────────────── */}
