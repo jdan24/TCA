@@ -22,6 +22,7 @@ function App() {
 
   const symbolMap = useSymbolMap();
   const singleOrderTimeOverride = useTCAStore((s) => s.singleOrderTimeOverride);
+  const singleOrderBbgSymbol    = useTCAStore((s) => s.singleOrderBbgSymbol);
   const [enrichProgress, setEnrichProgress] = useState<EnrichProgress | null>(null);
 
   // Re-run TCA metrics whenever trades or Bloomberg enrichment changes
@@ -36,8 +37,14 @@ function App() {
     setEnrichProgress({ done: 0, total: mode === "single" ? 1 : rawTrades.length });
     // Single Order mode: one set of Bloomberg calls for the full parent window.
     // Multi-order mode: one call per trade (existing behaviour).
+    // Single order: if the user typed a Bloomberg symbol override on the page, use it as a
+    // constant resolver (ignores the RIC from the file).  Otherwise fall back to the symbol
+    // mapping table — same as multi-order mode.
+    const soSymbol = singleOrderBbgSymbol?.trim();
+    const singleOrderResolver = soSymbol ? () => soSymbol : symbolMap.resolve;
+
     const result = mode === "single"
-      ? await enrichSingleOrder(rawTrades, setEnrichProgress, symbolMap.resolve, singleOrderTimeOverride ?? undefined)
+      ? await enrichSingleOrder(rawTrades, setEnrichProgress, singleOrderResolver, singleOrderTimeOverride ?? undefined)
       : await enrichAllTrades(rawTrades, setEnrichProgress, symbolMap.resolve);
     setAllEnrichment(result);
     setEnrichProgress(null);

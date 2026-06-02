@@ -18,6 +18,7 @@ const initialState = {
   parseError: null as string | null,
   aggregationFilter: null as AggregationFilter | null,
   singleOrderTimeOverride: null as { start: Date; end: Date } | null,
+  singleOrderBbgSymbol: null as string | null,
 };
 
 export const useTCAStore = create<TCAStore>((set) => ({
@@ -33,5 +34,6 @@ export const useTCAStore = create<TCAStore>((set) => ({
   setParseError: (msg) => set({ parseError: msg }),
   setAggregationFilter: (f) => set({ aggregationFilter: f }),
   setSingleOrderTimeOverride: (v) => set({ singleOrderTimeOverride: v }),
+  setSingleOrderBbgSymbol: (v) => set({ singleOrderBbgSymbol: v }),
   reset: () => set(initialState),
 }));

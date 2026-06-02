@@ -193,6 +193,8 @@ export interface TCAStore {
   aggregationFilter: AggregationFilter | null;
   /** Override order-window boundaries for the single-order Bloomberg fetch. */
   singleOrderTimeOverride: { start: Date; end: Date } | null;
+  /** Bloomberg ticker + yellow key typed directly on the single-order page (e.g. "ESH5 Index"). */
+  singleOrderBbgSymbol: string | null;
   setMode: (m: TCAMode) => void;
   setRawTrades: (trades: TradeRecord[]) => void;
   setResults: (results: TCAResult[]) => void;
@@ -204,6 +206,7 @@ export interface TCAStore {
   setParseError: (msg: string | null) => void;
   setAggregationFilter: (f: AggregationFilter | null) => void;
   setSingleOrderTimeOverride: (v: { start: Date; end: Date } | null) => void;
+  setSingleOrderBbgSymbol: (v: string | null) => void;
   reset: () => void;
 }
 

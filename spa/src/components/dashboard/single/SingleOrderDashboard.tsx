@@ -15,6 +15,7 @@ import type { EnrichProgress } from "@/bloomberg/enrichmentService";
 import type { BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
 import { computeParentOrderSummary } from "@/tca/compute";
 import { useTCAStore } from "@/store/useTCAStore";
+import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { ExportBar } from "@/components/export/ExportBar";
 import { TradeTable } from "@/components/table/TradeTable";
 import { ParentSummaryCard } from "./ParentSummaryCard";
@@ -55,10 +56,13 @@ export function SingleOrderDashboard({
   onReset,
 }: SingleOrderDashboardProps) {
   const [selectedAlgo, setSelectedAlgo] = useState<AlgoOption | null>(null);
+  const symbolMap = useSymbolMap();
 
   // Time overrides (persisted in store so the Bloomberg fetch in App.tsx can read them)
-  const singleOrderTimeOverride = useTCAStore((s) => s.singleOrderTimeOverride);
+  const singleOrderTimeOverride    = useTCAStore((s) => s.singleOrderTimeOverride);
   const setSingleOrderTimeOverride = useTCAStore((s) => s.setSingleOrderTimeOverride);
+  const singleOrderBbgSymbol       = useTCAStore((s) => s.singleOrderBbgSymbol);
+  const setSingleOrderBbgSymbol    = useTCAStore((s) => s.setSingleOrderBbgSymbol);
 
   const summary = useMemo(
     () => computeParentOrderSummary(trades, enrichment, singleOrderTimeOverride ?? undefined),
@@ -148,6 +152,67 @@ export function SingleOrderDashboard({
           </button>
         </div>
       </div>
+
+      {/* ── Bloomberg symbol override ───────────────────────────────────── */}
+      {(() => {
+        const fallback = trades[0] ? symbolMap.resolve(trades[0].symbol) : "";
+        const isOverridden = !!singleOrderBbgSymbol?.trim();
+        const isUsingMapping = !isOverridden && fallback !== (trades[0]?.symbol ?? "");
+        return (
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-3">
+              <label
+                htmlFor="bbg-symbol-input"
+                className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap"
+              >
+                Bloomberg Symbol
+              </label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  id="bbg-symbol-input"
+                  type="text"
+                  value={singleOrderBbgSymbol ?? ""}
+                  placeholder={fallback || "e.g. ESH5 Index"}
+                  onChange={(e) => setSingleOrderBbgSymbol(e.target.value || null)}
+                  className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[200px] font-mono"
+                  spellCheck={false}
+                />
+                {isOverridden && (
+                  <button
+                    type="button"
+                    onClick={() => setSingleOrderBbgSymbol(null)}
+                    title="Clear override — revert to symbol mapping"
+                    className="p-1 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              {isOverridden ? (
+                <span className="text-[11px] text-blue-600 dark:text-blue-400 font-medium">
+                  Using manual override
+                </span>
+              ) : isUsingMapping ? (
+                <span className="text-[11px] text-gray-400 dark:text-gray-500">
+                  Using symbol mapping: <span className="font-mono">{fallback}</span>
+                </span>
+              ) : (
+                <span className="text-[11px] text-amber-600 dark:text-amber-400">
+                  No mapping found for <span className="font-mono">{trades[0]?.symbol}</span> — type a Bloomberg symbol above
+                </span>
+              )}
+            </div>
+            <p className="text-[10px] text-gray-400 dark:text-gray-600 ml-[128px]">
+              Ticker + yellow key, e.g.{" "}
+              <span className="font-mono">ESH5 Index</span> ·{" "}
+              <span className="font-mono">CLZ4 Comdty</span> ·{" "}
+              <span className="font-mono">6EH5 Curncy</span>
+            </p>
+          </div>
+        );
+      })()}
 
       {/* ── Algo selector ───────────────────────────────────────────────── */}
       <div className="flex items-center gap-3">
