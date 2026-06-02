@@ -191,6 +191,8 @@ export interface TCAStore {
   isProcessing: boolean;
   parseError: string | null;
   aggregationFilter: AggregationFilter | null;
+  /** Override order-window boundaries for the single-order Bloomberg fetch. */
+  singleOrderTimeOverride: { start: Date; end: Date } | null;
   setMode: (m: TCAMode) => void;
   setRawTrades: (trades: TradeRecord[]) => void;
   setResults: (results: TCAResult[]) => void;
@@ -201,6 +203,7 @@ export interface TCAStore {
   setProcessing: (v: boolean) => void;
   setParseError: (msg: string | null) => void;
   setAggregationFilter: (f: AggregationFilter | null) => void;
+  setSingleOrderTimeOverride: (v: { start: Date; end: Date } | null) => void;
   reset: () => void;
 }
 

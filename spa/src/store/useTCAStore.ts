@@ -17,6 +17,7 @@ const initialState = {
   isProcessing: false,
   parseError: null as string | null,
   aggregationFilter: null as AggregationFilter | null,
+  singleOrderTimeOverride: null as { start: Date; end: Date } | null,
 };
 
 export const useTCAStore = create<TCAStore>((set) => ({
@@ -31,5 +32,6 @@ export const useTCAStore = create<TCAStore>((set) => ({
   setProcessing: (v) => set({ isProcessing: v }),
   setParseError: (msg) => set({ parseError: msg }),
   setAggregationFilter: (f) => set({ aggregationFilter: f }),
+  setSingleOrderTimeOverride: (v) => set({ singleOrderTimeOverride: v }),
   reset: () => set(initialState),
 }));

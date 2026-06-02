@@ -73,7 +73,9 @@ export function computeAll(
  */
 export function computeParentOrderSummary(
   trades: TradeRecord[],
-  enrichment: Record<string, BloombergEnrichment>
+  enrichment: Record<string, BloombergEnrichment>,
+  /** Optional manual override for the order window — affects all metric computations. */
+  timeOverride?: { start: Date; end: Date },
 ): ParentOrderSummary | null {
   if (trades.length === 0) return null;
 
@@ -88,11 +90,11 @@ export function computeParentOrderSummary(
   const fillVwap = totalQty > 0 ? totalNotional / totalQty : 0;
 
   // ── Time bounds ───────────────────────────────────────────────────────────
-  const orderTime = trades.reduce(
+  const orderTime = timeOverride?.start ?? trades.reduce(
     (min, t) => (t.orderTime < min ? t.orderTime : min),
     firstTrade.orderTime
   );
-  const lastFillTime = trades.reduce(
+  const lastFillTime = timeOverride?.end ?? trades.reduce(
     (max, t) => (t.lastFillTime > max ? t.lastFillTime : max),
     firstTrade.lastFillTime
   );

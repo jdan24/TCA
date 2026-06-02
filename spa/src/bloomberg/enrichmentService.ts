@@ -429,16 +429,19 @@ export async function enrichSingleOrder(
   trades: TradeRecord[],
   onProgress?: (progress: EnrichProgress) => void,
   resolveSymbol: (ric: string) => string = (s) => s,
+  /** Optional override for the order window used in all Bloomberg queries. */
+  timeOverride?: { start: Date; end: Date },
 ): Promise<Record<string, BloombergEnrichment>> {
   const result: Record<string, BloombergEnrichment> = {};
   if (trades.length === 0) return result;
 
   // All fills are the same parent order — derive the full execution window.
+  // If the user has manually overridden the times, use those instead.
   const firstTrade = trades[0]!;
   const bbgSymbol  = resolveSymbol(firstTrade.symbol);
 
-  const orderTime    = new Date(Math.min(...trades.map((t) => t.orderTime.getTime())));
-  const lastFillTime = new Date(Math.max(...trades.map((t) => t.lastFillTime.getTime())));
+  const orderTime    = timeOverride?.start ?? new Date(Math.min(...trades.map((t) => t.orderTime.getTime())));
+  const lastFillTime = timeOverride?.end   ?? new Date(Math.max(...trades.map((t) => t.lastFillTime.getTime())));
 
   // Parent fill-VWAP used as the reversion fallback (same as enrichOneTrade uses avgFillPrice)
   const totalQty      = trades.reduce((s, t) => s + t.orderQty, 0);

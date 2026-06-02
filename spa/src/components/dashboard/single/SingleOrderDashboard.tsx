@@ -1,20 +1,20 @@
 /**
  * SingleOrderDashboard — Mode 2 analytics view.
  *
- * All uploaded rows are treated as child slices of one parent order.
- *
  * Layout:
  *   ┌─ Toolbar ──────────────────────────────────────────────────────────┐
+ *   ├─ Algo selector ────────────────────────────────────────────────────┤
  *   ├─ ParentSummaryCard (full width) ───────────────────────────────────┤
  *   ├─ CumulativeTWAP ──────── CumulativeVWAP ──────────────────────────┤
- *   ├─ ExecutionTimeline ───── RunningParticipation ──────────────────┤
+ *   ├─ ExecutionTimeline ───── RunningParticipation ────────────────────┤
  *   └─ TradeTable (fill detail, full width) ─────────────────────────────┘
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { EnrichProgress } from "@/bloomberg/enrichmentService";
 import type { BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
 import { computeParentOrderSummary } from "@/tca/compute";
+import { useTCAStore } from "@/store/useTCAStore";
 import { ExportBar } from "@/components/export/ExportBar";
 import { TradeTable } from "@/components/table/TradeTable";
 import { ParentSummaryCard } from "./ParentSummaryCard";
@@ -22,6 +22,16 @@ import { ExecutionTimeline } from "./ExecutionTimeline";
 import { CumulativeVWAP } from "./CumulativeVWAP";
 import { CumulativeTWAP } from "./CumulativeTWAP";
 import { RunningParticipation } from "./RunningParticipation";
+
+const ALGO_OPTIONS = ["TWAP", "VWAP", "POV", "Pegger", "Sniper", "ArtemIS", "Apollo"] as const;
+type AlgoOption = typeof ALGO_OPTIONS[number];
+
+/** Which benchmark card to highlight given the selected algo. */
+function highlightedBenchmark(algo: AlgoOption | null): "arrival" | "vwap" | "twap" {
+  if (algo === "TWAP") return "twap";
+  if (algo === "VWAP") return "vwap";
+  return "arrival";
+}
 
 interface SingleOrderDashboardProps {
   trades: TradeRecord[];
@@ -44,13 +54,18 @@ export function SingleOrderDashboard({
   onFetchBloomberg,
   onReset,
 }: SingleOrderDashboardProps) {
+  const [selectedAlgo, setSelectedAlgo] = useState<AlgoOption | null>(null);
+
+  // Time overrides (persisted in store so the Bloomberg fetch in App.tsx can read them)
+  const singleOrderTimeOverride = useTCAStore((s) => s.singleOrderTimeOverride);
+  const setSingleOrderTimeOverride = useTCAStore((s) => s.setSingleOrderTimeOverride);
+
   const summary = useMemo(
-    () => computeParentOrderSummary(trades, enrichment),
-    [trades, enrichment],
+    () => computeParentOrderSummary(trades, enrichment, singleOrderTimeOverride ?? undefined),
+    [trades, enrichment, singleOrderTimeOverride],
   );
 
   // Single pass over the first enriched trade's tradeTicks for [orderTime, lastFillTime].
-  // Produces both the price series (ExecutionTimeline) and the size series (RunningParticipation).
   const { marketTicks, marketVolTicks } = useMemo<{
     marketTicks: Array<{ t: number; price: number }> | null;
     marketVolTicks: Array<{ t: number; size: number }> | null;
@@ -134,8 +149,55 @@ export function SingleOrderDashboard({
         </div>
       </div>
 
+      {/* ── Algo selector ───────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3">
+        <label
+          htmlFor="algo-select"
+          className="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap"
+        >
+          Execution Algo
+        </label>
+        <select
+          id="algo-select"
+          value={selectedAlgo ?? ""}
+          onChange={(e) => setSelectedAlgo((e.target.value as AlgoOption) || null)}
+          className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[140px]"
+        >
+          <option value="">— select algo —</option>
+          {ALGO_OPTIONS.map((a) => (
+            <option key={a} value={a}>{a}</option>
+          ))}
+        </select>
+        {selectedAlgo !== null && (
+          <span className="text-[11px] text-gray-400 dark:text-gray-500 italic">
+            {selectedAlgo === "TWAP"
+              ? "Market TWAP is the primary benchmark for this algo"
+              : selectedAlgo === "VWAP"
+                ? "Market VWAP is the primary benchmark for this algo"
+                : "Arrival price is the primary benchmark for this algo"}
+          </span>
+        )}
+      </div>
+
       {/* ── Parent order summary ─────────────────────────────────────────── */}
-      {summary !== null && <ParentSummaryCard summary={summary} />}
+      {summary !== null && (
+        <ParentSummaryCard
+          summary={summary}
+          highlightedBenchmark={selectedAlgo !== null ? highlightedBenchmark(selectedAlgo) : null}
+          onOrderTimeChange={(d) =>
+            setSingleOrderTimeOverride({
+              start: d,
+              end: singleOrderTimeOverride?.end ?? summary.lastFillTime,
+            })
+          }
+          onLastFillTimeChange={(d) =>
+            setSingleOrderTimeOverride({
+              start: singleOrderTimeOverride?.start ?? summary.orderTime,
+              end: d,
+            })
+          }
+        />
+      )}
 
       {/* ── Cumulative TWAP + Cumulative VWAP ──────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

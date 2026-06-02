@@ -21,6 +21,7 @@ function App() {
   const reset = useTCAStore((s) => s.reset);
 
   const symbolMap = useSymbolMap();
+  const singleOrderTimeOverride = useTCAStore((s) => s.singleOrderTimeOverride);
   const [enrichProgress, setEnrichProgress] = useState<EnrichProgress | null>(null);
 
   // Re-run TCA metrics whenever trades or Bloomberg enrichment changes
@@ -36,7 +37,7 @@ function App() {
     // Single Order mode: one set of Bloomberg calls for the full parent window.
     // Multi-order mode: one call per trade (existing behaviour).
     const result = mode === "single"
-      ? await enrichSingleOrder(rawTrades, setEnrichProgress, symbolMap.resolve)
+      ? await enrichSingleOrder(rawTrades, setEnrichProgress, symbolMap.resolve, singleOrderTimeOverride ?? undefined)
       : await enrichAllTrades(rawTrades, setEnrichProgress, symbolMap.resolve);
     setAllEnrichment(result);
     setEnrichProgress(null);
