@@ -23,15 +23,23 @@ interface FillAccumulator {
 // ── Parser ────────────────────────────────────────────────────────────────────
 
 /**
- * Parse one line of pipe-delimited FIX (field separator = "|").
- * Returns null if the line is blank or malformed.
+ * Parse one FIX message line.
+ *
+ * Delimiter auto-detection (per line):
+ *   • SOH (ASCII 0x01) — native FIX wire format; takes precedence when present.
+ *   • "|" (pipe)       — common logging/export format; used when no SOH found.
+ *
+ * Returns null if the line is blank or yields no tag=value pairs.
  */
 function parseLine(line: string): FixMsg | null {
   const trimmed = line.trim();
   if (!trimmed) return null;
 
+  // SOH (0x01) is the canonical FIX field separator; pipe is a common text variant.
+  const delim = trimmed.includes("\x01") ? "\x01" : "|";
+
   const msg: FixMsg = {};
-  const parts = trimmed.split("|");
+  const parts = trimmed.split(delim);
   for (const part of parts) {
     const eq = part.indexOf("=");
     if (eq === -1) continue;
