@@ -149,6 +149,9 @@ export interface SymbolMapping {
   ric: string; // e.g. "ESc1", "ES=F"
   bbgTicker: string; // e.g. "ES1", "CL1"
   bbgYellowKey: string; // "Index" | "Comdty" | "Equity" | "Curncy" | etc.
+  /** Multiplier applied to file fill prices before comparing with Bloomberg prices.
+   *  Omitted / undefined means 1 (no scaling). */
+  priceMultiplier?: number;
 }
 
 // ── Column-mapping types ──────────────────────────────────────────────────────
