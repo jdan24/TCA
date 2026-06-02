@@ -200,21 +200,6 @@ function getPriceAtOrBefore(bars: IntradayBar[], targetTime: Date): number | nul
   return best?.close ?? null;
 }
 
-/**
- * Close of the last bar for the calendar day of `day` (UTC date portion).
- * Returns null when no bars fall on that day.
- */
-function getEodClose(bars: IntradayBar[], day: Date): number | null {
-  const prefix = day.toISOString().slice(0, 10); // "YYYY-MM-DD"
-  let last: IntradayBar | null = null;
-  for (const bar of bars) {
-    if (bar.time.startsWith(prefix)) {
-      last = bar;
-    }
-  }
-  return last?.close ?? null;
-}
-
 // ── Reference data helpers ────────────────────────────────────────────────────
 
 /**
