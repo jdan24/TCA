@@ -2,7 +2,7 @@
  * CumulativeTWAP — running TWAP and running avg fill price vs arrival price.
  *
  * X-axis: fill time (UTC)
- * Amber dashed:  running market TWAP (if Bloomberg enriched, else hidden)
+ * Amber dashed:  running market TWAP from Bloomberg trade ticks (if enriched, else hidden)
  * Green solid:   running avg fill price of the order (cumulative qty-weighted)
  * Purple dashed: individual fill prices
  * Gray dashed:   arrival price reference line
