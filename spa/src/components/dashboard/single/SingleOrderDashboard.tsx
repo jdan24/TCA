@@ -6,8 +6,8 @@
  * Layout:
  *   ┌─ Toolbar ──────────────────────────────────────────────────────────┐
  *   ├─ ParentSummaryCard (full width) ───────────────────────────────────┤
- *   ├─ ExecutionTimeline ──── CumulativeVWAP ────────────────────────────┤
- *   ├─ CumulativeTWAP ──────── QtyProfile ─────────────────────────────┤
+ *   ├─ CumulativeTWAP ──────── CumulativeVWAP ──────────────────────────┤
+ *   ├─ ExecutionTimeline ───── QtyProfile ─────────────────────────────┤
  *   └─ TradeTable (fill detail, full width) ─────────────────────────────┘
  */
 
@@ -45,8 +45,8 @@ export function SingleOrderDashboard({
   onReset,
 }: SingleOrderDashboardProps) {
   const summary = useMemo(
-    () => computeParentOrderSummary(trades, results, enrichment),
-    [trades, results, enrichment],
+    () => computeParentOrderSummary(trades, enrichment),
+    [trades, enrichment],
   );
 
   // Last-traded price ticks for the ExecutionTimeline market-price line.
@@ -132,12 +132,12 @@ export function SingleOrderDashboard({
       {/* ── Parent order summary ─────────────────────────────────────────── */}
       {summary !== null && <ParentSummaryCard summary={summary} />}
 
-      {/* ── Execution timeline + Cumulative VWAP ────────────────────────── */}
+      {/* ── Cumulative TWAP + Cumulative VWAP ──────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ExecutionTimeline
+        <CumulativeTWAP
           trades={trades}
           arrivalPrice={summary?.arrivalPrice ?? null}
-          marketTicks={marketTicks}
+          runningMarketTwap={summary?.runningMarketTwap ?? null}
         />
         <CumulativeVWAP
           trades={trades}
@@ -146,12 +146,12 @@ export function SingleOrderDashboard({
         />
       </div>
 
-      {/* ── TWAP chart + Qty profile ─────────────────────────────────────── */}
+      {/* ── Execution timeline + Qty profile ────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <CumulativeTWAP
+        <ExecutionTimeline
           trades={trades}
           arrivalPrice={summary?.arrivalPrice ?? null}
-          runningMarketTwap={summary?.runningMarketTwap ?? null}
+          marketTicks={marketTicks}
         />
         <QtyProfile trades={trades} />
       </div>

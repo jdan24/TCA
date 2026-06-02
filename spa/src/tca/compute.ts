@@ -73,7 +73,6 @@ export function computeAll(
  */
 export function computeParentOrderSummary(
   trades: TradeRecord[],
-  results: TCAResult[],
   enrichment: Record<string, BloombergEnrichment>
 ): ParentOrderSummary | null {
   if (trades.length === 0) return null;
@@ -116,53 +115,66 @@ export function computeParentOrderSummary(
       ? ((fillVwap - arrivalPrice) / arrivalPrice) * sideSign(side) * 10_000
       : null;
 
-  // ── Vol: average of per-slice vol bps ────────────────────────────────────
-  const volBpsVals = results
-    .map((r) => r.vol_during_order_bps)
-    .filter((v): v is number => v !== null);
-  const volPriceVals = results
-    .map((r) => r.vol_during_order_price)
-    .filter((v): v is number => v !== null);
+  // ── Shared time constants ─────────────────────────────────────────────────
+  const ONE_MIN_MS  = 60_000;
+  const SHORT_MS    = 5 * 60_000;
+  const isShortOrder = duration_ms <= SHORT_MS;
+  const orderMs    = orderTime.getTime();
+  const lastFillMs = lastFillTime.getTime();
+  const fromBarMs  = Math.floor(orderMs    / ONE_MIN_MS) * ONE_MIN_MS;
+  const toBarMs    = Math.floor(lastFillMs / ONE_MIN_MS) * ONE_MIN_MS;
 
-  const vol_during_order_bps = volBpsVals.length > 0
-    ? volBpsVals.reduce((a, b) => a + b, 0) / volBpsVals.length
-    : null;
-  const vol_during_order_price = volPriceVals.length > 0
-    ? volPriceVals.reduce((a, b) => a + b, 0) / volPriceVals.length
-    : null;
+  // ── Vol + participation rate — Bloomberg-direct, full parent window ────────
+  //
+  // Vol: sample std dev of market prices over [orderTime, lastFillTime].
+  //   Short orders (≤5 min): std dev of last-traded prices from trade ticks.
+  //   Long  orders (>5 min): std dev of bar midpoints (high+low)/2.
+  //   Normalised by the window mean → bps.
+  //
+  // Participation: totalQty / Σ(trade tick sizes in [orderTime, lastFillTime]).
+  //   Uses actual prints collected from Bloomberg rather than bar-aggregated
+  //   volume, so the denominator matches exactly what traded in the window.
+  let vol_during_order_price: number | null = null;
+  let vol_during_order_bps:   number | null = null;
+  let participationRate:       number | null = null;
 
-  // ── Participation rate: totalQty / exchange volume during order window ──────
-  // Use actual market volume from the 1-min bars that fall within
-  // [orderTime, lastFillTime] (same minute-floor boundary as VWAP/TWAP).
-  // All slices are fills of the same security so we only need bars from
-  // the first enriched trade.
-  const ONE_MIN_MS = 60_000;
-  const fromBarMs = Math.floor(orderTime.getTime() / ONE_MIN_MS) * ONE_MIN_MS;
-  const toBarMs   = Math.floor(lastFillTime.getTime() / ONE_MIN_MS) * ONE_MIN_MS;
-
-  let orderWindowVolume = 0;
   for (const trade of trades) {
     const e = enrichment[trade.orderId];
-    if (e?.barsSnapshot && e.barsSnapshot.length > 0) {
-      for (const bar of e.barsSnapshot) {
-        const barMs = new Date(bar.time).getTime();
-        if (barMs >= fromBarMs && barMs <= toBarMs) {
-          orderWindowVolume += bar.volume;
-        }
-      }
-      break; // same security for all slices — first enriched trade's bars suffice
-    }
-  }
+    if (!e) continue;
 
-  const participationRate = orderWindowVolume > 0 ? totalQty / orderWindowVolume : null;
+    // Vol
+    const volSamples: number[] = isShortOrder
+      ? e.tradeTicks
+          .filter((tk) => { const ms = tk.time.getTime(); return ms >= orderMs && ms <= lastFillMs; })
+          .map((tk) => tk.price)
+      : e.barsSnapshot
+          .filter((b)  => { const t = new Date(b.time).getTime(); return t >= fromBarMs && t <= toBarMs; })
+          .map((b)  => (b.high + b.low) / 2);
+
+    if (volSamples.length >= 2) {
+      const n   = volSamples.length;
+      const mu  = volSamples.reduce((a, b) => a + b, 0) / n;
+      const sig = Math.sqrt(volSamples.reduce((s, v) => s + (v - mu) ** 2, 0) / (n - 1));
+      vol_during_order_price = sig;
+      vol_during_order_bps   = mu > 0 ? (sig / mu) * 10_000 : null;
+    }
+
+    // Participation rate from trade tick sizes (actual market prints)
+    let mktVol = 0;
+    for (const tk of e.tradeTicks) {
+      const ms = tk.time.getTime();
+      if (ms >= orderMs && ms <= lastFillMs) mktVol += tk.size;
+    }
+    participationRate = mktVol > 0 ? totalQty / mktVol : null;
+
+    break; // same security for all slices — first enriched trade suffices
+  }
 
   // ── Market VWAP (scalar) and running market VWAP (per-fill) ─────────────────
   // Scalar: full-window VWAP shown on the summary card.
   // Running: one point per fill from orderTime up to that fill, shown as an
   //          evolving chart line.  Both use tick midpoints for orders ≤ 5 min
   //          and bar close×volume for longer orders.
-  const SHORT_MS_PARENT = 5 * 60_000;
-  const isShortParent = lastFillTime.getTime() - orderTime.getTime() <= SHORT_MS_PARENT;
   let marketVwap: number | null = null;
   let runningMarketVwap: Array<{ t: number; vwap: number }> | null = null;
   let runningMarketTwap: Array<{ t: number; twap: number }> | null = null;
@@ -175,7 +187,7 @@ export function computeParentOrderSummary(
     const e = enrichment[trade.orderId];
     if (!e) continue;
 
-    if (isShortParent) {
+    if (isShortOrder) {
       // Scalar VWAP: true trade VWAP Σ(price×size)/Σ(size) over the full window
       const fromMs = orderTime.getTime();
       const toMs   = lastFillTime.getTime();
@@ -207,7 +219,7 @@ export function computeParentOrderSummary(
       const fillTimeMs = fill.lastFillTime.getTime();
       let vwap: number | null = null;
 
-      if (isShortParent) {
+      if (isShortOrder) {
         // Up to and including the fill second — true VWAP Σ(price×size)/Σ(size)
         const fromMs = orderTime.getTime();
         let sumPV = 0, sumV = 0;

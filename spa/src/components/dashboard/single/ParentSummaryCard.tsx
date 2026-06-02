@@ -50,7 +50,7 @@ export function ParentSummaryCard({ summary }: ParentSummaryCardProps) {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         <Stat label="Total Qty" value={summary.totalQty.toLocaleString()} />
         <Stat
-          label="Fill VWAP"
+          label="Order Avg. Price"
           value={summary.fillVwap.toLocaleString(undefined, {
             minimumFractionDigits: 2,
             maximumFractionDigits: 6,

@@ -98,7 +98,7 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks }: Executi
       payload?: FillPoint;
     };
     if (cx === undefined || cy === undefined || !payload?.fillPrice) return <g />;
-    const r = 5 + (payload.qty / maxQty) * 7; // 5–12 px
+    const r = 3 + (payload.qty / maxQty) * 3; // 3–6 px
     return (
       <circle
         key={`fill-${payload.t}`}
