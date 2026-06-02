@@ -49,6 +49,26 @@ export function SingleOrderDashboard({
     [trades, results, enrichment],
   );
 
+  // Last-traded price ticks for the ExecutionTimeline market-price line.
+  // Use the first enriched trade's tradeTicks, filtered to [orderTime, lastFillTime].
+  const marketTicks = useMemo<Array<{ t: number; price: number }> | null>(() => {
+    if (summary === null) return null;
+    const orderMs    = summary.orderTime.getTime();
+    const lastFillMs = summary.lastFillTime.getTime();
+    for (const trade of trades) {
+      const e = enrichment[trade.orderId];
+      if (!e || e.tradeTicks.length === 0) continue;
+      const ticks = e.tradeTicks
+        .filter((tk) => {
+          const ms = tk.time.getTime();
+          return ms >= orderMs && ms <= lastFillMs;
+        })
+        .map((tk) => ({ t: tk.time.getTime(), price: tk.price }));
+      return ticks.length > 0 ? ticks : null;
+    }
+    return null;
+  }, [trades, enrichment, summary]);
+
   const isFetching = enrichProgress !== null;
   const pct =
     isFetching && enrichProgress.total > 0
@@ -114,7 +134,11 @@ export function SingleOrderDashboard({
 
       {/* ── Execution timeline + Cumulative VWAP ────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ExecutionTimeline trades={trades} arrivalPrice={summary?.arrivalPrice ?? null} />
+        <ExecutionTimeline
+          trades={trades}
+          arrivalPrice={summary?.arrivalPrice ?? null}
+          marketTicks={marketTicks}
+        />
         <CumulativeVWAP
           trades={trades}
           arrivalPrice={summary?.arrivalPrice ?? null}

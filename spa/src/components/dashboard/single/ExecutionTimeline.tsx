@@ -1,17 +1,22 @@
 /**
- * ExecutionTimeline — scatter chart of fill price vs fill time.
+ * ExecutionTimeline — fill prices overlaid on the continuous market last price.
  *
- * Each point = one child slice.
- * A horizontal dashed reference line marks the arrival price.
- * Point radius is proportional to qty (encoded via ZAxis).
+ * Gray line:   Bloomberg last-traded price tick stream over [orderTime, lastFillTime]
+ *              (only rendered when Bloomberg enrichment is available)
+ * Colored dots: individual fill prices (blue=BUY, red=SELL), size ∝ qty
+ * Gray dashed:  arrival price reference line
+ *
+ * Uses ComposedChart so the Line (market ticks) and Scatter (fills) share the
+ * same X/Y axes.
  */
 
 import {
   CartesianGrid,
+  ComposedChart,
+  Line,
   ReferenceLine,
   ResponsiveContainer,
   Scatter,
-  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
@@ -23,16 +28,25 @@ import { ChartCard, EmptyState } from "@/components/dashboard/dashboardUtils";
 interface ExecutionTimelineProps {
   trades: TradeRecord[];
   arrivalPrice: number | null;
+  /** Bloomberg last-traded price ticks over [orderTime, lastFillTime].
+   *  null = Bloomberg not yet enriched → no market price line shown. */
+  marketTicks: Array<{ t: number; price: number }> | null;
 }
 
-interface Point {
-  t: number; // epoch ms
+interface FillPoint {
+  t: number;
   price: number;
   qty: number;
   label: string;
 }
 
-export function ExecutionTimeline({ trades, arrivalPrice }: ExecutionTimelineProps) {
+function fmtTime(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
+}
+
+export function ExecutionTimeline({ trades, arrivalPrice, marketTicks }: ExecutionTimelineProps) {
   if (trades.length === 0) {
     return (
       <ChartCard title="Execution Timeline" subtitle="Fill price vs time">
@@ -41,42 +55,56 @@ export function ExecutionTimeline({ trades, arrivalPrice }: ExecutionTimelinePro
     );
   }
 
-  // Use lastFillTime — the time when the slice completed execution.
-  // firstFillTime falls back to orderTime when only one time column is
-  // mapped, causing every point to cluster at the parent-order creation
-  // time.  lastFillTime is the most reliable per-fill timestamp.
-  const points: Point[] = trades.map((t) => ({
+  const fillPoints: FillPoint[] = trades.map((t) => ({
     t: t.lastFillTime.getTime(),
     price: t.avgFillPrice,
     qty: t.orderQty,
     label: t.orderId,
   }));
 
-  // Format epoch ms as HH:MM:SS UTC so it matches the timestamps shown
-  // elsewhere in the tool and is unambiguous for FIX data (which is UTC).
-  function fmtTime(ms: number): string {
-    const d = new Date(ms);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
-  }
-
-  const maxQty = Math.max(...points.map((p) => p.qty));
-  // BUY = blue (#3b82f6), SELL = red (#ef4444) — matches ParentSummaryCard badge
   const side = trades[0]?.side ?? "BUY";
   const fillColor = side === "SELL" ? "#ef4444" : "#3b82f6";
+  const maxQty = Math.max(...fillPoints.map((p) => p.qty));
+
+  // ── Axis domains spanning both fill points and market ticks ──────────────
+  const allPrices: number[] = [
+    ...fillPoints.map((p) => p.price),
+    ...(marketTicks ?? []).map((t) => t.price),
+  ];
+  if (arrivalPrice !== null) allPrices.push(arrivalPrice);
+  const pMin = Math.min(...allPrices);
+  const pMax = Math.max(...allPrices);
+  const pPad = (pMax - pMin) * 0.08 || pMin * 0.001;
+  const yDomain: [number, number] = [pMin - pPad, pMax + pPad];
+
+  const allTimes = [
+    ...fillPoints.map((p) => p.t),
+    ...(marketTicks ?? []).map((t) => t.t),
+  ];
+  const tMin = Math.min(...allTimes);
+  const tMax = Math.max(...allTimes);
+  const tPad = (tMax - tMin) * 0.04 || 30_000;
+  const xDomain: [number, number] = [tMin - tPad, tMax + tPad];
+
+  const hasMarket = (marketTicks?.length ?? 0) > 0;
+
+  const subtitle = hasMarket
+    ? `Fill price vs market last (BBG) — ${side} · dot size ∝ qty`
+    : `Fill price vs time — ${side} · dot size ∝ qty · fetch Bloomberg to see market line`;
 
   return (
-    <ChartCard
-      title="Execution Timeline"
-      subtitle={`Fill price vs time — ${side} · point size ∝ qty`}
-    >
+    <ChartCard title="Execution Timeline" subtitle={subtitle}>
       <ResponsiveContainer width="100%" height={260}>
-        <ScatterChart margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
+        <ComposedChart
+          data={marketTicks ?? []}
+          margin={{ top: 8, right: 16, bottom: 8, left: 8 }}
+        >
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
           <XAxis
             dataKey="t"
             type="number"
-            domain={["auto", "auto"]}
+            scale="time"
+            domain={xDomain}
             tickFormatter={fmtTime}
             tick={{ fontSize: 10, fill: "#94a3b8" }}
             tickLine={false}
@@ -84,15 +112,15 @@ export function ExecutionTimeline({ trades, arrivalPrice }: ExecutionTimelinePro
             name="Time"
           />
           <YAxis
-            dataKey="price"
             type="number"
-            domain={["auto", "auto"]}
+            domain={yDomain}
             tick={{ fontSize: 10, fill: "#94a3b8" }}
             tickLine={false}
             axisLine={false}
             tickFormatter={(v: number) => v.toFixed(2)}
             name="Price"
           />
+          {/* ZAxis controls scatter dot size; applies to the Scatter series */}
           <ZAxis dataKey="qty" range={[40, Math.max(200, maxQty * 2)]} name="Qty" />
 
           {arrivalPrice !== null && (
@@ -104,32 +132,72 @@ export function ExecutionTimeline({ trades, arrivalPrice }: ExecutionTimelinePro
             />
           )}
 
+          {/* Market last-traded price line — only when Bloomberg data is available */}
+          {hasMarket && (
+            <Line
+              dataKey="price"
+              stroke="#94a3b8"
+              strokeWidth={1.5}
+              dot={false}
+              activeDot={false}
+              isAnimationActive={false}
+              name="Mkt Last"
+              legendType="none"
+            />
+          )}
+
+          {/* Fill price dots — size encodes qty via ZAxis */}
+          <Scatter
+            data={fillPoints}
+            fill={fillColor}
+            fillOpacity={0.8}
+            name="Fills"
+          />
+
           <Tooltip
             cursor={{ strokeDasharray: "3 3" }}
             content={({ payload }) => {
-              const d = payload?.[0]?.payload as Point | undefined;
-              if (!d) return null;
-              return (
-                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
-                  <p className="font-mono text-gray-500 dark:text-gray-400 mb-1">{d.label}</p>
-                  <p className="text-gray-800 dark:text-gray-200">
-                    Price: <span className="font-semibold tabular-nums">{d.price.toFixed(4)}</span>
-                  </p>
-                  <p className="text-gray-800 dark:text-gray-200">
-                    Qty: <span className="font-semibold tabular-nums">{d.qty.toLocaleString()}</span>
-                  </p>
-                  <p className="text-gray-500 dark:text-gray-400 font-mono">{fmtTime(d.t)}</p>
-                </div>
+              if (!payload || payload.length === 0) return null;
+
+              // Prefer scatter (fill) payload over line (tick) payload
+              const fillEntry = payload.find(
+                (p) => p.name === "Fills" && p.payload?.label !== undefined,
               );
+              if (fillEntry) {
+                const d = fillEntry.payload as FillPoint;
+                return (
+                  <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
+                    <p className="font-mono text-gray-500 dark:text-gray-400 mb-1">{d.label}</p>
+                    <p className="text-gray-800 dark:text-gray-200">
+                      Fill: <span className="font-semibold tabular-nums">{d.price.toFixed(4)}</span>
+                    </p>
+                    <p className="text-gray-800 dark:text-gray-200">
+                      Qty: <span className="font-semibold tabular-nums">{d.qty.toLocaleString()}</span>
+                    </p>
+                    <p className="text-gray-500 dark:text-gray-400 font-mono">{fmtTime(d.t)}</p>
+                  </div>
+                );
+              }
+
+              // Fallback: market price line hover
+              const mktEntry = payload.find((p) => p.name === "Mkt Last");
+              if (mktEntry) {
+                const d = mktEntry.payload as { t: number; price: number };
+                return (
+                  <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
+                    <p className="text-gray-400 dark:text-gray-500 mb-0.5">Market Last</p>
+                    <p className="text-gray-800 dark:text-gray-200">
+                      <span className="font-semibold tabular-nums">{(d.price as number).toFixed(4)}</span>
+                    </p>
+                    <p className="text-gray-500 dark:text-gray-400 font-mono">{fmtTime(d.t as number)}</p>
+                  </div>
+                );
+              }
+
+              return null;
             }}
           />
-
-          <Scatter
-            data={points}
-            fill={fillColor}
-            fillOpacity={0.75}
-          />
-        </ScatterChart>
+        </ComposedChart>
       </ResponsiveContainer>
     </ChartCard>
   );
