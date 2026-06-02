@@ -122,7 +122,7 @@ export function SingleOrderDashboard({
             </span>
           )}
 
-          <ExportBar trades={trades} results={results} />
+          <ExportBar trades={trades} results={results} summary={summary ?? undefined} />
 
           <button
             type="button"
@@ -161,6 +161,7 @@ export function SingleOrderDashboard({
         <RunningParticipation
           trades={trades}
           marketVolTicks={marketVolTicks}
+          marketTicks={marketTicks}
         />
       </div>
 

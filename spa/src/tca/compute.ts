@@ -272,6 +272,11 @@ export function computeParentOrderSummary(
     break; // same security for all slices — first enriched trade suffices
   }
 
+  // Scalar TWAP = the TWAP up to the last fill = average over the full window
+  const marketTwap = runningMarketTwap !== null && runningMarketTwap.length > 0
+    ? runningMarketTwap[runningMarketTwap.length - 1]!.twap
+    : null;
+
   return {
     symbol: firstTrade.symbol,
     side,
@@ -286,6 +291,7 @@ export function computeParentOrderSummary(
     vol_during_order_bps,
     participationRate,
     marketVwap,
+    marketTwap,
     runningMarketVwap,
     runningMarketTwap,
   };

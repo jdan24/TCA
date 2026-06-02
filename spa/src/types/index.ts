@@ -87,6 +87,7 @@ export interface ParentOrderSummary {
   vol_during_order_bps: number | null;
   participationRate: number | null; // totalQty / exchange volume during [orderTime, lastFillTime]
   marketVwap: number | null;        // Bloomberg market VWAP over the full order window
+  marketTwap: number | null;        // Bloomberg market TWAP over the full order window
   /** Running market VWAP at each fill timestamp — null when Bloomberg not connected. */
   runningMarketVwap: Array<{ t: number; vwap: number }> | null;
   /** Running market TWAP at each fill timestamp — null when Bloomberg not connected. */

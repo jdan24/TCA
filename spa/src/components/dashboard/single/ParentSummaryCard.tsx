@@ -102,6 +102,28 @@ export function ParentSummaryCard({ summary }: ParentSummaryCardProps) {
           }
         />
         <Stat
+          label="Market VWAP (BBG)"
+          value={
+            summary.marketVwap !== null
+              ? summary.marketVwap.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 6,
+                })
+              : "N/A (needs BBG)"
+          }
+        />
+        <Stat
+          label="Market TWAP (BBG)"
+          value={
+            summary.marketTwap !== null
+              ? summary.marketTwap.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 6,
+                })
+              : "N/A (needs BBG)"
+          }
+        />
+        <Stat
           label="Order Start (UTC)"
           value={fmtUtc(summary.orderTime)}
         />
