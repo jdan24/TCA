@@ -7,10 +7,11 @@
  *   ├─ ParentSummaryCard (full width) ───────────────────────────────────┤
  *   ├─ CumulativeTWAP ──────── CumulativeVWAP ──────────────────────────┤
  *   ├─ ExecutionTimeline ───── RunningParticipation ────────────────────┤
+ *   ├─ VwapVolumeProfile (full width, VWAP algo only) ──────────────────┤
  *   └─ TradeTable (fill detail, full width) ─────────────────────────────┘
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { EnrichProgress } from "@/bloomberg/enrichmentService";
 import type { BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
 import { computeParentOrderSummary } from "@/tca/compute";
@@ -23,6 +24,7 @@ import { ExecutionTimeline } from "./ExecutionTimeline";
 import { CumulativeVWAP } from "./CumulativeVWAP";
 import { CumulativeTWAP } from "./CumulativeTWAP";
 import { RunningParticipation } from "./RunningParticipation";
+import { VwapVolumeProfile, parseVolumeCurveCsv } from "./VwapVolumeProfile";
 
 const ALGO_OPTIONS = ["TWAP", "VWAP", "POV", "Pegger", "Sniper", "ArtemIS", "Apollo"] as const;
 type AlgoOption = typeof ALGO_OPTIONS[number];
@@ -57,6 +59,32 @@ export function SingleOrderDashboard({
 }: SingleOrderDashboardProps) {
   const [selectedAlgo, setSelectedAlgo] = useState<AlgoOption | null>(null);
   const symbolMap = useSymbolMap();
+
+  // Historical volume curve uploaded by the user (VWAP algo only).
+  // Map: "HH:MM" (UTC) → Smoothed % value from the uploaded CSV.
+  const [histVolCurve, setHistVolCurve]     = useState<Map<string, number> | null>(null);
+  const [histCurveName, setHistCurveName]   = useState<string | null>(null);
+  const [histCurveError, setHistCurveError] = useState<string | null>(null);
+  const volCurveInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleVolumeCurveUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setHistCurveError(null);
+    try {
+      const curve = await parseVolumeCurveCsv(file);
+      if (curve.size === 0) {
+        setHistCurveError("No usable data found — check the file has Time_UTC and Smoothed columns.");
+      } else {
+        setHistVolCurve(curve);
+        setHistCurveName(file.name);
+      }
+    } catch {
+      setHistCurveError("Failed to parse file.");
+    }
+    // Reset input so the same file can be re-uploaded if needed
+    if (volCurveInputRef.current) volCurveInputRef.current.value = "";
+  }
 
   // Time overrides (persisted in store so the Bloomberg fetch in App.tsx can read them)
   const singleOrderTimeOverride    = useTCAStore((s) => s.singleOrderTimeOverride);
@@ -380,6 +408,47 @@ export function SingleOrderDashboard({
                 : "Arrival price is the primary benchmark for this algo"}
           </span>
         )}
+
+        {/* VWAP: upload historical volume curve ───────────────────────── */}
+        {selectedAlgo === "VWAP" && (
+          <div className="flex items-center gap-2 ml-2">
+            <span className="text-[11px] text-gray-400 dark:text-gray-500 whitespace-nowrap">
+              Historical Curve:
+            </span>
+            {histVolCurve ? (
+              <span className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                {histCurveName ?? "Loaded"}
+                <button
+                  type="button"
+                  title="Remove curve"
+                  onClick={() => { setHistVolCurve(null); setHistCurveName(null); setHistCurveError(null); }}
+                  className="ml-1 text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                >
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </span>
+            ) : (
+              <label className="cursor-pointer px-2 py-1 text-[11px] rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors select-none">
+                Upload CSV
+                <input
+                  ref={volCurveInputRef}
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={handleVolumeCurveUpload}
+                />
+              </label>
+            )}
+            {histCurveError && (
+              <span className="text-[11px] text-red-500">{histCurveError}</span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── Parent order summary ─────────────────────────────────────────── */}
@@ -457,6 +526,17 @@ export function SingleOrderDashboard({
           lastFillTime={summary?.lastFillTime ?? null}
         />
       </div>
+
+      {/* ── VWAP volume profile (VWAP algo only) ────────────────────────── */}
+      {selectedAlgo === "VWAP" && summary !== null && (
+        <VwapVolumeProfile
+          trades={scaledTrades}
+          orderTime={summary.orderTime}
+          lastFillTime={summary.lastFillTime}
+          marketVolTicks={marketVolTicks}
+          histVolCurve={histVolCurve}
+        />
+      )}
 
       {/* ── Fill detail table ────────────────────────────────────────────── */}
       <TradeTable trades={scaledTrades} results={results} title="Fill Detail" hideMetrics />
