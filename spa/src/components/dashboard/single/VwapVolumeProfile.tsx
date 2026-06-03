@@ -80,57 +80,12 @@ function colVal(row: Record<string, string>, names: string[]): string | undefine
 interface VolumePoint {
   t: number;
   timeLabel: string;
-  /** Predicted schedule: whole contracts (carry-forward method). Left axis. */
+  /** Historical Smoothed % normalised to order window (sums to 100%). Right axis. */
   historical: number | null;
-  /** Actual market volume from Bloomberg ticks. Right axis. */
+  /** Market volume as % of total window market volume. Right axis. */
   market: number | null;
-  /** Our actual fills (null when 0 so no dot is rendered). Left axis. */
+  /** Our actual fills in contracts (null when 0 — no dot drawn). Left axis. */
   ourOrder: number | null;
-}
-
-/**
- * Build a per-minute VWAP schedule by carrying fractional contracts forward.
- *
- * Each minute's proportional share (totalQty × weight / totalWeight) is added
- * to a running accumulator.  When the accumulator reaches ≥ 1 a whole contract
- * is scheduled and the fraction rolls over to the next minute.
- *
- * At the end the deficit (totalQty − sum_scheduled, always 0 or 1 for integer
- * quantities) is added to the last minute covered by the historical curve so
- * the schedule always sums to exactly totalQty.
- */
-function buildRollingSchedule(totalQty: number, weights: number[]): number[] {
-  const n = weights.length;
-  const result = new Array<number>(n).fill(0);
-  const totalWeight = weights.reduce((s, w) => s + w, 0);
-  if (totalWeight === 0 || totalQty === 0) return result;
-
-  let acc = 0;
-  let lastCoveredIdx = -1;   // last minute that has a non-zero historical weight
-
-  for (let i = 0; i < n; i++) {
-    const w = weights[i]!;
-    if (w > 0) lastCoveredIdx = i;
-
-    // Accumulate this minute's proportional share
-    acc += (totalQty * w) / totalWeight;
-
-    // Execute whole contracts; carry the fraction forward
-    const scheduled = Math.floor(acc);
-    result[i] = scheduled;
-    acc -= scheduled;
-  }
-
-  // After all minutes, any remaining carry represents a genuine rounding gap
-  // (for integer totalQty this is always < 1).  Add it — rounded — to the
-  // last minute that had historical coverage so the total equals totalQty.
-  const totalScheduled = result.reduce((a, b) => a + b, 0);
-  const deficit = Math.round(totalQty - totalScheduled);
-  if (deficit > 0 && lastCoveredIdx >= 0) {
-    result[lastCoveredIdx] = (result[lastCoveredIdx] ?? 0) + deficit;
-  }
-
-  return result;
 }
 
 function buildVolumeData(
@@ -149,15 +104,14 @@ function buildVolumeData(
   const minutes: number[] = [];
   for (let t = startMs; t <= endMs; t += ONE_MIN) minutes.push(t);
 
-  // ── Bucket our fills by minute (absolute qty) ─────────────────────────────
+  // ── Bucket our fills by minute (absolute contracts) ───────────────────────
   const ourByMin = new Map<number, number>();
   for (const t of trades) {
     const min = Math.floor(t.lastFillTime.getTime() / ONE_MIN) * ONE_MIN;
     ourByMin.set(min, (ourByMin.get(min) ?? 0) + t.orderQty);
   }
-  const totalOur = [...ourByMin.values()].reduce((a, b) => a + b, 0);
 
-  // ── Bucket market volume by minute (absolute contracts) ───────────────────
+  // ── Bucket market volume; compute window total for % normalisation ────────
   const mktByMin = new Map<number, number>();
   if (marketVolTicks) {
     for (const tk of marketVolTicks) {
@@ -165,48 +119,39 @@ function buildVolumeData(
       mktByMin.set(min, (mktByMin.get(min) ?? 0) + tk.size);
     }
   }
+  const totalMktVol = [...mktByMin.values()].reduce((a, b) => a + b, 0);
 
-  // ── Historical predicted schedule (carry-forward, whole contracts) ──────
-  // Look up the Smoothed % for each window minute; missing rows default to 0
-  // (zero volume historically → 0 scheduled, but the line stays continuous).
-  const rawHistWeights = minutes.map((t) => {
+  // ── Historical Smoothed % → normalised to window ──────────────────────────
+  // Each minute's raw value from the CSV; missing rows = 0 (zero volume).
+  const histWeights = minutes.map((t) => {
     if (!histCurve) return null;
     const d  = new Date(t);
     const hh = String(d.getUTCHours()).padStart(2, "0");
     const mm = String(d.getUTCMinutes()).padStart(2, "0");
     return histCurve.get(`${hh}:${mm}`) ?? 0;
   });
-
-  // If histCurve is loaded, convert nulls → 0 and run the rolling schedule.
-  // If histCurve is null (not uploaded), keep nulls so the chart can hide the
-  // series and show the "upload curve" prompt instead.
-  const histWindowTotal = rawHistWeights.reduce<number>((s, w) => s + (w ?? 0), 0);
-  const scheduledQty: (number | null)[] =
-    !histCurve || histWindowTotal === 0
-      ? minutes.map(() => null)
-      : buildRollingSchedule(totalOur, rawHistWeights.map((w) => w ?? 0));
+  // Sum of Smoothed values for the order window (used to renormalise to 100%)
+  const histWindowSum = histWeights.reduce<number>((s, w) => s + (w ?? 0), 0);
 
   return minutes.map((t, i) => {
     const d  = new Date(t);
     const hh = String(d.getUTCHours()).padStart(2, "0");
     const mm = String(d.getUTCMinutes()).padStart(2, "0");
 
-    const historical = scheduledQty[i] ?? null;
+    // Historical: Smoothed value ÷ window sum × 100  →  % of window
+    const hw = histWeights[i] ?? null;
+    const historical =
+      hw !== null && histWindowSum > 0 ? (hw / histWindowSum) * 100 : null;
 
-    const mktVol = mktByMin.get(t);
-    const market = mktVol !== undefined && mktVol > 0 ? mktVol : null;
+    // Market: minute volume ÷ window total × 100  →  % of window
+    const mktVol = mktByMin.get(t) ?? 0;
+    const market = totalMktVol > 0 ? (mktVol / totalMktVol) * 100 : null;
 
+    // Our execution: absolute contracts; null for empty minutes (no dot)
     const ourVol  = ourByMin.get(t) ?? 0;
-    // Null for empty minutes so no dot is drawn
     const ourOrder = ourVol > 0 ? ourVol : null;
 
-    return {
-      t,
-      timeLabel: `${hh}:${mm} UTC`,
-      historical,
-      market,
-      ourOrder,
-    };
+    return { t, timeLabel: `${hh}:${mm} UTC`, historical, market, ourOrder };
   });
 }
 
@@ -222,8 +167,8 @@ interface VwapVolumeProfileProps {
 
 const SERIES = {
   ourOrder:   { label: "Our Execution (contracts)", color: "#f97316" },
-  market:     { label: "Market Volume (BBG)",        color: "#3b82f6" },
-  historical: { label: "Scheduled (historical)",     color: "#94a3b8" },
+  market:     { label: "Market Volume % (BBG)",     color: "#3b82f6" },
+  historical: { label: "Historical Schedule %",     color: "#94a3b8" },
 };
 
 export function VwapVolumeProfile({
@@ -264,23 +209,25 @@ export function VwapVolumeProfile({
   }
 
   // ── Axis domains ─────────────────────────────────────────────────────────
-  // Left axis: our order + historical schedule (both in contracts, same scale)
+  // Left axis: Our Execution (contracts)
   const orderVals = data.flatMap((d) =>
-    [d.ourOrder, d.historical].filter((v): v is number => v !== null),
+    d.ourOrder !== null ? [d.ourOrder] : [],
   );
   const yOrderMax = Math.max(...orderVals, 1);
   const yOrderDomain: [number, number] = [0, Math.ceil(yOrderMax * 1.25)];
 
-  // Right axis: market volume (usually much larger)
-  const mktVals = data.flatMap((d) => (d.market !== null ? [d.market] : []));
-  const yMktMax = Math.max(...mktVals, 1);
-  const yMktDomain: [number, number] = [0, Math.ceil(yMktMax * 1.25)];
+  // Right axis: Market % and Historical % — shared % scale
+  const pctVals = data.flatMap((d) =>
+    [d.market, d.historical].filter((v): v is number => v !== null),
+  );
+  const yPctMax = Math.max(...pctVals, 1);
+  const yPctDomain: [number, number] = [0, Math.ceil(yPctMax * 1.25)];
 
   // X-axis label thinning (~6 ticks)
   const interval = Math.max(1, Math.ceil(data.length / 6)) - 1;
 
   const subtitle = [
-    "Contracts per minute — order window · click legend to mute",
+    "Our Execution (contracts, left) · Market & Historical % of window (right) · click legend to mute",
     !hasMarket    && "fetch Bloomberg for market volume",
     !hasHist      && "upload historical curve for schedule",
     (hasHist && !hasHistMatch) && "⚠ historical curve time range doesn't match order window",
@@ -305,30 +252,28 @@ export function VwapVolumeProfile({
             interval={interval}
           />
 
-          {/* Left axis — our order + historical (contracts) */}
+          {/* Left axis — Our Execution (contracts) */}
           <YAxis
             yAxisId="order"
             orientation="left"
             domain={yOrderDomain}
-            tick={{ fontSize: 10, fill: "#94a3b8" }}
+            tick={{ fontSize: 10, fill: "#f97316" }}
             tickLine={false}
             axisLine={false}
             tickFormatter={(v: number) => v.toLocaleString()}
-            width={42}
+            width={38}
           />
 
-          {/* Right axis — market volume (contracts) */}
-          {hasMarket && (
+          {/* Right axis — Market % and Historical % (shared % scale) */}
+          {(hasMarket || hasHistMatch) && (
             <YAxis
-              yAxisId="market"
+              yAxisId="pct"
               orientation="right"
-              domain={yMktDomain}
-              tick={{ fontSize: 10, fill: "#3b82f6" }}
+              domain={yPctDomain}
+              tick={{ fontSize: 10, fill: "#94a3b8" }}
               tickLine={false}
               axisLine={false}
-              tickFormatter={(v: number) =>
-                v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v)
-              }
+              tickFormatter={(v: number) => `${v.toFixed(1)}%`}
               width={46}
             />
           )}
@@ -345,12 +290,13 @@ export function VwapVolumeProfile({
                     const s = SERIES[key as keyof typeof SERIES];
                     if (!s || p.value == null) return null;
                     const v = p.value as number;
+                    const formatted = key === "ourOrder"
+                      ? v.toLocaleString()           // contracts — whole number
+                      : `${v.toFixed(2)}%`;          // % series
                     return (
                       <p key={idx} style={{ color: s.color }}>
                         {s.label}:{" "}
-                        <span className="font-semibold tabular-nums">
-                          {v.toLocaleString()}
-                        </span>
+                        <span className="font-semibold tabular-nums">{formatted}</span>
                       </p>
                     );
                   })}
@@ -383,23 +329,23 @@ export function VwapVolumeProfile({
             wrapperStyle={{ cursor: "pointer" }}
           />
 
-          {/* Market volume — bars on right axis */}
+          {/* Market volume % — bars on right % axis */}
           {hasMarket && (
             <Bar
-              yAxisId="market"
+              yAxisId="pct"
               dataKey="market"
               fill="#3b82f6"
-              fillOpacity={0.35}
+              fillOpacity={0.4}
               radius={[1, 1, 0, 0]}
               isAnimationActive={false}
               hide={hidden.has("market")}
             />
           )}
 
-          {/* Historical predicted schedule — dashed line on left axis */}
+          {/* Historical schedule % — dashed line on right % axis */}
           {hasHistMatch && (
             <Line
-              yAxisId="order"
+              yAxisId="pct"
               type="monotone"
               dataKey="historical"
               stroke="#94a3b8"
@@ -413,7 +359,7 @@ export function VwapVolumeProfile({
             />
           )}
 
-          {/* Our actual execution — dots only (no connecting line), left axis */}
+          {/* Our actual execution — dots only (no line), left contracts axis */}
           <Line
             yAxisId="order"
             dataKey="ourOrder"
