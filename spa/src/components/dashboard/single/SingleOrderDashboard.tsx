@@ -426,6 +426,7 @@ export function SingleOrderDashboard({
           trades={scaledTrades}
           arrivalPrice={summary?.arrivalPrice ?? null}
           runningMarketTwap={summary?.runningMarketTwap ?? null}
+          marketTwap={summary?.marketTwap ?? null}
           orderTime={summary?.orderTime ?? null}
           lastFillTime={summary?.lastFillTime ?? null}
         />
@@ -433,6 +434,7 @@ export function SingleOrderDashboard({
           trades={scaledTrades}
           arrivalPrice={summary?.arrivalPrice ?? null}
           runningMarketVwap={summary?.runningMarketVwap ?? null}
+          marketVwap={summary?.marketVwap ?? null}
           orderTime={summary?.orderTime ?? null}
           lastFillTime={summary?.lastFillTime ?? null}
         />

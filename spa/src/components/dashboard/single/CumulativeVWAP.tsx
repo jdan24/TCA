@@ -30,6 +30,8 @@ interface CumulativeVWAPProps {
   arrivalPrice: number | null;
   /** Per-fill running market VWAP from order start to each fill. null/empty = not yet enriched. */
   runningMarketVwap: Array<{ t: number; vwap: number }> | null;
+  /** Full-window market VWAP (orderTime → lastFillTime). Used as the trailing anchor value. */
+  marketVwap?: number | null;
   /** Explicit order window — drives x-axis domain so the chart shifts when times are overridden. */
   orderTime?: Date | null;
   lastFillTime?: Date | null;
@@ -54,8 +56,10 @@ function fmtUtc(ms: number): string {
 function buildData(
   trades: TradeRecord[],
   vwapByTime: Map<number, number>,
-  /** Optional anchor at orderTime — extends the market line back to order start. */
+  /** Anchor at orderTime — extends the market line back to order start. */
   orderAnchor?: { t: number; value: number } | null,
+  /** Anchor at Order End Time — extends the market line forward past the last fill. */
+  endAnchor?: { t: number; value: number } | null,
 ): DataPoint[] {
   if (trades.length === 0) return [];
 
@@ -82,7 +86,7 @@ function buildData(
     };
   });
 
-  // Prepend an anchor point at orderTime so the market VWAP line starts there.
+  // Prepend a start anchor at orderTime so the market VWAP line starts there.
   // runningFillAvg / fillPrice are null → Recharts creates a line break for fill series
   // so those lines still start from the first actual fill.
   if (orderAnchor && (fillPoints.length === 0 || orderAnchor.t < fillPoints[0]!.t)) {
@@ -96,6 +100,20 @@ function buildData(
     });
   }
 
+  // Append a trailing anchor at Order End Time if it extends past the last fill.
+  // This extends the market VWAP line forward to show what the market did after execution.
+  const lastPt = fillPoints[fillPoints.length - 1];
+  if (endAnchor && lastPt && endAnchor.t > lastPt.t) {
+    fillPoints.push({
+      t: endAnchor.t,
+      timeLabel: fmtUtc(endAnchor.t),
+      runningFillAvg: null,
+      fillPrice: null,
+      cumQty: lastPt.cumQty,
+      marketVwapLine: endAnchor.value,
+    });
+  }
+
   return fillPoints;
 }
 
@@ -105,14 +123,18 @@ const SERIES: Record<string, { label: string; color: string; dash?: string }> = 
   fillPrice:      { label: "Fill Price",         color: "#8b5cf6", dash: "4 2" },
 };
 
-export function CumulativeVWAP({ trades, arrivalPrice, runningMarketVwap, orderTime, lastFillTime }: CumulativeVWAPProps) {
+export function CumulativeVWAP({ trades, arrivalPrice, runningMarketVwap, marketVwap, orderTime, lastFillTime }: CumulativeVWAPProps) {
   const vwapByTime = new Map((runningMarketVwap ?? []).map((p) => [p.t, p.vwap]));
   const hasMarketVwap = (runningMarketVwap?.length ?? 0) > 0;
   // Anchor at orderTime using arrival price so the market line starts there, not at the first fill.
   const orderAnchor = (hasMarketVwap && orderTime && arrivalPrice !== null)
     ? { t: orderTime.getTime(), value: arrivalPrice }
     : null;
-  const data = buildData(trades, vwapByTime, orderAnchor);
+  // Trailing anchor at Order End Time: extends the market line past the last fill dot.
+  const endAnchor = (hasMarketVwap && lastFillTime && (marketVwap ?? null) !== null)
+    ? { t: lastFillTime.getTime(), value: marketVwap! }
+    : null;
+  const data = buildData(trades, vwapByTime, orderAnchor, endAnchor);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
   if (data.length === 0) {

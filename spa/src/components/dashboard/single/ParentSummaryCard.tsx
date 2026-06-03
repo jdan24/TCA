@@ -283,7 +283,7 @@ export function ParentSummaryCard({
               onChange={onOrderTimeChange}
             />
             <EditableTimeRow
-              label="Last Fill (UTC)"
+              label="Order End Time (UTC)"
               date={summary.lastFillTime}
               onChange={onLastFillTimeChange}
             />
