@@ -107,15 +107,19 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, orderT
   const pMax = Math.max(...allPrices);
   const pad = (pMax - pMin) * 0.08 || pMin * 0.001;
 
-  // X-axis domain: anchor to the order window when provided, but always include all fills
+  // X-axis domain: anchor to the order window when provided, but always include all fills.
+  // When orderTime is explicit use it as the hard left boundary (no padding) so the chart
+  // starts exactly at the edited order start time.
   const fillTimes = data.map((d) => d.t);
   const allTimes = [...fillTimes];
   if (orderTime) allTimes.push(orderTime.getTime());
   if (lastFillTime) allTimes.push(lastFillTime.getTime());
   const tMin = Math.min(...allTimes);
   const tMax = Math.max(...allTimes);
-  const tPad = (tMax - tMin) * 0.04 || 30_000;
-  const xDomain: [number, number] = [tMin - tPad, tMax + tPad];
+  const tSpan = tMax - tMin;
+  const leftPad  = orderTime   ? 0 : (tSpan * 0.04 || 30_000);
+  const rightPad = tSpan * 0.02 || 30_000;
+  const xDomain: [number, number] = [tMin - leftPad, tMax + rightPad];
 
   function toggleSeries(key: string) {
     setHidden((prev) => {

@@ -19,7 +19,8 @@ function App() {
   const bloombergConnected = useTCAStore((s) => s.bloombergConnected);
   const setRawTrades = useTCAStore((s) => s.setRawTrades);
   const setResults = useTCAStore((s) => s.setResults);
-  const setAllEnrichment = useTCAStore((s) => s.setAllEnrichment);
+  const setAllEnrichment        = useTCAStore((s) => s.setAllEnrichment);
+  const setSingleOrderFetchWindow = useTCAStore((s) => s.setSingleOrderFetchWindow);
   const reset = useTCAStore((s) => s.reset);
 
   const symbolMap = useSymbolMap();
@@ -53,6 +54,15 @@ function App() {
       ? await enrichSingleOrder(rawTrades, setEnrichProgress, singleOrderResolver, singleOrderTimeOverride ?? undefined)
       : await enrichAllTrades(rawTrades, setEnrichProgress, symbolMap.resolve);
     setAllEnrichment(result);
+    // Record the exact time window used for this fetch so the stale indicator
+    // can accurately detect when the override has moved outside the fetched range.
+    if (mode === "single") {
+      const fetchStart = singleOrderTimeOverride?.start
+        ?? new Date(Math.min(...rawTrades.map((t) => t.orderTime.getTime())));
+      const fetchEnd   = singleOrderTimeOverride?.end
+        ?? new Date(Math.max(...rawTrades.map((t) => t.lastFillTime.getTime())));
+      setSingleOrderFetchWindow({ start: fetchStart, end: fetchEnd });
+    }
     setEnrichProgress(null);
   }
 

@@ -108,7 +108,8 @@ export function RunningParticipation({ trades, marketVolTicks, marketTicks, orde
   const pPad = (pMax - pMin) * 0.1 || pMin * 0.001;
   const yPriceDomain: [number, number] = [pMin - pPad, pMax + pPad];
 
-  // X domain spans both series plus the explicit order window when provided
+  // X domain spans both series plus the explicit order window when provided.
+  // No left padding when orderTime is explicit — start exactly at the order start.
   const allTimes = [
     ...partData.map((d) => d.t),
     ...(marketTicks ?? []).map((t) => t.t),
@@ -117,8 +118,10 @@ export function RunningParticipation({ trades, marketVolTicks, marketTicks, orde
   if (lastFillTime) allTimes.push(lastFillTime.getTime());
   const tMin = Math.min(...allTimes);
   const tMax = Math.max(...allTimes);
-  const tPad = (tMax - tMin) * 0.04 || 30_000;
-  const xDomain: [number, number] = [tMin - tPad, tMax + tPad];
+  const tSpan = tMax - tMin;
+  const leftPad  = orderTime   ? 0 : (tSpan * 0.04 || 30_000);
+  const rightPad = tSpan * 0.02 || 30_000;
+  const xDomain: [number, number] = [tMin - leftPad, tMax + rightPad];
 
   return (
     <ChartCard

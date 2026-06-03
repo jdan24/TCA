@@ -61,6 +61,7 @@ export function SingleOrderDashboard({
   // Time overrides (persisted in store so the Bloomberg fetch in App.tsx can read them)
   const singleOrderTimeOverride    = useTCAStore((s) => s.singleOrderTimeOverride);
   const setSingleOrderTimeOverride = useTCAStore((s) => s.setSingleOrderTimeOverride);
+  const singleOrderFetchWindow     = useTCAStore((s) => s.singleOrderFetchWindow);
   const singleOrderBbgSymbol       = useTCAStore((s) => s.singleOrderBbgSymbol);
   const setSingleOrderBbgSymbol    = useTCAStore((s) => s.setSingleOrderBbgSymbol);
   const singleOrderPriceScale      = useTCAStore((s) => s.singleOrderPriceScale);
@@ -161,25 +162,18 @@ export function SingleOrderDashboard({
     return { marketTicks: null, marketVolTicks: null };
   }, [trades, enrichment, summary]);
 
-  // Detect when the time override extends beyond the already-fetched Bloomberg tick range.
+  // Detect when the current time override is outside the window used for the last
+  // Bloomberg fetch.  Relies on singleOrderFetchWindow set by App.tsx after each fetch.
+  // Falls back to false when no fetch has been performed yet (no stale indicator needed).
   const bbgStale = useMemo(() => {
-    if (!singleOrderTimeOverride) return false;
-    for (const trade of trades) {
-      const e = enrichment[trade.orderId];
-      if (!e || e.tradeTicks.length === 0) continue;
-      let firstTickMs = Infinity, lastTickMs = -Infinity;
-      for (const tk of e.tradeTicks) {
-        const ms = tk.time.getTime();
-        if (ms < firstTickMs) firstTickMs = ms;
-        if (ms > lastTickMs) lastTickMs = ms;
-      }
-      if (!isFinite(firstTickMs)) return false;
-      const startMs = singleOrderTimeOverride.start.getTime();
-      const endMs   = singleOrderTimeOverride.end.getTime();
-      return startMs < firstTickMs || endMs > lastTickMs;
-    }
-    return false;
-  }, [trades, enrichment, singleOrderTimeOverride]);
+    if (!singleOrderTimeOverride || !singleOrderFetchWindow) return false;
+    const startMs = singleOrderTimeOverride.start.getTime();
+    const endMs   = singleOrderTimeOverride.end.getTime();
+    return (
+      startMs < singleOrderFetchWindow.start.getTime() ||
+      endMs   > singleOrderFetchWindow.end.getTime()
+    );
+  }, [singleOrderTimeOverride, singleOrderFetchWindow]);
 
   const isFetching = enrichProgress !== null;
   const pct =

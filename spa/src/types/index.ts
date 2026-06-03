@@ -202,6 +202,10 @@ export interface TCAStore {
   aggregationFilter: AggregationFilter | null;
   /** Override order-window boundaries for the single-order Bloomberg fetch. */
   singleOrderTimeOverride: { start: Date; end: Date } | null;
+  /** The exact time window (orderTime / lastFillTime) that was used for the most recent
+   *  single-order Bloomberg fetch.  null = no fetch performed yet.  Used to detect whether
+   *  the current time override is outside the already-fetched range. */
+  singleOrderFetchWindow: { start: Date; end: Date } | null;
   /** Bloomberg ticker + yellow key typed directly on the single-order page (e.g. "ESH5 Index"). */
   singleOrderBbgSymbol: string | null;
   /** Multiplier applied to every fill price from the file before comparing with Bloomberg prices.
@@ -218,6 +222,7 @@ export interface TCAStore {
   setParseError: (msg: string | null) => void;
   setAggregationFilter: (f: AggregationFilter | null) => void;
   setSingleOrderTimeOverride: (v: { start: Date; end: Date } | null) => void;
+  setSingleOrderFetchWindow: (v: { start: Date; end: Date } | null) => void;
   setSingleOrderBbgSymbol: (v: string | null) => void;
   setSingleOrderPriceScale: (v: number | null) => void;
   reset: () => void;

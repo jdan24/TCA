@@ -98,8 +98,11 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime
   if (lastFillTime) allTimes.push(lastFillTime.getTime());
   const tMin = Math.min(...allTimes);
   const tMax = Math.max(...allTimes);
-  const tPad = (tMax - tMin) * 0.05 || 30_000;
-  const xDomain: [number, number] = [tMin - tPad, tMax + tPad];
+  const tSpan = tMax - tMin;
+  // No left padding when orderTime is explicit — start exactly at the order start.
+  const leftPad  = orderTime   ? 0 : (tSpan * 0.05 || 30_000);
+  const rightPad = tSpan * 0.02 || 30_000;
+  const xDomain: [number, number] = [tMin - leftPad, tMax + rightPad];
 
   const subtitle = hasMarket
     ? "Fill prices vs market last (BBG) · click legend to mute"

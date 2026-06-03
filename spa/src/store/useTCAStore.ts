@@ -18,6 +18,7 @@ const initialState = {
   parseError: null as string | null,
   aggregationFilter: null as AggregationFilter | null,
   singleOrderTimeOverride: null as { start: Date; end: Date } | null,
+  singleOrderFetchWindow:  null as { start: Date; end: Date } | null,
   singleOrderBbgSymbol: null as string | null,
   singleOrderPriceScale: null as number | null,
 };
@@ -35,6 +36,7 @@ export const useTCAStore = create<TCAStore>((set) => ({
   setParseError: (msg) => set({ parseError: msg }),
   setAggregationFilter: (f) => set({ aggregationFilter: f }),
   setSingleOrderTimeOverride: (v) => set({ singleOrderTimeOverride: v }),
+  setSingleOrderFetchWindow:  (v) => set({ singleOrderFetchWindow: v }),
   setSingleOrderBbgSymbol: (v) => set({ singleOrderBbgSymbol: v }),
   setSingleOrderPriceScale: (v) => set({ singleOrderPriceScale: v }),
   reset: () => set(initialState),
