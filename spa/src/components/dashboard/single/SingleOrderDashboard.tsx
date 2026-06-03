@@ -228,6 +228,7 @@ export function SingleOrderDashboard({
         summary={summary}
         charts={printCharts}
         onBack={() => setPrintCharts(null)}
+        resolveSymbol={resolveSymbol}
       />
     );
   }

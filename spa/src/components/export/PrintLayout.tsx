@@ -2,50 +2,30 @@
  * PrintLayout — full-screen view that replaces the single-order dashboard
  * when the user clicks "Print Layout".
  *
- * On screen: a sticky bar with Back / Print / Branding controls sits above
- * a scrollable preview of the report content.  Dashed "page break" dividers
- * show where Ctrl+P will split the output.
+ * On screen: sticky bar with Back / Branding / Print controls; scrollable
+ * content showing the same components as the live dashboard (ParentSummaryCard
+ * + captured chart images), with optional corporate logo and disclaimer.
+ * Dashed dividers indicate where Ctrl+P will split pages.
  *
- * On print (Ctrl+P): the sticky bar is hidden via `print:hidden` Tailwind,
- * `break-before-page` forces each section onto its own sheet, and an injected
- * @page rule sets A4 Portrait with 15 mm / 18 mm margins.
- *
- * Content: company logo (optional) → summary card → 4 charts → disclaimer (optional).
+ * On print (Ctrl+P): sticky bar is hidden via print:hidden, break-before-page
+ * creates page breaks, and an injected @page rule sets A4 Portrait with
+ * 15 mm / 18 mm margins.
  */
 
 import { useEffect, useRef, useState } from "react";
 import type { ParentOrderSummary } from "@/types";
-import { fmtBps, fmtTtf } from "@/components/dashboard/dashboardUtils";
 import { useCorporateTemplate } from "@/hooks/useCorporateTemplate";
+import { ParentSummaryCard } from "@/components/dashboard/single/ParentSummaryCard";
 import type { ChartImages } from "@/components/export/ExportBar";
 
 interface PrintLayoutProps {
-  summary: ParentOrderSummary;
-  charts:  ChartImages;
-  onBack:  () => void;
+  summary:         ParentOrderSummary;
+  charts:          ChartImages;
+  onBack:          () => void;
+  resolveSymbol?:  (ric: string) => string;
 }
 
-// ── Local formatters ──────────────────────────────────────────────────────────
-
-function fmtPrice(v: number | null): string {
-  return v !== null
-    ? v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })
-    : "N/A";
-}
-function fmtPct(v: number | null): string {
-  return v !== null ? `${(v * 100).toFixed(2)}%` : "N/A";
-}
-function fmtUtcStr(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
-    `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} UTC`
-  );
-}
-
-// ── Component ─────────────────────────────────────────────────────────────────
-
-export function PrintLayout({ summary, charts, onBack }: PrintLayoutProps) {
+export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLayoutProps) {
   const { logoDataUrl, disclaimerText, setLogo, setDisclaimer } = useCorporateTemplate();
   const [showBranding, setShowBranding] = useState(false);
   const brandingRef  = useRef<HTMLDivElement>(null);
@@ -84,22 +64,7 @@ export function PrintLayout({ summary, charts, onBack }: PrintLayoutProps) {
     reader.readAsDataURL(file);
   }
 
-  // ── Summary card data ───────────────────────────────────────────────────────
-
-  const sideIsBuy = summary.side === "BUY";
-  const isGood    = summary.IS_bps !== null && summary.IS_bps <= 0;
-  const isBad     = summary.IS_bps !== null && summary.IS_bps >  0;
-  const isColor   = isGood ? "text-green-600" : isBad ? "text-red-600" : "text-slate-900";
   const hasBranding = !!(logoDataUrl || disclaimerText.trim());
-
-  const metrics: [string, string, string, string, string][] = [
-    ["Total Qty",         summary.totalQty.toLocaleString(),   "Duration",            fmtTtf(summary.duration_ms),         ""],
-    ["Order Avg. Price",  fmtPrice(summary.fillVwap),          "Arrival Price",       fmtPrice(summary.arrivalPrice),      ""],
-    ["IS (bps)",          fmtBps(summary.IS_bps),              "Market VWAP (BBG)",   fmtPrice(summary.marketVwap),        isColor],
-    ["Market TWAP (BBG)", fmtPrice(summary.marketTwap),        "Participation Rate",  fmtPct(summary.participationRate),   ""],
-    ["1σ Vol (price)",    summary.vol_during_order_price?.toFixed(4) ?? "N/A",
-                                                               "1σ Vol (bps)",        fmtBps(summary.vol_during_order_bps), ""],
-  ];
 
   const chartList: [string | null, string][] = [
     [charts.twap,          "Cumulative TWAP"],
@@ -108,16 +73,13 @@ export function PrintLayout({ summary, charts, onBack }: PrintLayoutProps) {
     [charts.participation, "Running Participation"],
   ];
 
-  // ── Render ──────────────────────────────────────────────────────────────────
-
   return (
-    <div className="min-h-screen bg-white dark:bg-white">
+    <div className="min-h-screen bg-white">
 
-      {/* ── Screen-only sticky bar ─────────────────────────────────────────── */}
+      {/* ── Screen-only sticky bar ────────────────────────────────────────── */}
       <div className="print:hidden sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
         <div className="flex items-center gap-3 px-6 py-2.5">
 
-          {/* Back button */}
           <button
             type="button"
             onClick={onBack}
@@ -160,7 +122,6 @@ export function PrintLayout({ summary, charts, onBack }: PrintLayoutProps) {
               <div className="absolute right-0 top-9 z-30 w-80 bg-white rounded-xl shadow-xl border border-gray-200 p-4">
                 <p className="text-xs font-semibold text-gray-700 mb-3">Corporate Branding</p>
 
-                {/* Logo */}
                 <div className="mb-3">
                   <p className="text-xs text-gray-500 mb-1.5">Logo</p>
                   <input
@@ -196,7 +157,6 @@ export function PrintLayout({ summary, charts, onBack }: PrintLayoutProps) {
                   )}
                 </div>
 
-                {/* Disclaimer */}
                 <div>
                   <p className="text-xs text-gray-500 mb-1.5">
                     Disclaimer <span className="text-gray-400">(own last page)</span>
@@ -214,7 +174,6 @@ export function PrintLayout({ summary, charts, onBack }: PrintLayoutProps) {
             )}
           </div>
 
-          {/* Print button */}
           <button
             type="button"
             onClick={() => window.print()}
@@ -225,104 +184,58 @@ export function PrintLayout({ summary, charts, onBack }: PrintLayoutProps) {
           </button>
 
           <span className="text-xs text-gray-400 hidden xl:block">
-            In print dialog → paper: <strong>A4</strong>, orientation: <strong>Portrait</strong>
+            paper: <strong>A4</strong> · orientation: <strong>Portrait</strong>
           </span>
         </div>
       </div>
 
-      {/* ── Report content ─────────────────────────────────────────────────── */}
-      {/*
-          On screen: centred, max 760 px, generous padding.
-          On print:  remove max-width / padding — @page margins take over.
-      */}
-      <div className="max-w-[760px] mx-auto px-10 py-8 print:max-w-none print:mx-0 print:px-0 print:py-0">
+      {/* ── Report content ────────────────────────────────────────────────── */}
+      <div className="max-w-4xl mx-auto px-6 py-6 print:max-w-none print:mx-0 print:px-0 print:py-0">
 
-        {/* ── PAGE 1: Logo + Summary card ──────────────────────────────────── */}
+        {/* ── PAGE 1: Logo + Parent Order Summary ──────────────────────────── */}
         <section>
           {logoDataUrl && (
             <>
-              <div className="mb-3 text-center">
+              <div className="mb-4 text-center print:mb-3">
                 <img
                   src={logoDataUrl}
                   alt="Company logo"
                   className="max-h-16 max-w-full inline-block"
                 />
               </div>
-              <hr className="mb-5 border-slate-200" />
+              <hr className="mb-5 border-gray-200" />
             </>
           )}
 
-          {/* Summary card — mirrors the TCA dashboard visual style */}
-          <div className="rounded-lg overflow-hidden border border-slate-200 shadow-sm">
-
-            {/* Blue header band */}
-            <div className="bg-blue-700 px-4 py-3 flex justify-between items-start">
-              <div>
-                <div className="text-white font-bold text-base leading-snug">
-                  Single Order TCA &nbsp;&middot;&nbsp; Transaction Cost Analysis
-                </div>
-                <div className="text-blue-300 text-xs mt-0.5">
-                  Generated {new Date().toLocaleString()}
-                </div>
-              </div>
-              <div className={`ml-4 flex-shrink-0 px-3 py-1 rounded font-bold text-sm ${
-                sideIsBuy ? "bg-blue-100 text-blue-800" : "bg-red-100 text-red-700"
-              }`}>
-                {summary.symbol}&nbsp;&nbsp;{summary.side}
-              </div>
-            </div>
-
-            {/* Metrics grid */}
-            <table className="w-full border-collapse">
-              <tbody>
-                {metrics.map(([l1, v1, l2, v2, cls], i) => (
-                  <tr key={i} className={i % 2 === 0 ? "bg-slate-50" : "bg-white"}>
-                    <td className="px-4 py-2.5 w-1/2 border-r border-slate-200 align-top">
-                      <div className="text-[10px] text-slate-500 mb-0.5">{l1}</div>
-                      <div className={`font-bold text-sm ${cls || "text-slate-900"}`}>{v1}</div>
-                    </td>
-                    <td className="px-4 py-2.5 w-1/2 align-top">
-                      <div className="text-[10px] text-slate-500 mb-0.5">{l2}</div>
-                      <div className="font-bold text-sm text-slate-900">{v2}</div>
-                    </td>
-                  </tr>
-                ))}
-
-                {/* Timing footer row */}
-                <tr className="bg-slate-100">
-                  <td className="px-4 py-2.5 border-r border-slate-200 align-top">
-                    <div className="text-[10px] text-slate-500 mb-0.5">Order Start (UTC)</div>
-                    <div className="font-bold text-sm text-slate-900">{fmtUtcStr(summary.orderTime)}</div>
-                  </td>
-                  <td className="px-4 py-2.5 align-top">
-                    <div className="text-[10px] text-slate-500 mb-0.5">Last Fill (UTC)</div>
-                    <div className="font-bold text-sm text-slate-900">{fmtUtcStr(summary.lastFillTime)}</div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          {/* The actual ParentSummaryCard — identical to the live dashboard */}
+          <ParentSummaryCard
+            summary={summary}
+            highlightedBenchmark={null}
+            onOrderTimeChange={() => {}}
+            onLastFillTimeChange={() => {}}
+            {...(resolveSymbol ? { resolveSymbol } : {})}
+          />
         </section>
 
-        {/* ── Page-break indicator (screen only) + PAGE 2: Charts ──────────── */}
-        <div className="print:hidden my-8 flex items-center gap-3 text-xs text-slate-400 select-none">
-          <div className="flex-1 border-t border-dashed border-slate-300" />
+        {/* ── Page break indicator (screen) + PAGE 2: Charts ──────────────── */}
+        <div className="print:hidden my-8 flex items-center gap-3 text-xs text-gray-400 select-none">
+          <div className="flex-1 border-t border-dashed border-gray-300" />
           <span>page break</span>
-          <div className="flex-1 border-t border-dashed border-slate-300" />
+          <div className="flex-1 border-t border-dashed border-gray-300" />
         </div>
 
         <section className="break-before-page">
-          <p className="text-xs text-slate-500 mb-3">
+          <p className="text-xs text-gray-400 mb-3 print:mb-2">
             {summary.symbol}&nbsp;&nbsp;{summary.side}&nbsp;&middot;&nbsp;Charts
           </p>
           <div className="grid grid-cols-2 gap-4">
             {chartList.map(([src, alt], i) =>
               src ? (
-                <img key={i} src={src} alt={alt} className="w-full h-auto rounded" />
+                <img key={i} src={src} alt={alt} className="w-full h-auto rounded border border-gray-100" />
               ) : (
                 <div
                   key={i}
-                  className="aspect-[2/1] bg-slate-100 rounded flex items-center justify-center text-xs text-slate-400"
+                  className="aspect-[2/1] bg-gray-50 rounded border border-gray-100 flex items-center justify-center text-xs text-gray-400"
                 >
                   {alt} unavailable
                 </div>
@@ -331,32 +244,29 @@ export function PrintLayout({ summary, charts, onBack }: PrintLayoutProps) {
           </div>
         </section>
 
-        {/* ── Page-break indicator + Disclaimer (if set) ────────────────────── */}
+        {/* ── Disclaimer (if set) ───────────────────────────────────────────── */}
         {disclaimerText.trim() && (
           <>
-            <div className="print:hidden my-8 flex items-center gap-3 text-xs text-slate-400 select-none">
-              <div className="flex-1 border-t border-dashed border-slate-300" />
+            <div className="print:hidden my-8 flex items-center gap-3 text-xs text-gray-400 select-none">
+              <div className="flex-1 border-t border-dashed border-gray-300" />
               <span>page break</span>
-              <div className="flex-1 border-t border-dashed border-slate-300" />
+              <div className="flex-1 border-t border-dashed border-gray-300" />
             </div>
 
             <section className="break-before-page">
-              <hr className="border-slate-200 mb-5" />
-              <p className="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">
+              <hr className="border-gray-200 mb-5" />
+              <p className="text-xs text-gray-600 whitespace-pre-wrap leading-relaxed">
                 {disclaimerText.trim()}
               </p>
             </section>
           </>
         )}
 
-        {/* Bottom padding so last section isn't flush against browser chrome */}
         <div className="print:hidden h-16" />
       </div>
     </div>
   );
 }
-
-// ── Icons ──────────────────────────────────────────────────────────────────────
 
 function PrinterIcon() {
   return (
