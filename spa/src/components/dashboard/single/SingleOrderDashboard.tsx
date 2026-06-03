@@ -95,6 +95,16 @@ export function SingleOrderDashboard({
   const singleOrderPriceScale      = useTCAStore((s) => s.singleOrderPriceScale);
   const setSingleOrderPriceScale   = useTCAStore((s) => s.setSingleOrderPriceScale);
 
+  // Symbol resolver: manual override takes priority over the localStorage symbol map.
+  // Mirrors the same priority used in App.tsx when building the Bloomberg fetch resolver.
+  const resolveSymbol = useMemo(
+    () => (ric: string) => {
+      const override = singleOrderBbgSymbol?.trim();
+      return override ? override : symbolMap.resolve(ric);
+    },
+    [singleOrderBbgSymbol, symbolMap],
+  );
+
   // Controlled input string for the scale field (separate from the parsed store value)
   const [scaleInputStr, setScaleInputStr] = useState(
     singleOrderPriceScale !== null ? String(singleOrderPriceScale) : "",
@@ -456,7 +466,7 @@ export function SingleOrderDashboard({
         <ParentSummaryCard
           summary={summary}
           highlightedBenchmark={selectedAlgo !== null ? highlightedBenchmark(selectedAlgo) : null}
-          resolveSymbol={symbolMap.resolve}
+          resolveSymbol={resolveSymbol}
           onOrderTimeChange={(d) =>
             setSingleOrderTimeOverride({
               start: d,
@@ -540,7 +550,7 @@ export function SingleOrderDashboard({
       )}
 
       {/* ── Fill detail table ────────────────────────────────────────────── */}
-      <TradeTable trades={scaledTrades} results={results} title="Fill Detail" hideMetrics resolveSymbol={symbolMap.resolve} />
+      <TradeTable trades={scaledTrades} results={results} title="Fill Detail" hideMetrics resolveSymbol={resolveSymbol} />
     </div>
   );
 }
