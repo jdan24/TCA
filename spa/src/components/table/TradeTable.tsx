@@ -257,6 +257,58 @@ function fmtTtf(ms: number): string {
   return remM > 0 ? `${h}h ${remM}m` : `${h}h`;
 }
 
+// ── CSV export ────────────────────────────────────────────────────────────────
+
+/** Wrap a value in quotes and escape any internal double-quotes. */
+function csvField(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  const s = String(value);
+  // Always quote to handle commas in symbol names, timestamps, etc.
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+const CSV_COLUMNS: Array<{
+  header: string;
+  value: (row: TableRow) => unknown;
+}> = [
+  { header: "Order ID",           value: (r) => r.orderId },
+  { header: "Symbol",             value: (r) => r.symbol },
+  { header: "Side",               value: (r) => r.side },
+  { header: "Qty",                value: (r) => r.orderQty },
+  { header: "Fill Price",         value: (r) => r.avgFillPrice },
+  { header: "Arrival Price",      value: (r) => r.arrivalPrice },
+  { header: "Order Time (UTC)",   value: (r) => fmtUtc(r.orderTime) },
+  { header: "First Fill (UTC)",   value: (r) => fmtUtc(r.firstFillTime) },
+  { header: "Last Fill (UTC)",    value: (r) => fmtUtc(r.lastFillTime) },
+  { header: "Algo",               value: (r) => r.algo },
+  { header: "TTF",                value: (r) => fmtTtf(r.timeToFill_ms) },
+  { header: "IS (bps)",           value: (r) => r.IS_bps },
+  { header: "vs Mkt VWAP (bps)", value: (r) => r.VWAP_dev_bps },
+  { header: "Mkt VWAP",           value: (r) => r.marketVWAP_price },
+  { header: "vs Mkt TWAP (bps)", value: (r) => r.TWAP_dev_bps },
+  { header: "Mkt Impact (bps)",   value: (r) => r.MI_bps },
+  { header: "Rev +30s (bps)",     value: (r) => r.reversion_30s_bps },
+  { header: "Rev +1m (bps)",      value: (r) => r.reversion_1m_bps },
+  { header: "TWAS (bps)",         value: (r) => r.TWAS_bps },
+  { header: "Vol σ (price)",      value: (r) => r.vol_during_order_price },
+  { header: "Vol σ (bps)",        value: (r) => r.vol_during_order_bps },
+];
+
+function exportToCsv(data: TableRow[], filename: string) {
+  const headerRow = CSV_COLUMNS.map((c) => csvField(c.header)).join(",");
+  const dataRows  = data.map((row) =>
+    CSV_COLUMNS.map((c) => csvField(c.value(row))).join(","),
+  );
+  const csv  = [headerRow, ...dataRows].join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function BpsCell({
@@ -704,6 +756,22 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
             </div>
           )}
         </div>
+
+        {/* Export CSV — always exports all rows, ignoring filters and pagination */}
+        {!hideMetrics && (
+          <button
+            type="button"
+            onClick={() => exportToCsv(allData, "trade-detail.csv")}
+            title="Export all rows to CSV (ignores filters & pagination)"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors whitespace-nowrap"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Export CSV
+          </button>
+        )}
 
         <span className="ml-auto text-xs text-gray-400 dark:text-gray-600 whitespace-nowrap">
           {totalFiltered !== data.length

@@ -13,6 +13,8 @@ import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { useTCAStore } from "@/store/useTCAStore";
 import type { SymbolMapping } from "@/types";
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 const YELLOW_KEYS = [
   "Index",
   "Comdty",
@@ -36,18 +38,31 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
   const datasetRics = [...new Set(rawTrades.map((t) => t.symbol))];
   const mappedRics = new Set(mappings.map((m) => m.ric));
 
-  const [newRow, setNewRow] = useState<{ ric: string; bbgTicker: string; bbgYellowKey: string }>({
+  const [newRow, setNewRow] = useState<{
+    ric: string;
+    bbgTicker: string;
+    bbgYellowKey: string;
+    priceMultiplier: string;
+  }>({
     ric: "",
     bbgTicker: "",
     bbgYellowKey: "Index",
+    priceMultiplier: "",
   });
 
   function handleAdd() {
     const ric = newRow.ric.trim();
     const ticker = newRow.bbgTicker.trim();
     if (!ric || !ticker) return;
-    addMapping({ ric, bbgTicker: ticker, bbgYellowKey: newRow.bbgYellowKey });
-    setNewRow({ ric: "", bbgTicker: "", bbgYellowKey: "Index" });
+    const mult = parseFloat(newRow.priceMultiplier);
+    const isValidMult = !isNaN(mult) && mult > 0 && mult !== 1;
+    // Build the mapping object without priceMultiplier when it's not needed —
+    // exactOptionalPropertyTypes prohibits passing `priceMultiplier: undefined`.
+    const newMapping: SymbolMapping = isValidMult
+      ? { ric, bbgTicker: ticker, bbgYellowKey: newRow.bbgYellowKey, priceMultiplier: mult }
+      : { ric, bbgTicker: ticker, bbgYellowKey: newRow.bbgYellowKey };
+    addMapping(newMapping);
+    setNewRow({ ric: "", bbgTicker: "", bbgYellowKey: "Index", priceMultiplier: "" });
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -110,9 +125,10 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-gray-50 dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700">
               <tr>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">RIC</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">RIC / Symbol</th>
                 <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Bloomberg Ticker</th>
                 <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Yellow Key</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Price Multiplier</th>
                 <th className="px-4 py-2.5 w-10" />
               </tr>
             </thead>
@@ -123,12 +139,16 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
                   mapping={m}
                   onUpdate={(patch) => updateMapping(m.ric, patch)}
                   onDelete={() => deleteMapping(m.ric)}
+                  onClearMultiplier={() =>
+                    // Replace with a fresh mapping that has no priceMultiplier field.
+                    addMapping({ ric: m.ric, bbgTicker: m.bbgTicker, bbgYellowKey: m.bbgYellowKey })
+                  }
                 />
               ))}
 
               {mappings.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-xs text-gray-400 dark:text-gray-600 italic">
+                  <td colSpan={5} className="px-4 py-8 text-center text-xs text-gray-400 dark:text-gray-600 italic">
                     No mappings yet — add one below
                   </td>
                 </tr>
@@ -160,6 +180,17 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
                   <YellowKeySelect
                     value={newRow.bbgYellowKey}
                     onChange={(v) => setNewRow((p) => ({ ...p, bbgYellowKey: v }))}
+                  />
+                </td>
+                <td className="px-4 py-2.5">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={newRow.priceMultiplier}
+                    onChange={(e) => setNewRow((p) => ({ ...p, priceMultiplier: e.target.value }))}
+                    onKeyDown={handleKeyDown}
+                    placeholder="1.0"
+                    className="w-20 px-2 py-1 text-xs font-mono rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
                 </td>
                 <td className="px-4 py-2.5 text-center">
@@ -198,9 +229,32 @@ interface MappingRowProps {
   mapping: SymbolMapping;
   onUpdate: (patch: Partial<SymbolMapping>) => void;
   onDelete: () => void;
+  /** Called when the user blanks out the multiplier — replaces the mapping without the field. */
+  onClearMultiplier: () => void;
 }
 
-function MappingRow({ mapping, onUpdate, onDelete }: MappingRowProps) {
+function MappingRow({ mapping, onUpdate, onDelete, onClearMultiplier }: MappingRowProps) {
+  const [multStr, setMultStr] = useState(
+    mapping.priceMultiplier !== undefined && mapping.priceMultiplier !== 1
+      ? String(mapping.priceMultiplier)
+      : "",
+  );
+  const isActive = (() => {
+    const n = parseFloat(multStr);
+    return !isNaN(n) && n > 0 && n !== 1;
+  })();
+
+  function commitMultiplier(s: string) {
+    const n = parseFloat(s);
+    if (!s.trim() || isNaN(n) || n <= 0 || n === 1) {
+      // Can't patch with `priceMultiplier: undefined` (exactOptionalPropertyTypes).
+      // Delegate to parent which replaces the entire mapping object without the field.
+      onClearMultiplier();
+    } else {
+      onUpdate({ priceMultiplier: n });
+    }
+  }
+
   return (
     <tr className="hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors">
       <td className="px-4 py-2">
@@ -211,7 +265,12 @@ function MappingRow({ mapping, onUpdate, onDelete }: MappingRowProps) {
           type="text"
           value={mapping.bbgTicker}
           onChange={(e) => onUpdate({ bbgTicker: e.target.value })}
-          className="w-full px-2 py-1 text-xs rounded border border-gray-200 dark:border-gray-600 bg-transparent focus:bg-white dark:focus:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          placeholder="—"
+          className={`w-full px-2 py-1 text-xs rounded border bg-transparent focus:bg-white dark:focus:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+            mapping.bbgTicker.trim()
+              ? "border-gray-200 dark:border-gray-600"
+              : "border-amber-300 dark:border-amber-700 placeholder:text-amber-400"
+          }`}
         />
       </td>
       <td className="px-4 py-2">
@@ -219,6 +278,27 @@ function MappingRow({ mapping, onUpdate, onDelete }: MappingRowProps) {
           value={mapping.bbgYellowKey}
           onChange={(v) => onUpdate({ bbgYellowKey: v })}
         />
+      </td>
+      <td className="px-4 py-2">
+        <input
+          type="text"
+          inputMode="decimal"
+          value={multStr}
+          placeholder="1.0"
+          onChange={(e) => setMultStr(e.target.value)}
+          onBlur={(e) => commitMultiplier(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") commitMultiplier(multStr); }}
+          className={`w-20 px-2 py-1 text-xs font-mono rounded border bg-transparent focus:bg-white dark:focus:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+            isActive
+              ? "border-amber-400 dark:border-amber-500"
+              : "border-gray-200 dark:border-gray-600"
+          }`}
+        />
+        {isActive && (
+          <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+            ×{parseFloat(multStr).toFixed(4)}
+          </span>
+        )}
       </td>
       <td className="px-4 py-2 text-center">
         <button

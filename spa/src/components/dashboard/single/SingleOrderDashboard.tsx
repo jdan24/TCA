@@ -10,7 +10,7 @@
  *   └─ TradeTable (fill detail, full width) ─────────────────────────────┘
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { EnrichProgress } from "@/bloomberg/enrichmentService";
 import type { BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
 import { computeParentOrderSummary } from "@/tca/compute";
@@ -71,19 +71,58 @@ export function SingleOrderDashboard({
     singleOrderPriceScale !== null ? String(singleOrderPriceScale) : "",
   );
 
+  // ── Symbol-map ↔ price scale sync ─────────────────────────────────────────
+  // On mount: if no scale is set yet, pre-populate from the saved symbol mapping.
+  useEffect(() => {
+    if (singleOrderPriceScale !== null) return; // already set (e.g. from a previous session)
+    const ric = trades[0]?.symbol;
+    if (!ric) return;
+    const saved = symbolMap.mappings.find((m) => m.ric === ric);
+    const mult  = saved?.priceMultiplier;
+    if (mult !== undefined && mult > 0 && mult !== 1) {
+      setSingleOrderPriceScale(mult);
+      setScaleInputStr(String(mult));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally only on mount
+
+  /** Persist the effective price multiplier back to the symbol map. */
+  function persistScaleToMap(mult: number | null) {
+    const ric = trades[0]?.symbol;
+    if (!ric) return;
+    const existing = symbolMap.mappings.find((m) => m.ric === ric);
+    if (mult === null || mult === 1) {
+      // Remove the multiplier: replace the mapping without the priceMultiplier field.
+      // addMapping() does a full replace (filter + append) so the property is gone.
+      if (existing) {
+        symbolMap.addMapping({ ric: existing.ric, bbgTicker: existing.bbgTicker, bbgYellowKey: existing.bbgYellowKey });
+      }
+    } else if (existing) {
+      symbolMap.updateMapping(ric, { priceMultiplier: mult });
+    } else {
+      // No Bloomberg mapping yet — create a scale-only entry so it persists.
+      // bbgTicker is left empty; resolve() returns the raw RIC until the
+      // user fills in the ticker via the Symbol Mapping modal.
+      symbolMap.addMapping({ ric, bbgTicker: "", bbgYellowKey: "Index", priceMultiplier: mult });
+    }
+  }
+
   function applyScaleInput(s: string) {
     setScaleInputStr(s);
     const n = parseFloat(s);
     if (!s.trim() || isNaN(n) || n <= 0 || n === 1) {
       setSingleOrderPriceScale(null);
+      persistScaleToMap(null);
     } else {
       setSingleOrderPriceScale(n);
+      persistScaleToMap(n);
     }
   }
 
   function clearScale() {
     setSingleOrderPriceScale(null);
     setScaleInputStr("");
+    persistScaleToMap(null);
   }
 
   // Apply price scale to fill prices only — timestamps, qty, and Bloomberg prices are unchanged.
