@@ -117,27 +117,27 @@ export function FAQModal({ onClose }: FAQModalProps) {
           {/* ── Bloomberg Data Sources ───────────────────────────────────── */}
           <Section title="Bloomberg Data Sources">
             <Entry name="Arrival Price" tag="/snapshot">
-              <Row label="Bloomberg call" value="IntradayTick snapshot at orderTime (TRADE event)" />
-              <Row label="Fallback" value="First open price from the nearest 1-min bar if no tick is available" />
-              <p>The price of the security at the moment the order was submitted. Used as the benchmark for Implementation Shortfall.</p>
+              <Row label="Bloomberg call" value="(bid + ask) / 2 — mid-price from the nearest bid/ask tick at orderTime" />
+              <Row label="Fallback" value="(barOpen + barClose) / 2 from the 1-min bar covering orderTime, if no bid/ask tick is available" />
+              <p>The mid-price of the security at the moment the order was submitted — the average of the best bid and best ask at Order Start time. Used as the benchmark for Implementation Shortfall.</p>
             </Entry>
 
             <Entry name="1-Minute Intraday Bars" tag="IntradayBarRequest">
               <Row label="Window" value="orderTime − 5 min → end-of-day (EOD close)" />
               <Row label="Fields per bar" value="open, high, low, close, volume, numEvents" />
-              <p>The primary data source for VWAP, TWAP (long orders), volatility, participation rate, and all reversion benchmarks.</p>
+              <p>Primary data source for volatility, participation rate, and post-trade reversion benchmarks. Also used as a fallback for VWAP when the trade-tick stream is empty.</p>
             </Entry>
 
             <Entry name="Bid/Ask Ticks" tag="IntradayTickRequest · BID/ASK">
               <Row label="Window" value="orderTime − 2 min → lastFillTime + 30 s" />
               <Row label="Fields per tick" value="time, bid, ask" />
-              <p>Used exclusively for TWAS (Time-Weighted Average Spread). Not used for price benchmarks.</p>
+              <p>Used for TWAS (Time-Weighted Average Spread) and for the arrival price snapshot. Not used for VWAP or TWAP price benchmarks.</p>
             </Entry>
 
             <Entry name="Trade Ticks (Last Traded)" tag="IntradayTickRequest · TRADE">
               <Row label="Window" value="orderTime → lastFillTime + 30 s" />
               <Row label="Fields per tick" value="time, last price, size" />
-              <p>Used for market VWAP on short orders (≤ 5 min) and for running market TWAP on all single-order durations. These are actual exchange prints, not quoted bid/ask mid-prices.</p>
+              <p>Used for market VWAP (all order durations on the single-order page) and for the time-weighted market TWAP. These are actual exchange prints, not quoted bid/ask mid-prices.</p>
             </Entry>
 
             <Entry name="Reference Data" tag="ReferenceDataRequest">
@@ -150,7 +150,7 @@ export function FAQModal({ onClose }: FAQModalProps) {
           {/* ── Execution Benchmarks ─────────────────────────────────────── */}
           <Section title="Execution Benchmarks">
             <Entry name="Arrival Price">
-              <p>The Bloomberg snapshot price at orderTime. See <em>Bloomberg Data Sources</em> above for fetch details.</p>
+              <p>The mid-price of the security at Order Start time — <strong>(bid + ask) / 2</strong> from the nearest Bloomberg bid/ask tick. This is the price at which you could theoretically trade at the moment the order was submitted, before any execution impact. See <em>Bloomberg Data Sources → Arrival Price</em> for fallback details.</p>
             </Entry>
 
             <Entry name="Implementation Shortfall (IS)" tag="bps">
@@ -164,31 +164,31 @@ export function FAQModal({ onClose }: FAQModalProps) {
             <Entry name="VWAP Deviation" tag="bps">
               <Formula>VWAP Dev = (avgFillPrice − marketVWAP) / marketVWAP × sideSign × 10,000</Formula>
               <Row
-                label="marketVWAP source (short orders ≤ 5 min)"
-                value="Σ(lastPrice × size) / Σ(size) from Bloomberg TRADE ticks over [orderTime, lastFillTime]"
+                label="marketVWAP source (single-order page)"
+                value="Σ(lastPrice × size) / Σ(size) from Bloomberg TRADE ticks over [orderTime, lastFillTime] — all order durations. 1-min bar Σ(close × volume) / Σ(volume) used only as fallback when tick stream is empty."
               />
               <Row
-                label="marketVWAP source (long orders > 5 min)"
-                value="Σ(barClose × barVolume) / Σ(barVolume) from 1-min bars over [orderTime, lastFillTime]"
+                label="marketVWAP source (multi-order page)"
+                value="Σ(lastPrice × size) / Σ(size) from TRADE ticks for orders ≤ 5 min; Σ(barClose × barVolume) / Σ(barVolume) from 1-min bars for orders > 5 min"
               />
               <Row label="Favorable" value={<Pill color="green">negative</Pill>} />
               <Row label="Adverse" value={<Pill color="red">positive</Pill>} />
-              <p>Compares your average fill price to the market's volume-weighted average over the same window. Outperforming VWAP means you bought below (or sold above) the market average.</p>
+              <p>Compares your average fill price to the market's volume-weighted average over the same execution window. On the single-order page, marketVWAP is computed from actual exchange prints for all order durations, matching the Bloomberg terminal figure precisely.</p>
             </Entry>
 
             <Entry name="TWAP Deviation" tag="bps">
               <Formula>TWAP Dev = (avgFillPrice − marketTWAP) / marketTWAP × sideSign × 10,000</Formula>
               <Row
-                label="marketTWAP source (short orders ≤ 5 min)"
-                value="Simple average of (bid+ask)/2 from Bloomberg bid/ask ticks over [orderTime, lastFillTime]"
+                label="marketTWAP source (single-order page)"
+                value="True time-weighted average: Σ(price_i × holdDuration_i) / windowDuration — each last-traded price is weighted by how long it prevailed until the next tick (or window end). The first tick is extended back to orderTime so the full window is always covered."
               />
               <Row
-                label="marketTWAP source (long orders > 5 min)"
-                value="Simple average of (barOpen+barClose)/2 across 1-min bars over [orderTime, lastFillTime]"
+                label="marketTWAP source (multi-order page)"
+                value="Simple average of (barOpen + barClose) / 2 across 1-min bars over [orderTime, lastFillTime]"
               />
               <Row label="Favorable" value={<Pill color="green">negative</Pill>} />
               <Row label="Adverse" value={<Pill color="red">positive</Pill>} />
-              <p>Time-weighted benchmark: each minute (or tick) contributes equally regardless of volume. Useful for evaluating participation-rate strategies where you aim to track the schedule, not the volume.</p>
+              <p>Time-weighted benchmark: price is weighted by the duration it held, not by volume. A quiet period counts more than a burst of prints at the same price level. On the single-order page, this matches how Bloomberg computes TWAP.</p>
             </Entry>
           </Section>
 
@@ -254,22 +254,18 @@ export function FAQModal({ onClose }: FAQModalProps) {
 
             <Entry name="Running Market VWAP (Cumulative Fill VWAP chart)" tag="per-fill line">
               <Row
-                label="Short orders (≤ 5 min)"
-                value="At each fill: Σ(lastPrice × size) / Σ(size) from Bloomberg TRADE ticks over [orderTime, fillSecond]"
+                label="All order durations"
+                value="At each fill: Σ(lastPrice × size) / Σ(size) from Bloomberg TRADE ticks over [orderTime, fillTime]. 1-min bar Σ(close × volume) / Σ(volume) used as fallback if ticks are unavailable."
               />
-              <Row
-                label="Long orders (> 5 min)"
-                value="At each fill: Σ(barClose × barVolume) / Σ(barVolume) from 1-min bars over [orderTime, fillMinute]"
-              />
-              <p>The evolving volume-weighted average price of the market from order submission up to each fill. Plotted as the blue dashed line on the Cumulative Fill VWAP chart. When your running fill average (green) tracks at or below (BUY) / above (SELL) this line, you are outperforming VWAP in real time.</p>
+              <p>The evolving volume-weighted average price of the market from order submission up to each fill — computed from actual exchange prints for all order durations. Plotted as the blue dashed line on the Cumulative Fill VWAP chart. When your running fill average (green) tracks at or below (BUY) / above (SELL) this line, you are outperforming VWAP in real time.</p>
             </Entry>
 
             <Entry name="Running Market TWAP (Cumulative Fill TWAP chart)" tag="per-fill line">
               <Row
                 label="All order durations"
-                value="At each fill: simple average of last-traded prices from Bloomberg TRADE ticks over [orderTime, fillSecond]"
+                value="At each fill: Σ(price_i × holdDuration_i) / windowDuration — each last-traded price weighted by how long it prevailed until the next tick (or fill time). First tick extended to orderTime so the full window is covered."
               />
-              <p>The evolving time-weighted average price of the market from order submission up to each fill, always computed from Bloomberg TRADE ticks regardless of order duration. Plotted as the amber dashed line on the Cumulative Fill TWAP chart. Trade ticks are used (not bar midpoints) to avoid introducing bar-boundary rounding artefacts.</p>
+              <p>The evolving time-weighted average price of the market from order submission up to each fill. Plotted as the amber dashed line on the Cumulative Fill TWAP chart. Because each price is weighted by its hold duration rather than by tick count, a 30-second quiet period weighs 30× more than a one-second burst of prints — matching how Bloomberg calculates TWAP.</p>
             </Entry>
           </Section>
 

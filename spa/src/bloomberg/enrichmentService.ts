@@ -474,7 +474,17 @@ export async function enrichSingleOrder(
   const rawTicks     = shiftToUtc(rawTickData,     tickStart.getTime());
   const rawTradeTicks = shiftToUtc(rawTradeTickData, orderTime.getTime());
 
-  const arrivalPrice = bridgeArrival ?? getPriceAtOrBefore(bars, orderTime);
+  // Arrival price: bridge returns (bid+ask)/2 at orderTime (primary).
+  // Client-side bar fallback: use (open+close)/2 — the bar midpoint is a
+  // more neutral proxy than close alone, which biases toward bar-end price.
+  const arrivalPrice = bridgeArrival ?? (() => {
+    let best: (typeof bars)[number] | null = null;
+    for (const b of bars) {
+      if (new Date(b.time).getTime() <= orderTime.getTime()) best = b;
+      else break;
+    }
+    return best !== null ? (best.open + best.close) / 2 : null;
+  })();
 
   onProgress?.({ done: 1, total: 1 });
 
