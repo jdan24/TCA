@@ -46,6 +46,8 @@ export function ColumnMapper({
       algo: suggested.algo ?? UNMAPPED,
       accountId: suggested.accountId ?? UNMAPPED,
       accountDescription: suggested.accountDescription ?? UNMAPPED,
+      fileVwap: suggested.fileVwap ?? UNMAPPED,
+      fileTwap: suggested.fileTwap ?? UNMAPPED,
     };
     return init;
   });

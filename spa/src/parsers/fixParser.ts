@@ -161,6 +161,8 @@ function aggregate(messages: FixMsg[]): TradeRecord[] {
       algo: null,              // FIX messages do not carry algo policy info
       accountId: null,         // not present in standard FIX execution reports
       accountDescription: null,
+      fileVwap: null,
+      fileTwap: null,
     });
   }
 
@@ -232,6 +234,8 @@ function aggregatePerFill(messages: FixMsg[]): TradeRecord[] {
         algo: null,
         accountId: null,
         accountDescription: null,
+        fileVwap: null,
+        fileTwap: null,
       });
     } catch {
       // Skip fills with unrecognised side or other parse issues

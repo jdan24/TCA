@@ -73,6 +73,16 @@ const FIELD_ALIASES: Record<RequiredField | OptionalField, string[]> = {
     "accountname", "account_name", "clientname", "client_name", "client",
     "portfolioname", "portfolio_name", "portfoliodesc",
   ],
+  fileVwap: [
+    "vwap", "filevwap", "file_vwap", "sourcevwap", "source_vwap",
+    "benchmarkvwap", "benchmark_vwap", "marketvwap", "market_vwap",
+    "mkvwap", "mkt_vwap", "referencevwap", "reference_vwap",
+  ],
+  fileTwap: [
+    "twap", "filetwap", "file_twap", "sourcetwap", "source_twap",
+    "benchmarktwap", "benchmark_twap", "markettwap", "market_twap",
+    "mktwap", "mkt_twap", "referencetwap", "reference_twap",
+  ],
 };
 
 // Strip everything except a-z and 0-9 for comparison
@@ -143,6 +153,8 @@ export const OPTIONAL_FIELDS: OptionalField[] = [
   "algo",
   "accountId",
   "accountDescription",
+  "fileVwap",
+  "fileTwap",
 ];
 
 /** Human-readable labels and descriptions for the ColumnMapper UI */
@@ -181,5 +193,13 @@ export const FIELD_META: Record<
   accountDescription: {
     label: "Client / Account Name",
     description: "Account description or client name (used for filter bar)",
+  },
+  fileVwap: {
+    label: "Source VWAP",
+    description: "Market VWAP from your file — used for VWAP deviation when Bloomberg is offline",
+  },
+  fileTwap: {
+    label: "Source TWAP",
+    description: "Market TWAP from your file — used for TWAP deviation when Bloomberg is offline",
   },
 };

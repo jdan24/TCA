@@ -48,6 +48,9 @@ export function computeAll(
       ? computeMarketTWAP(barsForBenchmarks, e.bidAskTicks, trade.orderTime, trade.lastFillTime)
       : null;
 
+    // TWAP: prefer Bloomberg-derived marketTWAP; fall back to file-sourced fileTwap
+    const marketTWAPFinal = marketTWAP ?? trade.fileTwap ?? null;
+
     return {
       orderId: trade.orderId,
       IS_bps: computeSlippage(trade),
@@ -59,8 +62,9 @@ export function computeAll(
       TWAS_bps: computeTWAS(trade, e?.bidAskTicks ?? []),
       vol_during_order_price: vol.price,
       vol_during_order_bps: vol.bps,
-      TWAP_dev_bps: computeTWAPDeviation(trade, marketTWAP),
-      marketVWAP_price: e?.vwap ?? null,
+      TWAP_dev_bps: computeTWAPDeviation(trade, marketTWAPFinal),
+      // Market VWAP price: Bloomberg scalar, then file VWAP as offline fallback
+      marketVWAP_price: (e && e.vwap !== 0 ? e.vwap : null) ?? trade.fileVwap ?? null,
     };
   });
 }

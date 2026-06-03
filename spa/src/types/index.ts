@@ -29,6 +29,10 @@ export interface TradeRecord {
   algo: string | null;              // "Algo Policy" column; null when absent
   accountId: string | null;         // Portfolio / account identifier; null when absent
   accountDescription: string | null; // Client / account name; null when absent
+  /** VWAP benchmark imported from source file; null when column not mapped. */
+  fileVwap: number | null;
+  /** TWAP benchmark imported from source file; null when column not mapped. */
+  fileTwap: number | null;
 }
 
 // ── Computed TCA metrics per trade ───────────────────────────────────────────
@@ -172,7 +176,9 @@ export type OptionalField =
   | "currency"
   | "algo"
   | "accountId"
-  | "accountDescription";
+  | "accountDescription"
+  | "fileVwap"
+  | "fileTwap";
 
 export type ColumnMapping = Record<RequiredField, string> &
   Partial<Record<OptionalField, string>>;

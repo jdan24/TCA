@@ -1,6 +1,17 @@
 import { parseISO, isValid } from "date-fns";
 import type { ColumnMapping, RawFileData, TradeRecord } from "@/types";
 
+// ── Numeric parsing ───────────────────────────────────────────────────────────
+//
+// Many OMS exports format large numbers with comma thousands-separators
+// (e.g. "1,234" or "5,500.25").  parseFloat() stops at the first comma and
+// returns only the leading integer (1 or 5), silently dropping the rest.
+// Strip all commas before parsing so "1,234" → 1234 and "5,500.25" → 5500.25.
+
+export function parseNum(s: string): number {
+  return parseFloat(s.replace(/,/g, ""));
+}
+
 // ── Null-sentinel detection ───────────────────────────────────────────────────
 //
 // Many data sources export missing values as a bare hyphen "-", double
@@ -119,12 +130,18 @@ export function normalizeRows(data: RawFileData, mapping: ColumnMapping): TradeR
       const orderId = get(mapping.orderId) || `ROW-${i + 1}`;
       const symbol = get(mapping.symbol);
       const side = normalizeSide(get(mapping.side));
-      const orderQty = parseFloat(get(mapping.orderQty));
-      const avgFillPrice = parseFloat(get(mapping.avgFillPrice));
+      const orderQty = parseNum(get(mapping.orderQty));
+      const avgFillPrice = parseNum(get(mapping.avgFillPrice));
 
       // arrivalPrice is optional; null → Bloomberg will provide it in Phase 4
       const arrivalRaw = get(mapping.arrivalPrice);
-      const arrivalPrice = arrivalRaw !== "" ? (parseFloat(arrivalRaw) || null) : null;
+      const arrivalPrice = arrivalRaw !== "" ? (parseNum(arrivalRaw) || null) : null;
+
+      // File-sourced VWAP/TWAP benchmarks (optional — null when column not mapped)
+      const fileVwapRaw = get(mapping.fileVwap);
+      const fileVwap = fileVwapRaw !== "" ? (parseNum(fileVwapRaw) || null) : null;
+      const fileTwapRaw = get(mapping.fileTwap);
+      const fileTwap = fileTwapRaw !== "" ? (parseNum(fileTwapRaw) || null) : null;
 
       // Time fields: try each independently, then cross-fill with whichever
       // values did parse.  Many data sources export missing times as "-".
@@ -147,7 +164,7 @@ export function normalizeRows(data: RawFileData, mapping: ColumnMapping): TradeR
       const lastFillTime  = rawLastFill  ?? rawFirstFill ?? rawOrderTime ?? anyTime;
 
       const multRaw = get(mapping.contractMultiplier);
-      const contractMultiplier = multRaw ? parseFloat(multRaw) || 1 : 1;
+      const contractMultiplier = multRaw ? parseNum(multRaw) || 1 : 1;
 
       const currRaw = get(mapping.currency);
       const currency = currRaw || "USD";
@@ -183,6 +200,8 @@ export function normalizeRows(data: RawFileData, mapping: ColumnMapping): TradeR
         algo,
         accountId,
         accountDescription,
+        fileVwap,
+        fileTwap,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

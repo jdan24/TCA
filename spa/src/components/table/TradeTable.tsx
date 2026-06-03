@@ -11,7 +11,7 @@
  *   • Color-coded bps cells
  */
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   createColumnHelper,
   flexRender,
@@ -122,7 +122,7 @@ const nullableSort: SortingFn<TableRow> = (rowA, rowB, colId) => {
   return a - b;
 };
 
-// ── Timestamp formatter (UTC) ─────────────────────────────────────────────────
+// ── Timestamp formatter + UTC edit helpers ────────────────────────────────────
 
 /**
  * Format a Date as "YYYY-MM-DD HH:MM:SS UTC" using UTC values so the display
@@ -134,6 +134,112 @@ function fmtUtc(d: Date): string {
   return (
     `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
     `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`
+  );
+}
+
+/** Convert a UTC Date to the datetime-local input value string (treated as UTC). */
+function toInputUtc(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T` +
+    `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
+  );
+}
+
+/** Parse a datetime-local string as UTC (append Z to force UTC interpretation). */
+function parseInputAsUtc(s: string): Date | null {
+  if (!s) return null;
+  const d = new Date(s + "Z");
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Compact inline editable time cell — same pencil-edit pattern as
+ * ParentSummaryCard's EditableTimeRow, adapted for table cells.
+ * Changes propagate to the caller via `onChange`; the caller writes
+ * the new date back to rawTrades in the Zustand store so Bloomberg
+ * re-fetches pick up the corrected time window.
+ */
+function EditableTimeCellTable({
+  date,
+  onChange,
+}: {
+  date: Date;
+  onChange: (d: Date) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState("");
+  const [err, setErr] = useState(false);
+
+  function startEdit() {
+    setVal(toInputUtc(date));
+    setErr(false);
+    setEditing(true);
+  }
+  function confirm() {
+    const d = parseInputAsUtc(val);
+    if (!d) { setErr(true); return; }
+    onChange(d);
+    setEditing(false);
+    setErr(false);
+  }
+  function cancel() { setEditing(false); setErr(false); }
+
+  if (editing) {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <div className="flex items-center gap-1">
+          <input
+            type="datetime-local"
+            step="1"
+            value={val}
+            onChange={(e) => { setVal(e.target.value); setErr(false); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") confirm();
+              if (e.key === "Escape") cancel();
+            }}
+            className={[
+              "text-[10px] font-mono rounded border px-1 py-0.5 w-36",
+              "bg-white dark:bg-gray-800 text-gray-900 dark:text-white",
+              "focus:outline-none focus:ring-1 focus:ring-blue-500",
+              err ? "border-red-400" : "border-gray-300 dark:border-gray-600",
+            ].join(" ")}
+            // eslint-disable-next-line jsx-a11y/no-autofocus
+            autoFocus
+          />
+          <button type="button" onClick={confirm} title="Confirm (UTC)"
+            className="text-green-500 hover:text-green-600 transition-colors">
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </button>
+          <button type="button" onClick={cancel} title="Cancel"
+            className="text-gray-400 hover:text-gray-600 transition-colors">
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        {err && (
+          <span className="text-[9px] text-red-500">Invalid — use YYYY-MM-DDTHH:MM:SS</span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1 group">
+      <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap font-mono">
+        {fmtUtc(date)}
+      </span>
+      <button type="button" onClick={startEdit} title="Edit time (UTC)"
+        className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-blue-500 dark:text-gray-600 dark:hover:text-blue-400 transition-all">
+        <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round"
+            d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+        </svg>
+      </button>
+    </div>
   );
 }
 
@@ -196,10 +302,15 @@ function SortIcon({ direction }: { direction: "asc" | "desc" | false }) {
 }
 
 // ── Column definitions ────────────────────────────────────────────────────────
+//
+// Split into three static segments so the two editable time columns
+// (orderTime, lastFillTime) can be injected with their callback inside
+// the component, while the rest stay as module-level constants.
 
 const col = createColumnHelper<TableRow>();
 
-const COLUMNS = [
+// Columns that appear before the time block
+const PRE_TIME_COLS = [
   col.accessor("orderId", {
     header: "Order ID",
     cell: (i) => (
@@ -270,36 +381,22 @@ const COLUMNS = [
     sortingFn: nullableSort,
     enableGlobalFilter: false,
   }),
-  col.accessor("orderTime", {
-    header: "Order Time (UTC)",
-    cell: (i) => (
-      <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap font-mono">
-        {fmtUtc(i.getValue())}
-      </span>
-    ),
-    sortingFn: "datetime",
-    enableGlobalFilter: false,
-  }),
-  col.accessor("firstFillTime", {
-    header: "First Fill (UTC)",
-    cell: (i) => (
-      <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap font-mono">
-        {fmtUtc(i.getValue())}
-      </span>
-    ),
-    sortingFn: "datetime",
-    enableGlobalFilter: false,
-  }),
-  col.accessor("lastFillTime", {
-    header: "Last Fill (UTC)",
-    cell: (i) => (
-      <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap font-mono">
-        {fmtUtc(i.getValue())}
-      </span>
-    ),
-    sortingFn: "datetime",
-    enableGlobalFilter: false,
-  }),
+];
+
+// firstFillTime stays static (read-only display)
+const FIRST_FILL_COL = col.accessor("firstFillTime", {
+  header: "First Fill (UTC)",
+  cell: (i) => (
+    <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap font-mono">
+      {fmtUtc(i.getValue())}
+    </span>
+  ),
+  sortingFn: "datetime",
+  enableGlobalFilter: false,
+});
+
+// Columns that appear after the time block (algo, metrics…)
+const POST_TIME_COLS = [
   col.accessor("algo", {
     header: "Algo",
     cell: (i) => {
@@ -431,6 +528,47 @@ const METRIC_COLUMN_IDS = new Set([
 export function TradeTable({ trades, results, title = "Trade Detail", hideMetrics = false }: TradeTableProps) {
   const aggregationFilter = useTCAStore((s) => s.aggregationFilter);
   const setAggregationFilter = useTCAStore((s) => s.setAggregationFilter);
+  const rawTrades   = useTCAStore((s) => s.rawTrades);
+  const setRawTrades = useTCAStore((s) => s.setRawTrades);
+
+  // Write an edited time back to rawTrades in the store so Bloomberg re-fetches
+  // will use the corrected window on the next "Fetch Bloomberg Data" click.
+  const handleTimeEdit = useCallback(
+    (orderId: string, field: "orderTime" | "lastFillTime", date: Date) => {
+      setRawTrades(rawTrades.map((t) =>
+        t.orderId === orderId ? { ...t, [field]: date } : t,
+      ));
+    },
+    [rawTrades, setRawTrades],
+  );
+
+  // Build the two editable time columns inside the component so they capture
+  // the handleTimeEdit callback. firstFillTime remains static (read-only).
+  const allColumns = useMemo(() => {
+    const editOrderTime = col.accessor("orderTime", {
+      header: "Order Time (UTC)",
+      cell: (i) => (
+        <EditableTimeCellTable
+          date={i.getValue()}
+          onChange={(d) => handleTimeEdit(i.row.original.orderId, "orderTime", d)}
+        />
+      ),
+      sortingFn: "datetime",
+      enableGlobalFilter: false,
+    });
+    const editLastFill = col.accessor("lastFillTime", {
+      header: "Last Fill (UTC)",
+      cell: (i) => (
+        <EditableTimeCellTable
+          date={i.getValue()}
+          onChange={(d) => handleTimeEdit(i.row.original.orderId, "lastFillTime", d)}
+        />
+      ),
+      sortingFn: "datetime",
+      enableGlobalFilter: false,
+    });
+    return [...PRE_TIME_COLS, editOrderTime, FIRST_FILL_COL, editLastFill, ...POST_TIME_COLS];
+  }, [handleTimeEdit]);
 
   // Pre-filter rows by aggregation selection
   const filteredIds = useMemo(
@@ -457,11 +595,11 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
   const [colMenuOpen, setColMenuOpen] = useState(false);
 
   const visibleColumns = hideMetrics
-    ? COLUMNS.filter((c) => {
+    ? allColumns.filter((c) => {
         const id = (c as { accessorKey?: string }).accessorKey ?? "";
         return !METRIC_COLUMN_IDS.has(id);
       })
-    : COLUMNS;
+    : allColumns;
 
   const table = useReactTable({
     data,

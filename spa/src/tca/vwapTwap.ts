@@ -85,9 +85,12 @@ export function computeVWAPDeviation(
   trade: TradeRecord,
   enrichment: BloombergEnrichment | undefined
 ): number | null {
-  if (!enrichment || enrichment.vwap === 0) return null;
+  // Prefer Bloomberg VWAP; fall back to file-sourced VWAP when offline.
+  const vwap =
+    enrichment && enrichment.vwap !== 0
+      ? enrichment.vwap
+      : (trade.fileVwap ?? null);
+  if (vwap === null || vwap === 0) return null;
 
-  return toBps(
-    ((trade.avgFillPrice - enrichment.vwap) / enrichment.vwap) * sideSign(trade.side)
-  );
+  return toBps(((trade.avgFillPrice - vwap) / vwap) * sideSign(trade.side));
 }
