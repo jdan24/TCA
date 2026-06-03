@@ -1,31 +1,31 @@
 /**
- * Export bar — Excel (.xlsx) and PDF export buttons.
+ * Export bar — Excel (.xlsx), PDF, and Print Preview buttons.
  *
  * Libraries are imported statically (not dynamically) because the app is
  * built as a single self-contained HTML file with codeSplitting:false;
  * dynamic import() calls are not inlined by Rollup in that mode.
  *
- * Single-order PDF (3 pages, landscape A4):
+ * Single-order PDF (landscape A4, 3 pages):
  *   Page 1 — styled summary card drawn with jsPDF primitives
- *   Page 2 — all 4 chart visualizations captured via html-to-image, 2-per-row
+ *   Page 2 — 4 chart visualisations captured via html-to-image, 2-per-row
  *   Page 3 — fill detail table (all trade records)
  *
- * When a corporate template PDF is uploaded, its first page is stamped as a
- * background on every output page via pdf-lib. Content margins are inset by
- * TEMPLATE_TOP_PT / TEMPLATE_BOTTOM_PT to avoid overlapping the template's
- * header and footer zones.
+ * Single-order Print Preview:
+ *   Opens a full-screen modal with the report rendered as print-ready HTML
+ *   inside an <iframe>.  The browser's native Ctrl+P / print dialog is used
+ *   to save to PDF — corporate logo and disclaimer are added via localStorage.
  *
  * Multi-order PDF: landscape A4, header + autotable of trades.
  */
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { toPng } from "html-to-image";
 import * as XLSX from "xlsx";
 import type { AggregateRow, AggregationSet, ParentOrderSummary, TCAResult, TradeRecord } from "@/types";
 import { fmtBps, fmtTtf } from "@/components/dashboard/dashboardUtils";
-import { mergeWithTemplate } from "@/utils/pdfTemplateMerger";
+import { PrintPreviewModal } from "@/components/export/PrintPreviewModal";
 
 interface ExportBarProps {
   trades: TradeRecord[];
@@ -35,12 +35,6 @@ interface ExportBarProps {
 }
 
 type ExportRow = Record<string, string | number>;
-
-// ── Template margin constants ─────────────────────────────────────────────────
-// Vertical space (pt) reserved for the corporate template's header / footer.
-// Applied only when a template is loaded; set to 0 otherwise.
-const TEMPLATE_TOP_PT    = 60;
-const TEMPLATE_BOTTOM_PT = 50;
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
@@ -61,19 +55,6 @@ function fmtUtcStr(d: Date): string {
 }
 function datestamp(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-// ── PDF download helper ───────────────────────────────────────────────────────
-
-function downloadPdfBytes(bytes: Uint8Array, filename: string): void {
-  // new Uint8Array(bytes) copies data into a standard ArrayBuffer (TS 6 strict generic safety).
-  const blob = new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement("a");
-  a.href     = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
 // ── Excel data builders ────────────────────────────────────────────────────────
@@ -154,7 +135,7 @@ function doExcelExport(tradeRows: ExportRow[], aggregations?: AggregationSet): v
 // ── Multi-order PDF export ────────────────────────────────────────────────────
 
 function doPdfExport(rows: ExportRow[]): void {
-  const doc  = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  const doc   = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   doc.setFontSize(13); doc.setTextColor(17, 24, 39);
   doc.text("TCA Export", 20, 24);
@@ -188,11 +169,8 @@ async function captureChartById(id: string): Promise<CapturedChart | null> {
   if (!el) return null;
   try {
     // html-to-image handles SVG (Recharts) far better than html2canvas;
-    // it serializes the DOM via XMLSerializer rather than trying to repaint it.
-    const dataUrl = await toPng(el, {
-      backgroundColor: "#ffffff",
-      pixelRatio: 2,
-    });
+    // it serialises the DOM via XMLSerializer rather than trying to repaint it.
+    const dataUrl = await toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 });
     return { img: dataUrl, w: el.offsetWidth, h: el.offsetHeight };
   } catch {
     return null;
@@ -200,60 +178,45 @@ async function captureChartById(id: string): Promise<CapturedChart | null> {
 }
 
 // ── Single-order PDF: summary card drawn with jsPDF primitives ────────────────
-//
-// topOffset / bottomOffset (pt) define vertical dead zones reserved for the
-// corporate template's header and footer.  Both default to 0 (no template).
 
-function drawSummaryCard(
-  doc: jsPDF,
-  summary: ParentOrderSummary,
-  topOffset = 0,
-  bottomOffset = 0,
-): void {
-  const PW     = doc.internal.pageSize.getWidth();
-  const PH     = doc.internal.pageSize.getHeight();
-  const ML     = 28;
-  const cardW  = PW - 2 * ML;
-  const CARD_TOP = 20 + topOffset;
-  const CARD_H   = PH - 44 - topOffset - bottomOffset;
+function drawSummaryCard(doc: jsPDF, summary: ParentOrderSummary): void {
+  const PW    = doc.internal.pageSize.getWidth();
+  const PH    = doc.internal.pageSize.getHeight();
+  const ML    = 28;
+  const cardW = PW - 2 * ML;
 
-  // ── Outer card shadow ────────────────────────────────────────────────────────
+  // Shadow
   doc.setFillColor(226, 232, 240);
-  doc.roundedRect(ML + 2, CARD_TOP + 2, cardW, CARD_H, 6, 6, "F");
+  doc.roundedRect(ML + 2, 22, cardW, PH - 44, 6, 6, "F");
 
-  // ── Card background ──────────────────────────────────────────────────────────
+  // Card background
   doc.setFillColor(255, 255, 255);
-  doc.roundedRect(ML, CARD_TOP, cardW, CARD_H, 6, 6, "F");
+  doc.roundedRect(ML, 20, cardW, PH - 44, 6, 6, "F");
 
-  // ── Header band ─────────────────────────────────────────────────────────────
+  // Header band
   doc.setFillColor(37, 99, 235);
-  doc.roundedRect(ML, CARD_TOP, cardW, 48, 6, 6, "F");
+  doc.roundedRect(ML, 20, cardW, 48, 6, 6, "F");
   doc.setFillColor(37, 99, 235);
-  doc.rect(ML, CARD_TOP + 24, cardW, 24, "F");
+  doc.rect(ML, 44, cardW, 24, "F");
 
-  // Header title
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(14);
-  doc.setTextColor(255, 255, 255);
-  doc.text("Single Order TCA  ·  Transaction Cost Analysis", ML + 14, CARD_TOP + 20);
+  // Title
+  doc.setFont("helvetica", "bold"); doc.setFontSize(14); doc.setTextColor(255, 255, 255);
+  doc.text("Single Order TCA  ·  Transaction Cost Analysis", ML + 14, 40);
 
-  // Subtitle: generated date
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.5);
-  doc.setTextColor(147, 197, 253);
-  doc.text(`Generated ${new Date().toLocaleString()}`, ML + 14, CARD_TOP + 38);
+  // Subtitle
+  doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(147, 197, 253);
+  doc.text(`Generated ${new Date().toLocaleString()}`, ML + 14, 58);
 
-  // Symbol + side badge (top-right of header)
+  // Symbol + side badge
   const sideIsBuy = summary.side === "BUY";
   doc.setFillColor(...(sideIsBuy ? [219, 234, 254] : [254, 226, 226]) as [number,number,number]);
-  doc.roundedRect(PW - ML - 110, CARD_TOP + 8, 104, 28, 5, 5, "F");
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
+  doc.roundedRect(PW - ML - 110, 28, 104, 28, 5, 5, "F");
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11);
   doc.setTextColor(...(sideIsBuy ? [30, 64, 175] : [185, 28, 28]) as [number,number,number]);
-  doc.text(`${summary.symbol}  ${summary.side}`, PW - ML - 104, CARD_TOP + 26);
+  doc.text(`${summary.symbol}  ${summary.side}`, PW - ML - 104, 46);
 
-  // ── Metrics grid ─────────────────────────────────────────────────────────────
-  const GRID_TOP  = CARD_TOP + 62;
+  // Metrics grid
+  const GRID_TOP  = 82;
   const COL_W     = cardW / 2;
   const ROW_H     = 38;
   const LBL_COLOR: [number,number,number] = [100, 116, 139];
@@ -262,10 +225,8 @@ function drawSummaryCard(
   const WHITE:     [number,number,number] = [255, 255, 255];
 
   const isGood = summary.IS_bps !== null && summary.IS_bps <= 0;
-  const isBad  = summary.IS_bps !== null && summary.IS_bps >  0;
-  const IS_COLOR: [number,number,number] = isGood
-    ? [22, 163, 74]
-    : isBad ? [220, 38, 38] : VAL_COLOR;
+  const isBad  = summary.IS_bps !== null && summary.IS_bps > 0;
+  const IS_COLOR: [number,number,number] = isGood ? [22, 163, 74] : isBad ? [220, 38, 38] : VAL_COLOR;
 
   const metrics: Array<[string, string, string, string, [number,number,number]?]> = [
     ["Total Qty",         summary.totalQty.toLocaleString(),   "Duration",            fmtTtf(summary.duration_ms)],
@@ -285,8 +246,7 @@ function drawSummaryCard(
     doc.setFillColor(...bg);
     doc.rect(ML, rowY, cardW, ROW_H, "F");
 
-    doc.setDrawColor(226, 232, 240);
-    doc.setLineWidth(0.5);
+    doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.5);
     doc.line(ML + COL_W, rowY + 4, ML + COL_W, rowY + ROW_H - 4);
 
     doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...LBL_COLOR);
@@ -301,7 +261,7 @@ function drawSummaryCard(
     doc.text(val2, ML + COL_W + 12, rowY + 27);
   }
 
-  // ── Timing footer band ───────────────────────────────────────────────────────
+  // Timing footer band
   const footerY = GRID_TOP + metrics.length * ROW_H;
   doc.setFillColor(241, 245, 249);
   doc.rect(ML, footerY, cardW, 36, "F");
@@ -310,30 +270,24 @@ function drawSummaryCard(
   doc.roundedRect(ML, footerY + 24, cardW, 12, 0, 6, "F");
 
   doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...LBL_COLOR);
-  doc.text("Order Start (UTC)",  ML + 12,          footerY + 12);
-  doc.text("Last Fill (UTC)",    ML + COL_W + 12,  footerY + 12);
+  doc.text("Order Start (UTC)",  ML + 12,         footerY + 12);
+  doc.text("Last Fill (UTC)",    ML + COL_W + 12, footerY + 12);
   doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(...VAL_COLOR);
   doc.text(fmtUtcStr(summary.orderTime),    ML + 12,         footerY + 25);
   doc.text(fmtUtcStr(summary.lastFillTime), ML + COL_W + 12, footerY + 25);
 
   // Card border
-  doc.setDrawColor(203, 213, 225);
-  doc.setLineWidth(0.75);
-  doc.roundedRect(ML, CARD_TOP, cardW, CARD_H, 6, 6, "S");
+  doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.75);
+  doc.roundedRect(ML, 20, cardW, PH - 44, 6, 6, "S");
 }
 
-// ── Single-order PDF export ───────────────────────────────────────────────────
+// ── Single-order PDF export (landscape A4, 3 pages) ──────────────────────────
 
 async function doPdfExportSingle(
   summary: ParentOrderSummary,
   trades: TradeRecord[],
   _results: TCAResult[],
-  templateBytes: ArrayBuffer | null,
 ): Promise<void> {
-  const topOffset    = templateBytes ? TEMPLATE_TOP_PT    : 0;
-  const bottomOffset = templateBytes ? TEMPLATE_BOTTOM_PT : 0;
-
-  // Capture all 4 charts before opening the PDF doc
   const CHART_IDS = [
     "so-chart-twap",
     "so-chart-vwap",
@@ -348,11 +302,11 @@ async function doPdfExportSingle(
       CapturedChart|null, CapturedChart|null
     ];
 
-  // ── Page 1: Summary card ──────────────────────────────────────────────────────
+  // Page 1: Summary card
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-  drawSummaryCard(doc, summary, topOffset, bottomOffset);
+  drawSummaryCard(doc, summary);
 
-  // ── Page 2: Charts 2×2 ───────────────────────────────────────────────────────
+  // Page 2: Charts 2×2
   doc.addPage();
   const PW   = doc.internal.pageSize.getWidth();
   const PH   = doc.internal.pageSize.getHeight();
@@ -360,12 +314,9 @@ async function doPdfExportSingle(
   const GAP  = 8;
   const colW = (PW - 2 * MARG - GAP) / 2;
 
-  doc.setFont("helvetica", "normal"); doc.setFontSize(8);
-  doc.setTextColor(100, 116, 139);
-  const chartLabelY = topOffset > 0 ? topOffset + 6 : 11;
-  doc.text(`${summary.symbol}  ${summary.side}  ·  Charts`, MARG, chartLabelY);
-
-  let curY = topOffset > 0 ? topOffset + 10 : 16;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(100, 116, 139);
+  doc.text(`${summary.symbol}  ${summary.side}  ·  Charts`, MARG, 11);
+  let curY = 16;
 
   function placeChart(cap: CapturedChart | null, x: number, y: number): number {
     if (!cap) return 0;
@@ -380,7 +331,6 @@ async function doPdfExportSingle(
         vwapCap ? (vwapCap.h / vwapCap.w) * colW     : 0,
       )
     : 0;
-
   const r2h = timelineCap || partCap
     ? Math.max(
         timelineCap ? (timelineCap.h / timelineCap.w) * colW : 0,
@@ -388,29 +338,19 @@ async function doPdfExportSingle(
       )
     : 0;
 
-  const availH = PH - topOffset - bottomOffset - 2 * MARG;
-
-  // Row 1: Cumulative TWAP | Cumulative VWAP
   placeChart(twapCap,  MARG,             curY);
   placeChart(vwapCap,  MARG + colW + GAP, curY);
-  curY += (r1h > 0 ? r1h : availH / 2) + GAP;
+  curY += (r1h > 0 ? r1h : (PH - 2 * MARG) / 2) + GAP;
 
-  // If row 2 overflows, start a new page
-  if (curY + r2h > PH - MARG - bottomOffset) {
-    doc.addPage();
-    curY = topOffset > 0 ? topOffset + 10 : MARG;
-  }
+  if (curY + r2h > PH - MARG) { doc.addPage(); curY = MARG; }
 
-  // Row 2: Execution Timeline | Running Participation
   placeChart(timelineCap, MARG,             curY);
   placeChart(partCap,     MARG + colW + GAP, curY);
 
-  // ── Page 3: Fill Detail table ─────────────────────────────────────────────────
+  // Page 3: Fill detail table
   doc.addPage();
-  const fillLabelY = topOffset > 0 ? topOffset + 6 : 11;
-  doc.setFont("helvetica", "normal"); doc.setFontSize(8);
-  doc.setTextColor(100, 116, 139);
-  doc.text(`${summary.symbol}  ${summary.side}  ·  Fill Detail`, MARG, fillLabelY);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(100, 116, 139);
+  doc.text(`${summary.symbol}  ${summary.side}  ·  Fill Detail`, MARG, 11);
 
   const fillBody = trades.map((t) => [
     t.orderId,
@@ -426,29 +366,17 @@ async function doPdfExportSingle(
   ]);
 
   autoTable(doc, {
-    startY: topOffset > 0 ? topOffset + 10 : 16,
+    startY: 16,
     head: [["Order ID", "Symbol", "Side", "Qty", "Fill Price", "Arrival Price",
             "Order Time (UTC)", "First Fill (UTC)", "Last Fill (UTC)", "Algo"]],
     body: fillBody,
     styles: { fontSize: 6.5, cellPadding: 2.5, overflow: "ellipsize" },
     headStyles: { fillColor: [59, 130, 246], textColor: [255, 255, 255], fontStyle: "bold", fontSize: 7 },
     alternateRowStyles: { fillColor: [248, 250, 252] },
-    margin: {
-      left:   MARG,
-      right:  MARG,
-      bottom: bottomOffset > 0 ? bottomOffset + 8 : 15,
-    },
+    margin: { left: MARG, right: MARG, bottom: 15 },
   });
 
-  // ── Merge with template (if loaded) then download ────────────────────────────
-  const filename = `tca_${summary.symbol}_${summary.side}_${datestamp()}.pdf`;
-  if (templateBytes) {
-    const contentBytes = doc.output("arraybuffer");
-    const merged = await mergeWithTemplate(contentBytes, templateBytes);
-    downloadPdfBytes(merged, filename);
-  } else {
-    doc.save(filename);
-  }
+  doc.save(`tca_${summary.symbol}_${summary.side}_${datestamp()}.pdf`);
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -456,27 +384,8 @@ async function doPdfExportSingle(
 type Exporting = "excel" | "pdf" | null;
 
 export function ExportBar({ trades, results, aggregations, summary }: ExportBarProps) {
-  const [exporting,    setExporting]    = useState<Exporting>(null);
-  const [templateBytes, setTemplateBytes] = useState<ArrayBuffer | null>(null);
-  const [templateName,  setTemplateName]  = useState<string | null>(null);
-  const templateInputRef = useRef<HTMLInputElement>(null);
-
-  function handleTemplateFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setTemplateBytes((ev.target?.result as ArrayBuffer) ?? null);
-      setTemplateName(file.name);
-    };
-    reader.readAsArrayBuffer(file);
-    e.target.value = "";
-  }
-
-  function clearTemplate() {
-    setTemplateBytes(null);
-    setTemplateName(null);
-  }
+  const [exporting,       setExporting]       = useState<Exporting>(null);
+  const [showPrintPreview, setShowPrintPreview] = useState(false);
 
   function handleExcel() {
     if (exporting !== null) return;
@@ -491,7 +400,7 @@ export function ExportBar({ trades, results, aggregations, summary }: ExportBarP
     setExporting("pdf");
     try {
       if (summary) {
-        await doPdfExportSingle(summary, trades, results, templateBytes);
+        await doPdfExportSingle(summary, trades, results);
       } else {
         doPdfExport(buildTradeRows(trades, results));
       }
@@ -502,61 +411,49 @@ export function ExportBar({ trades, results, aggregations, summary }: ExportBarP
   const busy = exporting !== null;
 
   return (
-    <div className="flex items-center gap-2">
-      {/* Corporate template upload (single-order only; multi-order deferred) */}
-      {summary && (
-        <>
-          <input
-            ref={templateInputRef}
-            type="file"
-            accept=".pdf"
-            className="hidden"
-            onChange={handleTemplateFile}
-          />
-          {templateName ? (
-            <span className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg border border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300 max-w-[180px]">
-              <TemplateIcon />
-              <span className="truncate flex-1 min-w-0">{templateName}</span>
-              <button
-                type="button"
-                onClick={clearTemplate}
-                className="shrink-0 ml-0.5 leading-none hover:text-blue-900 dark:hover:text-blue-100"
-                title="Remove template"
-                aria-label="Remove corporate template"
-              >
-                ×
-              </button>
-            </span>
-          ) : (
+    <>
+      <div className="flex items-center gap-2">
+        {/* Print Preview — single-order mode only */}
+        {summary && (
+          <>
             <button
               type="button"
               disabled={busy}
-              onClick={() => templateInputRef.current?.click()}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-dashed border-gray-300 dark:border-gray-600 bg-transparent text-gray-500 dark:text-gray-400 hover:border-gray-400 hover:text-gray-600 dark:hover:border-gray-500 dark:hover:text-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              title="Upload a corporate PDF template (header + footer)"
+              onClick={() => setShowPrintPreview(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              title="Open branded print preview (logo + disclaimer)"
             >
-              <TemplateIcon />
-              Template
+              <PrinterIcon />
+              Print Preview
             </button>
-          )}
-          <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 shrink-0" />
-        </>
-      )}
+            <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 shrink-0" />
+          </>
+        )}
 
-      <button type="button" disabled={busy} onClick={handleExcel}
-        className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-wait transition-colors"
-        title="Export to Excel (.xlsx)">
-        {exporting === "excel" ? <Spinner /> : <DownloadIcon />}
-        {exporting === "excel" ? "Exporting…" : "Excel"}
-      </button>
-      <button type="button" disabled={busy}
-        className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-wait transition-colors"
-        title="Export to PDF"
-        onClick={() => { void handlePdf(); }}>
-        {exporting === "pdf" ? <Spinner /> : <PdfIcon />}
-        {exporting === "pdf" ? "Exporting…" : "PDF"}
-      </button>
-    </div>
+        <button type="button" disabled={busy} onClick={handleExcel}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-wait transition-colors"
+          title="Export to Excel (.xlsx)">
+          {exporting === "excel" ? <Spinner /> : <DownloadIcon />}
+          {exporting === "excel" ? "Exporting…" : "Excel"}
+        </button>
+        <button type="button" disabled={busy}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-wait transition-colors"
+          title="Export to PDF"
+          onClick={() => { void handlePdf(); }}>
+          {exporting === "pdf" ? <Spinner /> : <PdfIcon />}
+          {exporting === "pdf" ? "Exporting…" : "PDF"}
+        </button>
+      </div>
+
+      {showPrintPreview && summary && (
+        <PrintPreviewModal
+          summary={summary}
+          trades={trades}
+          results={results}
+          onClose={() => setShowPrintPreview(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -582,11 +479,10 @@ function PdfIcon() {
     </svg>
   );
 }
-function TemplateIcon() {
+function PrinterIcon() {
   return (
-    <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 17h18" />
+    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
     </svg>
   );
 }
