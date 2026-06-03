@@ -80,7 +80,7 @@ function colVal(row: Record<string, string>, names: string[]): string | undefine
 interface VolumePoint {
   t: number;
   timeLabel: string;
-  /** Predicted schedule: whole contracts (largest-remainder method). Left axis. */
+  /** Predicted schedule: whole contracts (carry-forward method). Left axis. */
   historical: number | null;
   /** Actual market volume from Bloomberg ticks. Right axis. */
   market: number | null;
@@ -89,31 +89,47 @@ interface VolumePoint {
 }
 
 /**
- * Distribute `total` whole-number units across `weights` (null = excluded)
- * using the Largest Remainder Method so the result sums to exactly `total`.
+ * Build a per-minute VWAP schedule by carrying fractional contracts forward.
+ *
+ * Each minute's proportional share (totalQty × weight / totalWeight) is added
+ * to a running accumulator.  When the accumulator reaches ≥ 1 a whole contract
+ * is scheduled and the fraction rolls over to the next minute.
+ *
+ * At the end the deficit (totalQty − sum_scheduled, always 0 or 1 for integer
+ * quantities) is added to the last minute covered by the historical curve so
+ * the schedule always sums to exactly totalQty.
  */
-function largestRemainder(total: number, weights: (number | null)[]): (number | null)[] {
-  const totalWeight = weights.reduce<number>((s, w) => s + (w ?? 0), 0);
-  if (totalWeight === 0 || total === 0) return weights.map(() => null);
+function buildRollingSchedule(totalQty: number, weights: number[]): number[] {
+  const n = weights.length;
+  const result = new Array<number>(n).fill(0);
+  const totalWeight = weights.reduce((s, w) => s + w, 0);
+  if (totalWeight === 0 || totalQty === 0) return result;
 
-  // Raw (fractional) allocation
-  const raw = weights.map((w) => (w !== null ? (total * w) / totalWeight : null));
-  // Floor each
-  const floored = raw.map((v) => (v !== null ? Math.floor(v) : null));
-  const currentSum = floored.reduce<number>((s, v) => s + (v ?? 0), 0);
-  let remainder = total - currentSum;
+  let acc = 0;
+  let lastCoveredIdx = -1;   // last minute that has a non-zero historical weight
 
-  // Sort eligible indices by fractional part descending, add 1 each
-  const fracs = raw
-    .map((v, i) => ({ i, frac: v !== null ? v - Math.floor(v) : -1 }))
-    .filter((x) => x.frac >= 0)
-    .sort((a, b) => b.frac - a.frac);
+  for (let i = 0; i < n; i++) {
+    const w = weights[i]!;
+    if (w > 0) lastCoveredIdx = i;
 
-  const result = [...floored];
-  for (let j = 0; j < remainder && j < fracs.length; j++) {
-    const idx = fracs[j]!.i;
-    if (result[idx] !== null) result[idx] = result[idx]! + 1;
+    // Accumulate this minute's proportional share
+    acc += (totalQty * w) / totalWeight;
+
+    // Execute whole contracts; carry the fraction forward
+    const scheduled = Math.floor(acc);
+    result[i] = scheduled;
+    acc -= scheduled;
   }
+
+  // After all minutes, any remaining carry represents a genuine rounding gap
+  // (for integer totalQty this is always < 1).  Add it — rounded — to the
+  // last minute that had historical coverage so the total equals totalQty.
+  const totalScheduled = result.reduce((a, b) => a + b, 0);
+  const deficit = Math.round(totalQty - totalScheduled);
+  if (deficit > 0 && lastCoveredIdx >= 0) {
+    result[lastCoveredIdx] = (result[lastCoveredIdx] ?? 0) + deficit;
+  }
+
   return result;
 }
 
@@ -150,20 +166,25 @@ function buildVolumeData(
     }
   }
 
-  // ── Historical predicted schedule (whole contracts, largest remainder) ────
-  // Use the Smoothed % values for each minute in the window, then allocate
-  // totalOur contracts proportionally so the schedule sums to exactly totalOur.
-  // Minutes not in the CSV are treated as 0 volume (not excluded), so the line
-  // stays continuous at y=0 for those points per the user's preference.
+  // ── Historical predicted schedule (carry-forward, whole contracts) ──────
+  // Look up the Smoothed % for each window minute; missing rows default to 0
+  // (zero volume historically → 0 scheduled, but the line stays continuous).
   const rawHistWeights = minutes.map((t) => {
     if (!histCurve) return null;
     const d  = new Date(t);
     const hh = String(d.getUTCHours()).padStart(2, "0");
     const mm = String(d.getUTCMinutes()).padStart(2, "0");
-    // 0 for minutes absent from the CSV → zero scheduled, no break in line
     return histCurve.get(`${hh}:${mm}`) ?? 0;
   });
-  const scheduledQty = largestRemainder(totalOur, rawHistWeights);
+
+  // If histCurve is loaded, convert nulls → 0 and run the rolling schedule.
+  // If histCurve is null (not uploaded), keep nulls so the chart can hide the
+  // series and show the "upload curve" prompt instead.
+  const histWindowTotal = rawHistWeights.reduce<number>((s, w) => s + (w ?? 0), 0);
+  const scheduledQty: (number | null)[] =
+    !histCurve || histWindowTotal === 0
+      ? minutes.map(() => null)
+      : buildRollingSchedule(totalOur, rawHistWeights.map((w) => w ?? 0));
 
   return minutes.map((t, i) => {
     const d  = new Date(t);
