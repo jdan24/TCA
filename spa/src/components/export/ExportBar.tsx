@@ -5,22 +5,17 @@
  * built as a single self-contained HTML file with codeSplitting:false;
  * dynamic import() calls are not inlined by Rollup in that mode.
  *
- * Single-order PDF — two modes:
+ * Single-order PDF (3 pages, landscape A4):
+ *   Page 1 — styled summary card drawn with jsPDF primitives
+ *   Page 2 — all 4 chart visualizations captured via html-to-image, 2-per-row
+ *   Page 3 — fill detail table (all trade records)
  *
- *   Without .docx template (default):
- *     Landscape A4, 3 pages:
- *       Page 1 — styled summary card
- *       Page 2 — 4 charts (2×2)
- *       Page 3 — fill detail table
+ * When a corporate template PDF is uploaded, its first page is stamped as a
+ * background on every output page via pdf-lib. Content margins are inset by
+ * TEMPLATE_TOP_PT / TEMPLATE_BOTTOM_PT to avoid overlapping the template's
+ * header and footer zones.
  *
- *   With .docx template:
- *     Portrait A4, N+1 pages:
- *       Page 1 — company logo (from Word header) + summary card
- *       Page 2 — 4 charts (2×2, portrait-sized)
- *       Page 3+ — fill detail table
- *       Last   — dedicated disclaimer page (text from Word body)
- *
- * Multi-order PDF: landscape A4, header + autotable of trades (unchanged).
+ * Multi-order PDF: landscape A4, header + autotable of trades.
  */
 
 import { useRef, useState } from "react";
@@ -30,7 +25,7 @@ import { toPng } from "html-to-image";
 import * as XLSX from "xlsx";
 import type { AggregateRow, AggregationSet, ParentOrderSummary, TCAResult, TradeRecord } from "@/types";
 import { fmtBps, fmtTtf } from "@/components/dashboard/dashboardUtils";
-import { type DocxTemplate, parseDocxTemplate } from "@/utils/docxTemplateParser";
+import { mergeWithTemplate } from "@/utils/pdfTemplateMerger";
 
 interface ExportBarProps {
   trades: TradeRecord[];
@@ -40,6 +35,12 @@ interface ExportBarProps {
 }
 
 type ExportRow = Record<string, string | number>;
+
+// ── Template margin constants ─────────────────────────────────────────────────
+// Vertical space (pt) reserved for the corporate template's header / footer.
+// Applied only when a template is loaded; set to 0 otherwise.
+const TEMPLATE_TOP_PT    = 60;
+const TEMPLATE_BOTTOM_PT = 50;
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
@@ -58,12 +59,21 @@ function fmtUtcStr(d: Date): string {
     `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} UTC`
   );
 }
-function fmtTimeUtc(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} UTC`;
-}
 function datestamp(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+// ── PDF download helper ───────────────────────────────────────────────────────
+
+function downloadPdfBytes(bytes: Uint8Array, filename: string): void {
+  // new Uint8Array(bytes) copies data into a standard ArrayBuffer (TS 6 strict generic safety).
+  const blob = new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── Excel data builders ────────────────────────────────────────────────────────
@@ -144,7 +154,7 @@ function doExcelExport(tradeRows: ExportRow[], aggregations?: AggregationSet): v
 // ── Multi-order PDF export ────────────────────────────────────────────────────
 
 function doPdfExport(rows: ExportRow[]): void {
-  const doc   = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  const doc  = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   doc.setFontSize(13); doc.setTextColor(17, 24, 39);
   doc.text("TCA Export", 20, 24);
@@ -178,65 +188,34 @@ async function captureChartById(id: string): Promise<CapturedChart | null> {
   if (!el) return null;
   try {
     // html-to-image handles SVG (Recharts) far better than html2canvas;
-    // it serialises the DOM via XMLSerializer rather than trying to repaint it.
-    const dataUrl = await toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 });
+    // it serializes the DOM via XMLSerializer rather than trying to repaint it.
+    const dataUrl = await toPng(el, {
+      backgroundColor: "#ffffff",
+      pixelRatio: 2,
+    });
     return { img: dataUrl, w: el.offsetWidth, h: el.offsetHeight };
   } catch {
     return null;
   }
 }
 
-// ── Single-order PDF: logo header (portrait, first page only) ─────────────────
-//
-// Returns the total vertical space consumed (logo height + divider + gap),
-// which is used as topOffset for the summary card below it.
-
-function drawLogoHeader(doc: jsPDF, logoDataUrl: string, logoAspect: number): number {
-  const PW    = doc.internal.pageSize.getWidth();
-  const ML    = 28;
-  const maxW  = PW - 2 * ML;
-  const maxH  = 72; // cap logo height at ~25 mm
-
-  let logoW = maxW;
-  let logoH = logoW / Math.max(logoAspect, 0.1);
-  if (logoH > maxH) {
-    logoH = maxH;
-    logoW = logoH * logoAspect;
-  }
-
-  const x = (PW - logoW) / 2; // horizontally centred
-  const y = 16;
-
-  doc.addImage(logoDataUrl, x, y, logoW, logoH);
-
-  // Thin divider below logo
-  doc.setDrawColor(226, 232, 240);
-  doc.setLineWidth(0.5);
-  doc.line(ML, y + logoH + 6, PW - ML, y + logoH + 6);
-
-  return logoH + 16; // total space: logo + divider + 10 pt gap
-}
-
 // ── Single-order PDF: summary card drawn with jsPDF primitives ────────────────
 //
-// topOffset   — vertical space at top already consumed (logo, etc.)
-// bottomOffset — space to leave at the bottom (unused in portrait mode)
-// fixedCardH   — if provided, overrides the page-filling height calculation;
-//                use for portrait so the card is content-sized, not page-filling
+// topOffset / bottomOffset (pt) define vertical dead zones reserved for the
+// corporate template's header and footer.  Both default to 0 (no template).
 
 function drawSummaryCard(
   doc: jsPDF,
   summary: ParentOrderSummary,
-  topOffset  = 0,
+  topOffset = 0,
   bottomOffset = 0,
-  fixedCardH?: number,
 ): void {
   const PW     = doc.internal.pageSize.getWidth();
   const PH     = doc.internal.pageSize.getHeight();
   const ML     = 28;
   const cardW  = PW - 2 * ML;
   const CARD_TOP = 20 + topOffset;
-  const CARD_H   = fixedCardH ?? (PH - 44 - topOffset - bottomOffset);
+  const CARD_H   = PH - 44 - topOffset - bottomOffset;
 
   // ── Outer card shadow ────────────────────────────────────────────────────────
   doc.setFillColor(226, 232, 240);
@@ -331,8 +310,8 @@ function drawSummaryCard(
   doc.roundedRect(ML, footerY + 24, cardW, 12, 0, 6, "F");
 
   doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...LBL_COLOR);
-  doc.text("Order Start (UTC)",  ML + 12,         footerY + 12);
-  doc.text("Last Fill (UTC)",    ML + COL_W + 12, footerY + 12);
+  doc.text("Order Start (UTC)",  ML + 12,          footerY + 12);
+  doc.text("Last Fill (UTC)",    ML + COL_W + 12,  footerY + 12);
   doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(...VAL_COLOR);
   doc.text(fmtUtcStr(summary.orderTime),    ML + 12,         footerY + 25);
   doc.text(fmtUtcStr(summary.lastFillTime), ML + COL_W + 12, footerY + 25);
@@ -343,53 +322,16 @@ function drawSummaryCard(
   doc.roundedRect(ML, CARD_TOP, cardW, CARD_H, 6, 6, "S");
 }
 
-// ── Single-order PDF: disclaimer page (portrait, last page) ──────────────────
-
-function drawDisclaimerPage(doc: jsPDF, paragraphs: string[]): void {
-  const PW       = doc.internal.pageSize.getWidth();
-  const PH       = doc.internal.pageSize.getHeight();
-  const ML       = 28;
-  const contentW = PW - 2 * ML;
-  const LINE_H   = 10; // pt per line at 7.5pt font
-  const PARA_GAP = 6;  // extra gap between paragraphs
-
-  // Thin top rule
-  doc.setDrawColor(226, 232, 240);
-  doc.setLineWidth(0.5);
-  doc.line(ML, 24, PW - ML, 24);
-
-  let y = 36;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.5);
-  doc.setTextColor(71, 85, 105); // slate-600
-
-  for (const para of paragraphs) {
-    const trimmed = para.trim();
-    if (!trimmed) continue;
-
-    const lines = doc.splitTextToSize(trimmed, contentW) as string[];
-    const blockH = lines.length * LINE_H;
-
-    if (y + blockH > PH - 24) break; // don't bleed past page bottom
-
-    doc.text(lines, ML, y);
-    y += blockH + PARA_GAP;
-  }
-}
-
 // ── Single-order PDF export ───────────────────────────────────────────────────
-
-// Content-height for the summary card in portrait mode:
-// header(48) + header-to-grid gap(14) + 5 rows(190) + footer band(36) + padding(8) = 296pt
-const PORTRAIT_CARD_H = 296;
 
 async function doPdfExportSingle(
   summary: ParentOrderSummary,
   trades: TradeRecord[],
   _results: TCAResult[],
-  docxTemplate: DocxTemplate | null,
+  templateBytes: ArrayBuffer | null,
 ): Promise<void> {
-  const isPortrait = docxTemplate !== null;
+  const topOffset    = templateBytes ? TEMPLATE_TOP_PT    : 0;
+  const bottomOffset = templateBytes ? TEMPLATE_BOTTOM_PT : 0;
 
   // Capture all 4 charts before opening the PDF doc
   const CHART_IDS = [
@@ -398,6 +340,7 @@ async function doPdfExportSingle(
     "so-chart-timeline",
     "so-chart-participation",
   ] as const;
+
   const rawCaptures = await Promise.all(CHART_IDS.map(captureChartById));
   const [twapCap, vwapCap, timelineCap, partCap] =
     rawCaptures.map((c) => c ?? null) as [
@@ -405,32 +348,24 @@ async function doPdfExportSingle(
       CapturedChart|null, CapturedChart|null
     ];
 
-  const orientation = isPortrait ? "portrait" : "landscape";
-  const doc = new jsPDF({ orientation, unit: "pt", format: "a4" });
-  const PW  = doc.internal.pageSize.getWidth();
-  const PH  = doc.internal.pageSize.getHeight();
-
   // ── Page 1: Summary card ──────────────────────────────────────────────────────
-  let topOffset = 0;
-  if (isPortrait && docxTemplate?.logoDataUrl) {
-    topOffset = drawLogoHeader(doc, docxTemplate.logoDataUrl, docxTemplate.logoAspect);
-  }
-  drawSummaryCard(
-    doc, summary,
-    topOffset, 0,
-    isPortrait ? PORTRAIT_CARD_H : undefined,
-  );
+  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  drawSummaryCard(doc, summary, topOffset, bottomOffset);
 
   // ── Page 2: Charts 2×2 ───────────────────────────────────────────────────────
   doc.addPage();
+  const PW   = doc.internal.pageSize.getWidth();
+  const PH   = doc.internal.pageSize.getHeight();
   const MARG = 16;
   const GAP  = 8;
   const colW = (PW - 2 * MARG - GAP) / 2;
 
   doc.setFont("helvetica", "normal"); doc.setFontSize(8);
   doc.setTextColor(100, 116, 139);
-  doc.text(`${summary.symbol}  ${summary.side}  ·  Charts`, MARG, 11);
-  let curY = 16;
+  const chartLabelY = topOffset > 0 ? topOffset + 6 : 11;
+  doc.text(`${summary.symbol}  ${summary.side}  ·  Charts`, MARG, chartLabelY);
+
+  let curY = topOffset > 0 ? topOffset + 10 : 16;
 
   function placeChart(cap: CapturedChart | null, x: number, y: number): number {
     if (!cap) return 0;
@@ -445,22 +380,25 @@ async function doPdfExportSingle(
         vwapCap ? (vwapCap.h / vwapCap.w) * colW     : 0,
       )
     : 0;
+
   const r2h = timelineCap || partCap
     ? Math.max(
         timelineCap ? (timelineCap.h / timelineCap.w) * colW : 0,
         partCap     ? (partCap.h     / partCap.w)     * colW : 0,
       )
     : 0;
-  const availH = PH - 2 * MARG;
+
+  const availH = PH - topOffset - bottomOffset - 2 * MARG;
 
   // Row 1: Cumulative TWAP | Cumulative VWAP
   placeChart(twapCap,  MARG,             curY);
   placeChart(vwapCap,  MARG + colW + GAP, curY);
   curY += (r1h > 0 ? r1h : availH / 2) + GAP;
 
-  if (curY + r2h > PH - MARG) {
+  // If row 2 overflows, start a new page
+  if (curY + r2h > PH - MARG - bottomOffset) {
     doc.addPage();
-    curY = MARG;
+    curY = topOffset > 0 ? topOffset + 10 : MARG;
   }
 
   // Row 2: Execution Timeline | Running Participation
@@ -469,48 +407,48 @@ async function doPdfExportSingle(
 
   // ── Page 3: Fill Detail table ─────────────────────────────────────────────────
   doc.addPage();
+  const fillLabelY = topOffset > 0 ? topOffset + 6 : 11;
   doc.setFont("helvetica", "normal"); doc.setFontSize(8);
   doc.setTextColor(100, 116, 139);
-  doc.text(`${summary.symbol}  ${summary.side}  ·  Fill Detail`, MARG, 11);
+  doc.text(`${summary.symbol}  ${summary.side}  ·  Fill Detail`, MARG, fillLabelY);
 
-  // In portrait, timestamp columns are condensed to HH:MM:SS UTC to fit.
-  const fillBody = trades.map((t) => {
-    const timeStr = isPortrait ? fmtTimeUtc : fmtUtcStr;
-    return [
-      t.orderId,
-      t.symbol,
-      t.side,
-      t.orderQty.toLocaleString(),
-      fmtPrice(t.avgFillPrice),
-      t.arrivalPrice !== null ? fmtPrice(t.arrivalPrice) : "—",
-      timeStr(t.orderTime),
-      timeStr(t.firstFillTime),
-      timeStr(t.lastFillTime),
-      t.algo ?? "—",
-    ];
-  });
-
-  const timeHeader = isPortrait ? ["Order Time (UTC)", "First Fill (UTC)", "Last Fill (UTC)"]
-                                : ["Order Time (UTC)", "First Fill (UTC)", "Last Fill (UTC)"];
+  const fillBody = trades.map((t) => [
+    t.orderId,
+    t.symbol,
+    t.side,
+    t.orderQty.toLocaleString(),
+    fmtPrice(t.avgFillPrice),
+    t.arrivalPrice !== null ? fmtPrice(t.arrivalPrice) : "—",
+    fmtUtcStr(t.orderTime),
+    fmtUtcStr(t.firstFillTime),
+    fmtUtcStr(t.lastFillTime),
+    t.algo ?? "—",
+  ]);
 
   autoTable(doc, {
-    startY: 16,
+    startY: topOffset > 0 ? topOffset + 10 : 16,
     head: [["Order ID", "Symbol", "Side", "Qty", "Fill Price", "Arrival Price",
-            ...timeHeader, "Algo"]],
+            "Order Time (UTC)", "First Fill (UTC)", "Last Fill (UTC)", "Algo"]],
     body: fillBody,
-    styles: { fontSize: isPortrait ? 6 : 6.5, cellPadding: 2.5, overflow: "ellipsize" },
-    headStyles: { fillColor: [59, 130, 246], textColor: [255, 255, 255], fontStyle: "bold", fontSize: isPortrait ? 6.5 : 7 },
+    styles: { fontSize: 6.5, cellPadding: 2.5, overflow: "ellipsize" },
+    headStyles: { fillColor: [59, 130, 246], textColor: [255, 255, 255], fontStyle: "bold", fontSize: 7 },
     alternateRowStyles: { fillColor: [248, 250, 252] },
-    margin: { left: MARG, right: MARG, bottom: 15 },
+    margin: {
+      left:   MARG,
+      right:  MARG,
+      bottom: bottomOffset > 0 ? bottomOffset + 8 : 15,
+    },
   });
 
-  // ── Last page: Disclaimer (portrait / docx template only) ────────────────────
-  if (isPortrait && docxTemplate && docxTemplate.disclaimerParagraphs.length > 0) {
-    doc.addPage();
-    drawDisclaimerPage(doc, docxTemplate.disclaimerParagraphs);
+  // ── Merge with template (if loaded) then download ────────────────────────────
+  const filename = `tca_${summary.symbol}_${summary.side}_${datestamp()}.pdf`;
+  if (templateBytes) {
+    const contentBytes = doc.output("arraybuffer");
+    const merged = await mergeWithTemplate(contentBytes, templateBytes);
+    downloadPdfBytes(merged, filename);
+  } else {
+    doc.save(filename);
   }
-
-  doc.save(`tca_${summary.symbol}_${summary.side}_${datestamp()}.pdf`);
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -518,34 +456,26 @@ async function doPdfExportSingle(
 type Exporting = "excel" | "pdf" | null;
 
 export function ExportBar({ trades, results, aggregations, summary }: ExportBarProps) {
-  const [exporting,     setExporting]     = useState<Exporting>(null);
-  const [docxTemplate,  setDocxTemplate]  = useState<DocxTemplate | null>(null);
+  const [exporting,    setExporting]    = useState<Exporting>(null);
+  const [templateBytes, setTemplateBytes] = useState<ArrayBuffer | null>(null);
   const [templateName,  setTemplateName]  = useState<string | null>(null);
-  const [templateError, setTemplateError] = useState<string | null>(null);
   const templateInputRef = useRef<HTMLInputElement>(null);
 
-  async function handleTemplateFile(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleTemplateFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    e.target.value = "";
-    setTemplateError(null);
-    try {
-      const buffer   = await file.arrayBuffer();
-      const template = await parseDocxTemplate(buffer);
-      setDocxTemplate(template);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setTemplateBytes((ev.target?.result as ArrayBuffer) ?? null);
       setTemplateName(file.name);
-    } catch (err) {
-      console.error("Failed to parse .docx template:", err);
-      setTemplateError("Could not read template — make sure it is a valid .docx file.");
-      setDocxTemplate(null);
-      setTemplateName(null);
-    }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = "";
   }
 
   function clearTemplate() {
-    setDocxTemplate(null);
+    setTemplateBytes(null);
     setTemplateName(null);
-    setTemplateError(null);
   }
 
   function handleExcel() {
@@ -561,7 +491,7 @@ export function ExportBar({ trades, results, aggregations, summary }: ExportBarP
     setExporting("pdf");
     try {
       if (summary) {
-        await doPdfExportSingle(summary, trades, results, docxTemplate);
+        await doPdfExportSingle(summary, trades, results, templateBytes);
       } else {
         doPdfExport(buildTradeRows(trades, results));
       }
@@ -572,67 +502,60 @@ export function ExportBar({ trades, results, aggregations, summary }: ExportBarP
   const busy = exporting !== null;
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <div className="flex items-center gap-2">
-        {/* Corporate template upload (single-order mode only) */}
-        {summary && (
-          <>
-            <input
-              ref={templateInputRef}
-              type="file"
-              accept=".docx"
-              className="hidden"
-              onChange={(e) => { void handleTemplateFile(e); }}
-            />
-            {templateName ? (
-              <span className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg border border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300 max-w-[180px]">
-                <TemplateIcon />
-                <span className="truncate flex-1 min-w-0">{templateName}</span>
-                <button
-                  type="button"
-                  onClick={clearTemplate}
-                  className="shrink-0 ml-0.5 leading-none hover:text-blue-900 dark:hover:text-blue-100"
-                  title="Remove template"
-                  aria-label="Remove corporate template"
-                >
-                  ×
-                </button>
-              </span>
-            ) : (
+    <div className="flex items-center gap-2">
+      {/* Corporate template upload (single-order only; multi-order deferred) */}
+      {summary && (
+        <>
+          <input
+            ref={templateInputRef}
+            type="file"
+            accept=".pdf"
+            className="hidden"
+            onChange={handleTemplateFile}
+          />
+          {templateName ? (
+            <span className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg border border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300 max-w-[180px]">
+              <TemplateIcon />
+              <span className="truncate flex-1 min-w-0">{templateName}</span>
               <button
                 type="button"
-                disabled={busy}
-                onClick={() => templateInputRef.current?.click()}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-dashed border-gray-300 dark:border-gray-600 bg-transparent text-gray-500 dark:text-gray-400 hover:border-gray-400 hover:text-gray-600 dark:hover:border-gray-500 dark:hover:text-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                title="Upload corporate .docx template"
+                onClick={clearTemplate}
+                className="shrink-0 ml-0.5 leading-none hover:text-blue-900 dark:hover:text-blue-100"
+                title="Remove template"
+                aria-label="Remove corporate template"
               >
-                <TemplateIcon />
-                Template
+                ×
               </button>
-            )}
-            <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 shrink-0" />
-          </>
-        )}
-
-        <button type="button" disabled={busy} onClick={handleExcel}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-wait transition-colors"
-          title="Export to Excel (.xlsx)">
-          {exporting === "excel" ? <Spinner /> : <DownloadIcon />}
-          {exporting === "excel" ? "Exporting…" : "Excel"}
-        </button>
-        <button type="button" disabled={busy}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-wait transition-colors"
-          title="Export to PDF"
-          onClick={() => { void handlePdf(); }}>
-          {exporting === "pdf" ? <Spinner /> : <PdfIcon />}
-          {exporting === "pdf" ? "Exporting…" : "PDF"}
-        </button>
-      </div>
-
-      {/* Inline error for template parse failures */}
-      {templateError && (
-        <p className="text-xs text-red-500 dark:text-red-400">{templateError}</p>
+            </span>
+          ) : (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => templateInputRef.current?.click()}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-dashed border-gray-300 dark:border-gray-600 bg-transparent text-gray-500 dark:text-gray-400 hover:border-gray-400 hover:text-gray-600 dark:hover:border-gray-500 dark:hover:text-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              title="Upload a corporate PDF template (header + footer)"
+            >
+              <TemplateIcon />
+              Template
+            </button>
+          )}
+          <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 shrink-0" />
+        </>
       )}
+
+      <button type="button" disabled={busy} onClick={handleExcel}
+        className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-wait transition-colors"
+        title="Export to Excel (.xlsx)">
+        {exporting === "excel" ? <Spinner /> : <DownloadIcon />}
+        {exporting === "excel" ? "Exporting…" : "Excel"}
+      </button>
+      <button type="button" disabled={busy}
+        className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-wait transition-colors"
+        title="Export to PDF"
+        onClick={() => { void handlePdf(); }}>
+        {exporting === "pdf" ? <Spinner /> : <PdfIcon />}
+        {exporting === "pdf" ? "Exporting…" : "PDF"}
+      </button>
     </div>
   );
 }
@@ -663,6 +586,7 @@ function TemplateIcon() {
   return (
     <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 17h18" />
     </svg>
   );
 }
