@@ -238,6 +238,7 @@ export interface TCAStore {
 export const FIX_TAGS = {
   ClOrdID: 11,
   ExecID: 17,
+  SecurityID: 48, // purer RIC code; preferred over tag 55 (Symbol) when present
   Symbol: 55,
   Side: 54,
   OrderQty: 38,

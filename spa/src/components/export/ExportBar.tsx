@@ -20,6 +20,7 @@ export interface ChartImages {
   vwap:          string | null;
   timeline:      string | null;
   participation: string | null;
+  vwapProfile:   string | null; // VWAP volume profile — null when VWAP algo not active
 }
 
 interface ExportBarProps {
@@ -185,13 +186,14 @@ export function ExportBar({ trades, results, aggregations, summary, onPrintLayou
     if (generating || exporting !== null || !onPrintLayout) return;
     setGenerating(true);
     try {
-      const [twap, vwap, timeline, participation] = await Promise.all([
+      const [twap, vwap, timeline, participation, vwapProfile] = await Promise.all([
         captureChart("so-chart-twap"),
         captureChart("so-chart-vwap"),
         captureChart("so-chart-timeline"),
         captureChart("so-chart-participation"),
+        captureChart("so-chart-vwap-profile"), // null when element not in DOM (non-VWAP algo)
       ]);
-      onPrintLayout({ twap, vwap, timeline, participation });
+      onPrintLayout({ twap, vwap, timeline, participation, vwapProfile });
     } catch (err) {
       console.error("Chart capture failed:", err);
     } finally {

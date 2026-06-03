@@ -73,6 +73,8 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
     [charts.participation, "Running Participation"],
   ];
 
+  const vwapProfile = charts.vwapProfile ?? null;
+
   return (
     <div className="min-h-screen bg-white">
 
@@ -224,24 +226,54 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
           <div className="flex-1 border-t border-dashed border-gray-300" />
         </div>
 
-        <section className="break-before-page">
-          <p className="text-xs text-gray-400 mb-3 print:mb-2">
+        {/*
+          PAGE 2: Charts
+          On screen: normal flow, charts at natural size.
+          On print: section fills exactly one A4 page using flex column + h-screen.
+            - 4-chart grid uses flex-1 (fills the page) when no VWAP profile,
+              or a fixed ~57% height when the VWAP profile is also shown.
+            - VWAP profile (when present) fills the remaining ~40% below.
+          grid-rows-2 + h-full on each img makes every chart fill its grid cell.
+        */}
+        <section className="break-before-page print:h-screen print:flex print:flex-col print:overflow-hidden">
+          <p className="text-xs text-gray-400 mb-3 print:mb-2 print:shrink-0">
             {summary.symbol}&nbsp;&nbsp;{summary.side}&nbsp;&middot;&nbsp;Charts
           </p>
-          <div className="grid grid-cols-2 gap-4">
+
+          {/* 2×2 grid — fills remaining space (or ~57% when 5th chart present) */}
+          <div className={[
+            "grid grid-cols-2 grid-rows-2 gap-4 print:gap-2",
+            vwapProfile
+              ? "print:h-[57%] print:shrink-0"
+              : "print:flex-1 print:min-h-0",
+          ].join(" ")}>
             {chartList.map(([src, alt], i) =>
               src ? (
-                <img key={i} src={src} alt={alt} className="w-full h-auto rounded border border-gray-100" />
+                <img
+                  key={i}
+                  src={src}
+                  alt={alt}
+                  className="w-full h-auto print:h-full print:w-full print:object-contain rounded border border-gray-100"
+                />
               ) : (
                 <div
                   key={i}
-                  className="aspect-[2/1] bg-gray-50 rounded border border-gray-100 flex items-center justify-center text-xs text-gray-400"
+                  className="aspect-[2/1] print:aspect-auto print:h-full bg-gray-50 rounded border border-gray-100 flex items-center justify-center text-xs text-gray-400"
                 >
                   {alt} unavailable
                 </div>
               )
             )}
           </div>
+
+          {/* VWAP volume profile — full width, only when captured (VWAP algo) */}
+          {vwapProfile && (
+            <img
+              src={vwapProfile}
+              alt="VWAP Volume Profile"
+              className="w-full h-auto mt-4 print:mt-2 print:flex-1 print:min-h-0 print:object-contain rounded border border-gray-100"
+            />
+          )}
         </section>
 
         {/* ── Disclaimer (if set) ───────────────────────────────────────────── */}

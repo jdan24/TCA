@@ -275,6 +275,12 @@ export function ParentSummaryCard({
 
   const noBloomberg = summary.arrivalPrice === null;
 
+  // Trend Cost = IS − MI − TWAS/2  (IS decomposition: residual after impact and spread)
+  const trendCost_bps: number | null =
+    summary.IS_bps !== null && summary.MI_bps !== null && summary.TWAS_bps !== null
+      ? summary.IS_bps - summary.MI_bps - summary.TWAS_bps / 2
+      : null;
+
   // Benchmark-relative reversion: uses the benchmark selected by the active algo.
   // Defaults to arrival price when no algo is selected.
   const benchmarkPrice: number | null =
@@ -341,9 +347,10 @@ export function ParentSummaryCard({
                 ? summary.vol_during_order_price.toFixed(4)
                 : "N/A (needs BBG)"
             } />
-            <BpsRow label="Impact (bps)"    value={summary.MI_bps} neutral />
+            <BpsRow label="Impact (bps)"       value={summary.MI_bps} neutral />
             <BpsRow label="Reversion 1m (bps)" value={reversion1m_bps} invert />
-            <BpsRow label="TWAS (bps)"      value={summary.TWAS_bps} neutral />
+            <BpsRow label="TWAS (bps)"         value={summary.TWAS_bps} neutral />
+            <BpsRow label="Trend Cost (bps)"   value={trendCost_bps} />
           </div>
         </div>
 

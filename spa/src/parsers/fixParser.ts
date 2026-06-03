@@ -77,7 +77,7 @@ function aggregate(messages: FixMsg[]): TradeRecord[] {
     if (!existing) {
       map.set(clOrdId, {
         clOrdId,
-        symbol: tag(msg, FIX_TAGS.Symbol),
+        symbol: tag(msg, FIX_TAGS.SecurityID) || tag(msg, FIX_TAGS.Symbol),
         side: tag(msg, FIX_TAGS.Side),
         orderQty: parseFloat(tag(msg, FIX_TAGS.OrderQty) || "0"),
         fills:
@@ -90,7 +90,7 @@ function aggregate(messages: FixMsg[]): TradeRecord[] {
       });
     } else {
       // Update symbol/side/orderQty from later messages if earlier one was blank
-      if (!existing.symbol) existing.symbol = tag(msg, FIX_TAGS.Symbol);
+      if (!existing.symbol) existing.symbol = tag(msg, FIX_TAGS.SecurityID) || tag(msg, FIX_TAGS.Symbol);
       if (!existing.side) existing.side = tag(msg, FIX_TAGS.Side);
       if (!existing.orderQty) {
         existing.orderQty = parseFloat(tag(msg, FIX_TAGS.OrderQty) || "0");
@@ -229,7 +229,7 @@ function aggregatePerFill(messages: FixMsg[]): TradeRecord[] {
     const clOrdId      = tag(msg, FIX_TAGS.ClOrdID);
     const execId       = tag(msg, FIX_TAGS.ExecID);
     const transactTime = tag(msg, FIX_TAGS.TransactTime);
-    const symbol       = tag(msg, FIX_TAGS.Symbol);
+    const symbol       = tag(msg, FIX_TAGS.SecurityID) || tag(msg, FIX_TAGS.Symbol);
     const sideRaw      = tag(msg, FIX_TAGS.Side);
     const execType     = tag(msg, FIX_TAGS.ExecType); // tag 150
 
