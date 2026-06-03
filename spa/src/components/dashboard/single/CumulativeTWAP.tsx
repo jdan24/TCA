@@ -38,9 +38,10 @@ interface CumulativeTWAPProps {
 interface DataPoint {
   t: number;
   timeLabel: string;
-  runningFillAvg: number;      // cumulative qty-weighted avg fill price
-  fillPrice: number;           // this fill's individual price
-  marketTwapLine?: number;     // Bloomberg running market TWAP (optional)
+  /** null on the orderTime anchor point (before any fill) — creates a line break for fill series */
+  runningFillAvg: number | null;
+  fillPrice: number | null;
+  marketTwapLine?: number;
   cumQty: number;
 }
 
@@ -53,6 +54,8 @@ function fmtUtc(ms: number): string {
 function buildData(
   trades: TradeRecord[],
   twapByTime: Map<number, number>,
+  /** Optional anchor at orderTime — extends the market line back to order start. */
+  orderAnchor?: { t: number; value: number } | null,
 ): DataPoint[] {
   if (trades.length === 0) return [];
 
@@ -63,7 +66,7 @@ function buildData(
   let cumNotional = 0;
   let cumQty = 0;
 
-  return sorted.map((t) => {
+  const fillPoints: DataPoint[] = sorted.map((t) => {
     cumNotional += t.avgFillPrice * t.orderQty;
     cumQty += t.orderQty;
     const runningFillAvg = cumQty > 0 ? cumNotional / cumQty : t.avgFillPrice;
@@ -78,6 +81,22 @@ function buildData(
       ...(marketTwapAtFill !== undefined ? { marketTwapLine: marketTwapAtFill } : {}),
     };
   });
+
+  // Prepend an anchor point at orderTime so the market TWAP line starts there.
+  // runningFillAvg / fillPrice are null → Recharts creates a line break for fill series
+  // so those lines still start from the first actual fill.
+  if (orderAnchor && (fillPoints.length === 0 || orderAnchor.t < fillPoints[0]!.t)) {
+    fillPoints.unshift({
+      t: orderAnchor.t,
+      timeLabel: fmtUtc(orderAnchor.t),
+      runningFillAvg: null,
+      fillPrice: null,
+      cumQty: 0,
+      marketTwapLine: orderAnchor.value,
+    });
+  }
+
+  return fillPoints;
 }
 
 const SERIES: Record<string, { label: string; color: string; dash?: string }> = {
@@ -88,8 +107,12 @@ const SERIES: Record<string, { label: string; color: string; dash?: string }> = 
 
 export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, orderTime, lastFillTime }: CumulativeTWAPProps) {
   const twapByTime = new Map((runningMarketTwap ?? []).map((p) => [p.t, p.twap]));
-  const data = buildData(trades, twapByTime);
   const hasMarketTwap = (runningMarketTwap?.length ?? 0) > 0;
+  // Anchor at orderTime using arrival price so the market line starts there, not at the first fill.
+  const orderAnchor = (hasMarketTwap && orderTime && arrivalPrice !== null)
+    ? { t: orderTime.getTime(), value: arrivalPrice }
+    : null;
+  const data = buildData(trades, twapByTime, orderAnchor);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
   if (data.length === 0) {
@@ -100,7 +123,9 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, orderT
     );
   }
 
-  const allPrices = data.flatMap((d) => [d.runningFillAvg, d.fillPrice]);
+  const allPrices: number[] = data.flatMap((d) =>
+    [d.runningFillAvg, d.fillPrice].filter((v): v is number => v !== null),
+  );
   if (arrivalPrice !== null) allPrices.push(arrivalPrice);
   if (runningMarketTwap) runningMarketTwap.forEach((p) => allPrices.push(p.twap));
   const pMin = Math.min(...allPrices);
@@ -162,7 +187,7 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, orderT
               return (
                 <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
                   <p className="text-gray-500 dark:text-gray-400 mb-1 font-mono">{d.timeLabel}</p>
-                  {!hidden.has("runningFillAvg") && (
+                  {!hidden.has("runningFillAvg") && d.runningFillAvg !== null && (
                     <p className="text-emerald-600 dark:text-emerald-400">
                       Avg Fill: <span className="font-semibold tabular-nums">{d.runningFillAvg.toFixed(4)}</span>
                     </p>
@@ -172,7 +197,7 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, orderT
                       Mkt TWAP: <span className="font-semibold tabular-nums">{d.marketTwapLine.toFixed(4)}</span>
                     </p>
                   )}
-                  {!hidden.has("fillPrice") && (
+                  {!hidden.has("fillPrice") && d.fillPrice !== null && (
                     <p className="text-violet-600 dark:text-violet-400">
                       Fill: <span className="font-semibold tabular-nums">{d.fillPrice.toFixed(4)}</span>
                     </p>
