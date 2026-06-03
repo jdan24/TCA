@@ -17,7 +17,8 @@ import type { BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
 import { computeParentOrderSummary } from "@/tca/compute";
 import { useTCAStore } from "@/store/useTCAStore";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
-import { ExportBar } from "@/components/export/ExportBar";
+import { ExportBar, type ChartImages } from "@/components/export/ExportBar";
+import { PrintLayout } from "@/components/export/PrintLayout";
 import { TradeTable } from "@/components/table/TradeTable";
 import { ParentSummaryCard } from "./ParentSummaryCard";
 import { ExecutionTimeline } from "./ExecutionTimeline";
@@ -58,6 +59,7 @@ export function SingleOrderDashboard({
   onReset,
 }: SingleOrderDashboardProps) {
   const [selectedAlgo, setSelectedAlgo] = useState<AlgoOption | null>(null);
+  const [printCharts, setPrintCharts]   = useState<ChartImages | null>(null);
   const symbolMap = useSymbolMap();
 
   // Historical volume curve uploaded by the user (VWAP algo only).
@@ -219,6 +221,17 @@ export function SingleOrderDashboard({
       ? Math.round((enrichProgress.done / enrichProgress.total) * 100)
       : 0;
 
+  // When print layout is active, replace the entire dashboard with the print view.
+  if (printCharts && summary) {
+    return (
+      <PrintLayout
+        summary={summary}
+        charts={printCharts}
+        onBack={() => setPrintCharts(null)}
+      />
+    );
+  }
+
   return (
     <div className="w-full max-w-7xl mx-auto px-4 py-6 space-y-4">
       {/* ── Toolbar ─────────────────────────────────────────────────────── */}
@@ -261,7 +274,12 @@ export function SingleOrderDashboard({
             </span>
           )}
 
-          <ExportBar trades={scaledTrades} results={results} summary={summary ?? undefined} />
+          <ExportBar
+                  trades={scaledTrades}
+                  results={results}
+                  summary={summary ?? undefined}
+                  onPrintLayout={setPrintCharts}
+                />
 
           <button
             type="button"
