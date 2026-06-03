@@ -1,31 +1,25 @@
 /**
- * Export bar — Excel (.xlsx), PDF, and Print Preview buttons.
+ * Export bar — Excel (.xlsx), Print Preview, and (multi-order only) PDF buttons.
  *
- * Libraries are imported statically (not dynamically) because the app is
- * built as a single self-contained HTML file with codeSplitting:false;
- * dynamic import() calls are not inlined by Rollup in that mode.
+ * Single-order mode:
+ *   "Print Preview" — captures live charts via html-to-image, builds a
+ *   CSS-rendered A4 print-preview document, and opens it in a new browser tab.
+ *   The user clicks "Print / Save PDF" inside that tab to invoke the browser's
+ *   native print dialog.  Corporate logo + disclaimer are configured once via
+ *   the Branding ⚙ popover and persisted in localStorage.
  *
- * Single-order PDF (landscape A4, 3 pages):
- *   Page 1 — styled summary card drawn with jsPDF primitives
- *   Page 2 — 4 chart visualisations captured via html-to-image, 2-per-row
- *   Page 3 — fill detail table (all trade records)
- *
- * Single-order Print Preview:
- *   Opens a full-screen modal with the report rendered as print-ready HTML
- *   inside an <iframe>.  The browser's native Ctrl+P / print dialog is used
- *   to save to PDF — corporate logo and disclaimer are added via localStorage.
- *
- * Multi-order PDF: landscape A4, header + autotable of trades.
+ * Multi-order mode:
+ *   "PDF" — existing landscape A4 jsPDF export (3 pages, unchanged).
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { toPng } from "html-to-image";
 import * as XLSX from "xlsx";
 import type { AggregateRow, AggregationSet, ParentOrderSummary, TCAResult, TradeRecord } from "@/types";
-import { fmtBps, fmtTtf } from "@/components/dashboard/dashboardUtils";
-import { PrintPreviewModal } from "@/components/export/PrintPreviewModal";
+import { buildReportHtml, type ChartCaptures } from "@/utils/buildReportHtml";
+import { useCorporateTemplate } from "@/hooks/useCorporateTemplate";
 
 interface ExportBarProps {
   trades: TradeRecord[];
@@ -38,21 +32,6 @@ type ExportRow = Record<string, string | number>;
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
-function fmtPrice(v: number | null): string {
-  return v !== null
-    ? v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })
-    : "N/A";
-}
-function fmtPct(v: number | null): string {
-  return v !== null ? `${(v * 100).toFixed(2)}%` : "N/A";
-}
-function fmtUtcStr(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
-    `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} UTC`
-  );
-}
 function datestamp(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -160,223 +139,16 @@ function doPdfExport(rows: ExportRow[]): void {
   doc.save(`tca_${datestamp()}.pdf`);
 }
 
-// ── Single-order PDF: chart capture ──────────────────────────────────────────
+// ── Chart capture ─────────────────────────────────────────────────────────────
 
-interface CapturedChart { img: string; w: number; h: number }
-
-async function captureChartById(id: string): Promise<CapturedChart | null> {
+async function captureChartById(id: string): Promise<string | null> {
   const el = document.getElementById(id);
   if (!el) return null;
   try {
-    // html-to-image handles SVG (Recharts) far better than html2canvas;
-    // it serialises the DOM via XMLSerializer rather than trying to repaint it.
-    const dataUrl = await toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 });
-    return { img: dataUrl, w: el.offsetWidth, h: el.offsetHeight };
+    return await toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 });
   } catch {
     return null;
   }
-}
-
-// ── Single-order PDF: summary card drawn with jsPDF primitives ────────────────
-
-function drawSummaryCard(doc: jsPDF, summary: ParentOrderSummary): void {
-  const PW    = doc.internal.pageSize.getWidth();
-  const PH    = doc.internal.pageSize.getHeight();
-  const ML    = 28;
-  const cardW = PW - 2 * ML;
-
-  // Shadow
-  doc.setFillColor(226, 232, 240);
-  doc.roundedRect(ML + 2, 22, cardW, PH - 44, 6, 6, "F");
-
-  // Card background
-  doc.setFillColor(255, 255, 255);
-  doc.roundedRect(ML, 20, cardW, PH - 44, 6, 6, "F");
-
-  // Header band
-  doc.setFillColor(37, 99, 235);
-  doc.roundedRect(ML, 20, cardW, 48, 6, 6, "F");
-  doc.setFillColor(37, 99, 235);
-  doc.rect(ML, 44, cardW, 24, "F");
-
-  // Title
-  doc.setFont("helvetica", "bold"); doc.setFontSize(14); doc.setTextColor(255, 255, 255);
-  doc.text("Single Order TCA  ·  Transaction Cost Analysis", ML + 14, 40);
-
-  // Subtitle
-  doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(147, 197, 253);
-  doc.text(`Generated ${new Date().toLocaleString()}`, ML + 14, 58);
-
-  // Symbol + side badge
-  const sideIsBuy = summary.side === "BUY";
-  doc.setFillColor(...(sideIsBuy ? [219, 234, 254] : [254, 226, 226]) as [number,number,number]);
-  doc.roundedRect(PW - ML - 110, 28, 104, 28, 5, 5, "F");
-  doc.setFont("helvetica", "bold"); doc.setFontSize(11);
-  doc.setTextColor(...(sideIsBuy ? [30, 64, 175] : [185, 28, 28]) as [number,number,number]);
-  doc.text(`${summary.symbol}  ${summary.side}`, PW - ML - 104, 46);
-
-  // Metrics grid
-  const GRID_TOP  = 82;
-  const COL_W     = cardW / 2;
-  const ROW_H     = 38;
-  const LBL_COLOR: [number,number,number] = [100, 116, 139];
-  const VAL_COLOR: [number,number,number] = [15,  23,  42 ];
-  const ALT_BG:    [number,number,number] = [248, 250, 252];
-  const WHITE:     [number,number,number] = [255, 255, 255];
-
-  const isGood = summary.IS_bps !== null && summary.IS_bps <= 0;
-  const isBad  = summary.IS_bps !== null && summary.IS_bps > 0;
-  const IS_COLOR: [number,number,number] = isGood ? [22, 163, 74] : isBad ? [220, 38, 38] : VAL_COLOR;
-
-  const metrics: Array<[string, string, string, string, [number,number,number]?]> = [
-    ["Total Qty",         summary.totalQty.toLocaleString(),   "Duration",            fmtTtf(summary.duration_ms)],
-    ["Order Avg. Price",  fmtPrice(summary.fillVwap),          "Arrival Price",       fmtPrice(summary.arrivalPrice)],
-    ["IS (bps)",          fmtBps(summary.IS_bps),              "Market VWAP (BBG)",   fmtPrice(summary.marketVwap), IS_COLOR],
-    ["Market TWAP (BBG)", fmtPrice(summary.marketTwap),        "Participation Rate",  fmtPct(summary.participationRate)],
-    ["1σ Vol (price)",    summary.vol_during_order_price !== null
-                            ? summary.vol_during_order_price.toFixed(4) : "N/A",
-                                                               "1σ Vol (bps)",        fmtBps(summary.vol_during_order_bps)],
-  ];
-
-  for (let i = 0; i < metrics.length; i++) {
-    const [lbl1, val1, lbl2, val2, overrideColor] = metrics[i]!;
-    const rowY = GRID_TOP + i * ROW_H;
-    const bg   = i % 2 === 0 ? ALT_BG : WHITE;
-
-    doc.setFillColor(...bg);
-    doc.rect(ML, rowY, cardW, ROW_H, "F");
-
-    doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.5);
-    doc.line(ML + COL_W, rowY + 4, ML + COL_W, rowY + ROW_H - 4);
-
-    doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...LBL_COLOR);
-    doc.text(lbl1, ML + 12, rowY + 13);
-    doc.setFont("helvetica", "bold"); doc.setFontSize(10);
-    doc.setTextColor(...(i === 2 && overrideColor ? overrideColor : VAL_COLOR));
-    doc.text(val1, ML + 12, rowY + 27);
-
-    doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...LBL_COLOR);
-    doc.text(lbl2, ML + COL_W + 12, rowY + 13);
-    doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...VAL_COLOR);
-    doc.text(val2, ML + COL_W + 12, rowY + 27);
-  }
-
-  // Timing footer band
-  const footerY = GRID_TOP + metrics.length * ROW_H;
-  doc.setFillColor(241, 245, 249);
-  doc.rect(ML, footerY, cardW, 36, "F");
-  doc.setFillColor(241, 245, 249);
-  doc.rect(ML, footerY + 30, cardW, 6, "F");
-  doc.roundedRect(ML, footerY + 24, cardW, 12, 0, 6, "F");
-
-  doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...LBL_COLOR);
-  doc.text("Order Start (UTC)",  ML + 12,         footerY + 12);
-  doc.text("Last Fill (UTC)",    ML + COL_W + 12, footerY + 12);
-  doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(...VAL_COLOR);
-  doc.text(fmtUtcStr(summary.orderTime),    ML + 12,         footerY + 25);
-  doc.text(fmtUtcStr(summary.lastFillTime), ML + COL_W + 12, footerY + 25);
-
-  // Card border
-  doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.75);
-  doc.roundedRect(ML, 20, cardW, PH - 44, 6, 6, "S");
-}
-
-// ── Single-order PDF export (landscape A4, 3 pages) ──────────────────────────
-
-async function doPdfExportSingle(
-  summary: ParentOrderSummary,
-  trades: TradeRecord[],
-  _results: TCAResult[],
-): Promise<void> {
-  const CHART_IDS = [
-    "so-chart-twap",
-    "so-chart-vwap",
-    "so-chart-timeline",
-    "so-chart-participation",
-  ] as const;
-
-  const rawCaptures = await Promise.all(CHART_IDS.map(captureChartById));
-  const [twapCap, vwapCap, timelineCap, partCap] =
-    rawCaptures.map((c) => c ?? null) as [
-      CapturedChart|null, CapturedChart|null,
-      CapturedChart|null, CapturedChart|null
-    ];
-
-  // Page 1: Summary card
-  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-  drawSummaryCard(doc, summary);
-
-  // Page 2: Charts 2×2
-  doc.addPage();
-  const PW   = doc.internal.pageSize.getWidth();
-  const PH   = doc.internal.pageSize.getHeight();
-  const MARG = 16;
-  const GAP  = 8;
-  const colW = (PW - 2 * MARG - GAP) / 2;
-
-  doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(100, 116, 139);
-  doc.text(`${summary.symbol}  ${summary.side}  ·  Charts`, MARG, 11);
-  let curY = 16;
-
-  function placeChart(cap: CapturedChart | null, x: number, y: number): number {
-    if (!cap) return 0;
-    const h = (cap.h / cap.w) * colW;
-    doc.addImage(cap.img, "PNG", x, y, colW, h);
-    return h;
-  }
-
-  const r1h = twapCap || vwapCap
-    ? Math.max(
-        twapCap ? (twapCap.h / twapCap.w) * colW     : 0,
-        vwapCap ? (vwapCap.h / vwapCap.w) * colW     : 0,
-      )
-    : 0;
-  const r2h = timelineCap || partCap
-    ? Math.max(
-        timelineCap ? (timelineCap.h / timelineCap.w) * colW : 0,
-        partCap     ? (partCap.h     / partCap.w)     * colW : 0,
-      )
-    : 0;
-
-  placeChart(twapCap,  MARG,             curY);
-  placeChart(vwapCap,  MARG + colW + GAP, curY);
-  curY += (r1h > 0 ? r1h : (PH - 2 * MARG) / 2) + GAP;
-
-  if (curY + r2h > PH - MARG) { doc.addPage(); curY = MARG; }
-
-  placeChart(timelineCap, MARG,             curY);
-  placeChart(partCap,     MARG + colW + GAP, curY);
-
-  // Page 3: Fill detail table
-  doc.addPage();
-  doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(100, 116, 139);
-  doc.text(`${summary.symbol}  ${summary.side}  ·  Fill Detail`, MARG, 11);
-
-  const fillBody = trades.map((t) => [
-    t.orderId,
-    t.symbol,
-    t.side,
-    t.orderQty.toLocaleString(),
-    fmtPrice(t.avgFillPrice),
-    t.arrivalPrice !== null ? fmtPrice(t.arrivalPrice) : "—",
-    fmtUtcStr(t.orderTime),
-    fmtUtcStr(t.firstFillTime),
-    fmtUtcStr(t.lastFillTime),
-    t.algo ?? "—",
-  ]);
-
-  autoTable(doc, {
-    startY: 16,
-    head: [["Order ID", "Symbol", "Side", "Qty", "Fill Price", "Arrival Price",
-            "Order Time (UTC)", "First Fill (UTC)", "Last Fill (UTC)", "Algo"]],
-    body: fillBody,
-    styles: { fontSize: 6.5, cellPadding: 2.5, overflow: "ellipsize" },
-    headStyles: { fillColor: [59, 130, 246], textColor: [255, 255, 255], fontStyle: "bold", fontSize: 7 },
-    alternateRowStyles: { fillColor: [248, 250, 252] },
-    margin: { left: MARG, right: MARG, bottom: 15 },
-  });
-
-  doc.save(`tca_${summary.symbol}_${summary.side}_${datestamp()}.pdf`);
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -384,11 +156,41 @@ async function doPdfExportSingle(
 type Exporting = "excel" | "pdf" | null;
 
 export function ExportBar({ trades, results, aggregations, summary }: ExportBarProps) {
-  const [exporting,       setExporting]       = useState<Exporting>(null);
-  const [showPrintPreview, setShowPrintPreview] = useState(false);
+  const { logoDataUrl, disclaimerText, setLogo, setDisclaimer } = useCorporateTemplate();
+
+  const [exporting,     setExporting]     = useState<Exporting>(null);
+  const [generating,    setGenerating]    = useState(false);
+  const [showBranding,  setShowBranding]  = useState(false);
+
+  const brandingRef  = useRef<HTMLDivElement>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+
+  // Close branding popover on outside click
+  useEffect(() => {
+    if (!showBranding) return;
+    function handleClick(e: MouseEvent) {
+      if (brandingRef.current && !brandingRef.current.contains(e.target as Node)) {
+        setShowBranding(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showBranding]);
+
+  function handleLogoFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = ev.target?.result;
+      if (typeof result === "string") setLogo(result);
+    };
+    reader.readAsDataURL(file);
+  }
 
   function handleExcel() {
-    if (exporting !== null) return;
+    if (exporting !== null || generating) return;
     setExporting("excel");
     try { doExcelExport(buildTradeRows(trades, results), aggregations); }
     catch (err) { console.error("Excel export failed:", err); }
@@ -396,64 +198,192 @@ export function ExportBar({ trades, results, aggregations, summary }: ExportBarP
   }
 
   async function handlePdf() {
-    if (exporting !== null) return;
+    if (exporting !== null || generating) return;
     setExporting("pdf");
-    try {
-      if (summary) {
-        await doPdfExportSingle(summary, trades, results);
-      } else {
-        doPdfExport(buildTradeRows(trades, results));
-      }
-    } catch (err) { console.error("PDF export failed:", err); }
+    try { doPdfExport(buildTradeRows(trades, results)); }
+    catch (err) { console.error("PDF export failed:", err); }
     finally { setExporting(null); }
   }
 
-  const busy = exporting !== null;
+  function handlePrintPreview() {
+    if (generating || !summary) return;
+    setShowBranding(false);
+
+    // Open new tab synchronously from the click event to avoid popup blocking.
+    const win = window.open("", "_blank");
+    if (!win) {
+      alert("Popups are blocked — please allow popups for this page and try again.");
+      return;
+    }
+
+    // Show a loading state in the new tab immediately.
+    win.document.write(
+      `<!DOCTYPE html><html><head><title>Generating report…</title>` +
+      `<style>body{font-family:Helvetica,sans-serif;display:flex;align-items:center;` +
+      `justify-content:center;height:100vh;margin:0;color:#64748b;background:#f1f5f9}</style>` +
+      `</head><body><p>Capturing charts, please wait…</p></body></html>`
+    );
+    win.document.close();
+
+    setGenerating(true);
+
+    Promise.all([
+      captureChartById("so-chart-twap"),
+      captureChartById("so-chart-vwap"),
+      captureChartById("so-chart-timeline"),
+      captureChartById("so-chart-participation"),
+    ]).then((captures) => {
+      const charts: ChartCaptures = {
+        twap:          captures[0],
+        vwap:          captures[1],
+        timeline:      captures[2],
+        participation: captures[3],
+      };
+      const html = buildReportHtml({ summary, trades, charts, logoDataUrl, disclaimerText });
+      win.document.open();
+      win.document.write(html);
+      win.document.close();
+    }).catch((err) => {
+      console.error("Print preview failed:", err);
+      win.close();
+    }).finally(() => {
+      setGenerating(false);
+    });
+  }
+
+  const busy = exporting !== null || generating;
+  const hasBranding = !!(logoDataUrl || disclaimerText.trim());
 
   return (
-    <>
-      <div className="flex items-center gap-2">
-        {/* Print Preview — single-order mode only */}
-        {summary && (
-          <>
+    <div className="flex items-center gap-2">
+
+      {/* ── Single-order: Print Preview + Branding gear ───────────────────── */}
+      {summary && (
+        <>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={handlePrintPreview}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-wait transition-colors"
+            title="Open print preview in a new tab"
+          >
+            {generating ? <Spinner /> : <PrinterIcon />}
+            {generating ? "Generating…" : "Print Preview"}
+          </button>
+
+          {/* Branding settings gear */}
+          <div ref={brandingRef} className="relative">
             <button
               type="button"
               disabled={busy}
-              onClick={() => setShowPrintPreview(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              title="Open branded print preview (logo + disclaimer)"
+              onClick={() => setShowBranding((v) => !v)}
+              className={`relative flex items-center justify-center w-7 h-7 rounded-lg border transition-colors disabled:opacity-40 ${
+                showBranding
+                  ? "border-blue-400 bg-blue-50 text-blue-600 dark:border-blue-600 dark:bg-blue-900/40 dark:text-blue-400"
+                  : "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+              }`}
+              title="Configure corporate branding (logo + disclaimer)"
+              aria-label="Branding settings"
             >
-              <PrinterIcon />
-              Print Preview
+              <GearIcon />
+              {/* Blue dot indicator when branding is set */}
+              {hasBranding && !showBranding && (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-500 border border-white dark:border-gray-900" />
+              )}
             </button>
-            <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 shrink-0" />
-          </>
-        )}
 
-        <button type="button" disabled={busy} onClick={handleExcel}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-wait transition-colors"
-          title="Export to Excel (.xlsx)">
-          {exporting === "excel" ? <Spinner /> : <DownloadIcon />}
-          {exporting === "excel" ? "Exporting…" : "Excel"}
-        </button>
-        <button type="button" disabled={busy}
+            {/* Branding popover */}
+            {showBranding && (
+              <div className="absolute right-0 top-9 z-30 w-80 bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 p-4">
+                <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-3">Corporate Branding</p>
+
+                {/* Logo */}
+                <div className="mb-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1.5">Logo</p>
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleLogoFile}
+                  />
+                  {logoDataUrl ? (
+                    <div className="flex items-center gap-2">
+                      <img
+                        src={logoDataUrl}
+                        alt="Logo"
+                        className="h-8 w-auto max-w-[140px] object-contain rounded border border-gray-200 dark:border-gray-700 bg-white p-0.5"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setLogo(null)}
+                        className="text-xs text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                        title="Remove logo"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => logoInputRef.current?.click()}
+                      className="text-xs px-3 py-1.5 rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:border-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors w-full text-left"
+                    >
+                      Upload PNG / JPG / SVG…
+                    </button>
+                  )}
+                </div>
+
+                {/* Disclaimer */}
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1.5">Disclaimer text <span className="text-gray-400">(appears as last page)</span></p>
+                  <textarea
+                    value={disclaimerText}
+                    onChange={(e) => setDisclaimer(e.target.value)}
+                    placeholder="Paste your disclaimer here…"
+                    rows={4}
+                    className="w-full text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-2.5 py-1.5 resize-y focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400"
+                  />
+                </div>
+
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                  Saved automatically to this browser.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 shrink-0" />
+        </>
+      )}
+
+      {/* ── Excel (always) ────────────────────────────────────────────────── */}
+      <button
+        type="button"
+        disabled={busy}
+        onClick={handleExcel}
+        className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-wait transition-colors"
+        title="Export to Excel (.xlsx)"
+      >
+        {exporting === "excel" ? <Spinner /> : <DownloadIcon />}
+        {exporting === "excel" ? "Exporting…" : "Excel"}
+      </button>
+
+      {/* ── PDF (multi-order only) ─────────────────────────────────────────── */}
+      {!summary && (
+        <button
+          type="button"
+          disabled={busy}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-wait transition-colors"
           title="Export to PDF"
-          onClick={() => { void handlePdf(); }}>
+          onClick={() => { void handlePdf(); }}
+        >
           {exporting === "pdf" ? <Spinner /> : <PdfIcon />}
           {exporting === "pdf" ? "Exporting…" : "PDF"}
         </button>
-      </div>
-
-      {showPrintPreview && summary && (
-        <PrintPreviewModal
-          summary={summary}
-          trades={trades}
-          results={results}
-          onClose={() => setShowPrintPreview(false)}
-        />
       )}
-    </>
+
+    </div>
   );
 }
 
@@ -483,6 +413,14 @@ function PrinterIcon() {
   return (
     <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
       <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+    </svg>
+  );
+}
+function GearIcon() {
+  return (
+    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
     </svg>
   );
 }
