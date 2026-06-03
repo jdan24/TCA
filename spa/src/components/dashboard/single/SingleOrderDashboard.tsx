@@ -280,6 +280,7 @@ export function SingleOrderDashboard({
                   results={results}
                   summary={summary ?? undefined}
                   onPrintLayout={setPrintCharts}
+                  hideExcel
                 />
 
           <button
@@ -569,7 +570,7 @@ export function SingleOrderDashboard({
       )}
 
       {/* ── Fill detail table ────────────────────────────────────────────── */}
-      <TradeTable trades={scaledTrades} results={results} title="Fill Detail" hideMetrics resolveSymbol={resolveSymbol} />
+      <TradeTable trades={scaledTrades} results={results} title="Fill Detail" hideMetrics showExcelExport resolveSymbol={resolveSymbol} />
     </div>
   );
 }

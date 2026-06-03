@@ -11,7 +11,7 @@
  * computeParentOrderSummary() aggregates all trades into a single parent-order
  * view for Mode 2 (Single Order TCA).
  */
-import type { BloombergEnrichment, ParentOrderSummary, TCAResult, TradeRecord } from "@/types";
+import type { BidAskTick, BloombergEnrichment, ParentOrderSummary, TCAResult, TradeRecord } from "@/types";
 import { computeMarketImpact } from "./marketImpact";
 import { computeReversion } from "./reversion";
 import { computeSlippage } from "./slippage";
@@ -304,6 +304,78 @@ export function computeParentOrderSummary(
     ? runningMarketTwap[runningMarketTwap.length - 1]!.twap
     : null;
 
+  // ── Market Impact (qty-weighted avg across fills) ────────────────────────
+  let MI_bps: number | null = null;
+  {
+    let weightedSum = 0;
+    let weightTotal = 0;
+    for (const trade of trades) {
+      const e = enrichment[trade.orderId];
+      const mi = computeMarketImpact(trade, e);
+      if (mi !== null) {
+        weightedSum += mi * trade.orderQty;
+        weightTotal += trade.orderQty;
+      }
+    }
+    if (weightTotal > 0) MI_bps = weightedSum / weightTotal;
+  }
+
+  // ── Parent-window TWAS ────────────────────────────────────────────────────
+  // Time-weighted average spread over [orderTime, lastFillTime].
+  let TWAS_bps: number | null = null;
+  {
+    for (const trade of trades) {
+      const e = enrichment[trade.orderId];
+      if (!e || e.bidAskTicks.length === 0) continue;
+
+      const windowStart = orderMs;
+      const windowEnd   = lastFillMs;
+      const totalDur    = windowEnd - windowStart;
+
+      const ticks = [...e.bidAskTicks]
+        .filter((tk) => { const ms = tk.time.getTime(); return ms >= windowStart && ms <= windowEnd; })
+        .sort((a: BidAskTick, b: BidAskTick) => a.time.getTime() - b.time.getTime());
+
+      if (ticks.length === 0) break;
+
+      if (totalDur <= 0 || ticks.length === 1) {
+        const tk = ticks[0]!;
+        const mid = (tk.bid + tk.ask) / 2;
+        if (mid > 0) TWAS_bps = ((tk.ask - tk.bid) / mid) * 10_000;
+        break;
+      }
+
+      let weightedSum = 0;
+      let weightTotal = 0;
+      for (let i = 0; i < ticks.length; i++) {
+        const tk     = ticks[i]!;
+        const nextMs2 = i + 1 < ticks.length ? ticks[i + 1]!.time.getTime() : windowEnd;
+        const deltaT = nextMs2 - tk.time.getTime();
+        if (deltaT <= 0) continue;
+        const mid = (tk.bid + tk.ask) / 2;
+        if (mid <= 0) continue;
+        weightedSum += ((tk.ask - tk.bid) / mid) * 10_000 * deltaT;
+        weightTotal += deltaT;
+      }
+      if (weightTotal > 0) TWAS_bps = weightedSum / weightTotal;
+      break; // same security — first enriched trade's ticks cover the window
+    }
+  }
+
+  // ── 1-minute post-fill price (for benchmark-relative reversion) ───────────
+  // Use the enrichment of the trade with the latest lastFillTime.
+  let reversion1m_price: number | null = null;
+  {
+    const latestTrade = trades.reduce(
+      (latest, t) => (t.lastFillTime > latest.lastFillTime ? t : latest),
+      trades[0]!,
+    );
+    const e = enrichment[latestTrade.orderId];
+    if (e && e.reversion1m && e.reversion1m !== 0) {
+      reversion1m_price = e.reversion1m;
+    }
+  }
+
   return {
     symbol: firstTrade.symbol,
     side,
@@ -321,5 +393,8 @@ export function computeParentOrderSummary(
     marketTwap,
     runningMarketVwap,
     runningMarketTwap,
+    MI_bps,
+    TWAS_bps,
+    reversion1m_price,
   };
 }

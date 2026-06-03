@@ -96,6 +96,12 @@ export interface ParentOrderSummary {
   runningMarketVwap: Array<{ t: number; vwap: number }> | null;
   /** Running market TWAP at each fill timestamp — null when Bloomberg not connected. */
   runningMarketTwap: Array<{ t: number; twap: number }> | null;
+  /** Qty-weighted average of fill-level market impact (Almgren/Chriss). */
+  MI_bps: number | null;
+  /** Time-weighted average spread over the full parent order window. */
+  TWAS_bps: number | null;
+  /** Raw market price 1 minute after the parent order's last fill (from Bloomberg). */
+  reversion1m_price: number | null;
 }
 
 // ── Multi-order aggregation types ─────────────────────────────────────────────

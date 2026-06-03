@@ -29,6 +29,8 @@ interface ExportBarProps {
   summary?:       ParentOrderSummary | undefined;
   /** Called after charts are captured — parent switches to PrintLayout. */
   onPrintLayout?: (charts: ChartImages) => void;
+  /** When true, the Excel button is hidden (e.g. it has been moved elsewhere). */
+  hideExcel?:     boolean;
 }
 
 type ExportRow = Record<string, string | number>;
@@ -159,7 +161,7 @@ async function captureChart(id: string): Promise<string | null> {
 
 type Exporting = "excel" | "pdf" | null;
 
-export function ExportBar({ trades, results, aggregations, summary, onPrintLayout }: ExportBarProps) {
+export function ExportBar({ trades, results, aggregations, summary, onPrintLayout, hideExcel }: ExportBarProps) {
   const [exporting,  setExporting]  = useState<Exporting>(null);
   const [generating, setGenerating] = useState(false);
 
@@ -215,21 +217,23 @@ export function ExportBar({ trades, results, aggregations, summary, onPrintLayou
             {generating ? <Spinner /> : <PrinterIcon />}
             {generating ? "Preparing…" : "Print Layout"}
           </button>
-          <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 shrink-0" />
+          {!hideExcel && <div className="w-px h-4 bg-gray-200 dark:bg-gray-700 shrink-0" />}
         </>
       )}
 
-      {/* Excel — always visible */}
-      <button
-        type="button"
-        disabled={busy}
-        onClick={handleExcel}
-        className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-wait transition-colors"
-        title="Export to Excel (.xlsx)"
-      >
-        {exporting === "excel" ? <Spinner /> : <DownloadIcon />}
-        {exporting === "excel" ? "Exporting…" : "Excel"}
-      </button>
+      {/* Excel — hidden when moved elsewhere (e.g. single-order Fill Detail table) */}
+      {!hideExcel && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={handleExcel}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-wait transition-colors"
+          title="Export to Excel (.xlsx)"
+        >
+          {exporting === "excel" ? <Spinner /> : <DownloadIcon />}
+          {exporting === "excel" ? "Exporting…" : "Excel"}
+        </button>
+      )}
 
       {/* PDF — multi-order only (single-order uses Print Layout instead) */}
       {!summary && (

@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
 import {
   createColumnHelper,
   flexRender,
@@ -294,6 +295,52 @@ const CSV_COLUMNS: Array<{
   { header: "Vol σ (bps)",        value: (r) => r.vol_during_order_bps },
 ];
 
+// ── XLSX export (visible columns only) ────────────────────────────────────────
+
+type XlsxColDef = { header: string; value: (row: TableRow) => number | string | null };
+
+const XLSX_COL_DEFS: Record<string, XlsxColDef> = {
+  orderId:                { header: "Order ID",           value: (r) => r.orderId },
+  symbol:                 { header: "Symbol",             value: (r) => r.symbol },
+  side:                   { header: "Side",               value: (r) => r.side },
+  orderQty:               { header: "Qty",                value: (r) => r.orderQty },
+  avgFillPrice:           { header: "Fill Price",         value: (r) => r.avgFillPrice },
+  arrivalPrice:           { header: "Arrival Price",      value: (r) => r.arrivalPrice },
+  orderTime:              { header: "Order Time (UTC)",   value: (r) => fmtUtc(r.orderTime) },
+  firstFillTime:          { header: "First Fill (UTC)",   value: (r) => fmtUtc(r.firstFillTime) },
+  lastFillTime:           { header: "Last Fill (UTC)",    value: (r) => fmtUtc(r.lastFillTime) },
+  algo:                   { header: "Algo",               value: (r) => r.algo },
+  timeToFill_ms:          { header: "TTF",                value: (r) => fmtTtf(r.timeToFill_ms) },
+  IS_bps:                 { header: "IS (bps)",           value: (r) => r.IS_bps },
+  VWAP_dev_bps:           { header: "vs Mkt VWAP (bps)", value: (r) => r.VWAP_dev_bps },
+  marketVWAP_price:       { header: "Mkt VWAP",          value: (r) => r.marketVWAP_price },
+  TWAP_dev_bps:           { header: "vs Mkt TWAP (bps)", value: (r) => r.TWAP_dev_bps },
+  MI_bps:                 { header: "Mkt Impact (bps)",  value: (r) => r.MI_bps },
+  reversion_30s_bps:      { header: "Rev +30s (bps)",    value: (r) => r.reversion_30s_bps },
+  reversion_1m_bps:       { header: "Rev +1m (bps)",     value: (r) => r.reversion_1m_bps },
+  TWAS_bps:               { header: "TWAS (bps)",        value: (r) => r.TWAS_bps },
+  vol_during_order_price: { header: "Vol σ (price)",     value: (r) => r.vol_during_order_price },
+  vol_during_order_bps:   { header: "Vol σ (bps)",       value: (r) => r.vol_during_order_bps },
+};
+
+function exportFillDetailToXlsx(data: TableRow[], visibleColumnIds: string[], filename: string) {
+  const cols = visibleColumnIds
+    .map((id) => XLSX_COL_DEFS[id])
+    .filter((c): c is XlsxColDef => c !== undefined);
+
+  const rows = data.map((row) => {
+    const obj: Record<string, unknown> = {};
+    for (const c of cols) obj[c.header] = c.value(row) ?? "";
+    return obj;
+  });
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws["!cols"] = cols.map((c) => ({ wch: Math.max(c.header.length + 2, 14) }));
+  XLSX.utils.book_append_sheet(wb, ws, "Fill Detail");
+  XLSX.writeFile(wb, filename);
+}
+
 function exportToCsv(data: TableRow[], filename: string) {
   const headerRow = CSV_COLUMNS.map((c) => csvField(c.header)).join(",");
   const dataRows  = data.map((row) =>
@@ -550,11 +597,13 @@ interface TradeTableProps {
   title?: string;
   /**
    * When true, only raw input columns are shown (no Bloomberg-dependent
-   * metrics).  Used in the Single Order Fill Detail table.
+   * metrics, no arrivalPrice, no algo).  Used in the Single Order Fill Detail table.
    */
   hideMetrics?: boolean;
   /** Optional symbol resolver — translates raw RIC to BBG ticker + yellow key. */
   resolveSymbol?: (ric: string) => string;
+  /** When true, shows an Excel export button in the toolbar. */
+  showExcelExport?: boolean;
 }
 
 const PAGE_SIZES = [10, 25, 50] as const;
@@ -563,14 +612,17 @@ const DEFAULT_VISIBILITY: VisibilityState = {
   // All reversion columns visible by default; others hidden as needed
 };
 
-// Columns that require Bloomberg enrichment — hidden when hideMetrics=true
+// Columns hidden in Fill Detail mode (hideMetrics=true):
+//   - metric columns requiring Bloomberg enrichment
+//   - arrivalPrice and algo (not needed in single-order fill detail)
 const METRIC_COLUMN_IDS = new Set([
   "timeToFill_ms", "IS_bps", "VWAP_dev_bps", "marketVWAP_price",
   "TWAP_dev_bps", "MI_bps", "reversion_30s_bps", "reversion_1m_bps",
   "TWAS_bps", "vol_during_order_price", "vol_during_order_bps",
+  "arrivalPrice", "algo",
 ]);
 
-export function TradeTable({ trades, results, title = "Trade Detail", hideMetrics = false, resolveSymbol }: TradeTableProps) {
+export function TradeTable({ trades, results, title = "Trade Detail", hideMetrics = false, resolveSymbol, showExcelExport = false }: TradeTableProps) {
   const aggregationFilter = useTCAStore((s) => s.aggregationFilter);
   const setAggregationFilter = useTCAStore((s) => s.setAggregationFilter);
   const rawTrades   = useTCAStore((s) => s.rawTrades);
@@ -772,6 +824,25 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
                 d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
             Export CSV
+          </button>
+        )}
+
+        {/* Excel export — visible columns only, used in single-order Fill Detail */}
+        {showExcelExport && (
+          <button
+            type="button"
+            onClick={() => {
+              const visibleIds = table.getVisibleLeafColumns().map((c) => c.id);
+              exportFillDetailToXlsx(allData, visibleIds, "fill-detail.xlsx");
+            }}
+            title="Export visible columns to Excel (.xlsx)"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors whitespace-nowrap"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Excel
           </button>
         )}
 

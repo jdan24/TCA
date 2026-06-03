@@ -1,14 +1,15 @@
 /**
  * ParentSummaryCard — top-of-dashboard summary for Single Order TCA (Mode 2).
  *
- * Two-column layout:
- *   Left  — Order Details  (factual order data; Order Start / Last Fill are editable)
- *   Right — Benchmark Performance  (avg fill price vs each benchmark, highlighted by algo)
+ * Three-column layout:
+ *   Col 1 — Order Details        (factual order data; Order Start / Last Fill are editable)
+ *   Col 2 — Market Conditions    (vol, impact, reversion, spread)
+ *   Col 3 — Benchmark Performance (avg fill price vs each benchmark, highlighted by algo)
  */
 
 import { useState } from "react";
 import type { ParentOrderSummary } from "@/types";
-import { fmtBps, fmtTtf } from "@/components/dashboard/dashboardUtils";
+import { fmtTtf } from "@/components/dashboard/dashboardUtils";
 
 // ── UTC helpers ───────────────────────────────────────────────────────────────
 
@@ -20,7 +21,6 @@ function fmtUtc(d: Date): string {
   );
 }
 
-/** Convert a UTC Date to the value string for datetime-local (uses UTC, not local). */
 function toInputUtc(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return (
@@ -29,10 +29,9 @@ function toInputUtc(d: Date): string {
   );
 }
 
-/** Parse a datetime-local string as UTC (the browser gives it back in local — we treat it as UTC). */
 function parseInputAsUtc(s: string): Date | null {
   if (!s) return null;
-  const d = new Date(s + "Z");          // append Z to force UTC interpretation
+  const d = new Date(s + "Z");
   return isNaN(d.getTime()) ? null : d;
 }
 
@@ -52,11 +51,9 @@ function fmtPct(v: number | null): string {
 
 interface ParentSummaryCardProps {
   summary: ParentOrderSummary;
-  /** Which benchmark card to ring-highlight based on the selected algo. */
   highlightedBenchmark: "arrival" | "vwap" | "twap" | null;
   onOrderTimeChange: (d: Date) => void;
   onLastFillTimeChange: (d: Date) => void;
-  /** Optional symbol resolver — translates raw RIC to BBG ticker + yellow key. */
   resolveSymbol?: (ric: string) => string;
 }
 
@@ -81,7 +78,44 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
   );
 }
 
-/** A time row that shows a pencil-edit button and switches to an input on click. */
+function BpsRow({
+  label,
+  value,
+  invert = false,
+  neutral = false,
+}: {
+  label: string;
+  value: number | null;
+  invert?: boolean;
+  neutral?: boolean;
+}) {
+  let displayStr: string;
+  let colorClass: string;
+
+  if (value === null) {
+    displayStr = "N/A (needs BBG)";
+    colorClass = "text-gray-400 dark:text-gray-600";
+  } else {
+    const sign = value > 0 ? "+" : "";
+    displayStr = `${sign}${value.toFixed(1)} bps`;
+    if (neutral) {
+      colorClass = "text-gray-700 dark:text-gray-300";
+    } else {
+      const favorable = invert ? value > 0 : value < 0;
+      colorClass = favorable ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400";
+    }
+  }
+
+  return (
+    <div className="flex items-baseline justify-between gap-2 py-1.5 border-b border-gray-100 dark:border-gray-800 last:border-0">
+      <span className="text-[11px] text-gray-500 dark:text-gray-400 shrink-0">{label}</span>
+      <span className={`text-xs font-semibold tabular-nums text-right ${colorClass}`}>
+        {displayStr}
+      </span>
+    </div>
+  );
+}
+
 function EditableTimeRow({
   label,
   date,
@@ -128,14 +162,12 @@ function EditableTimeRow({
               }`}
               autoFocus
             />
-            {/* Confirm */}
             <button type="button" onClick={confirm} title="Confirm (UTC)"
               className="p-0.5 text-green-600 hover:text-green-700 dark:text-green-400">
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
               </svg>
             </button>
-            {/* Cancel */}
             <button type="button" onClick={cancel} title="Cancel"
               className="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -243,6 +275,18 @@ export function ParentSummaryCard({
 
   const noBloomberg = summary.arrivalPrice === null;
 
+  // Benchmark-relative reversion: uses the benchmark selected by the active algo.
+  // Defaults to arrival price when no algo is selected.
+  const benchmarkPrice: number | null =
+    highlightedBenchmark === "vwap"  ? summary.marketVwap  :
+    highlightedBenchmark === "twap"  ? summary.marketTwap  :
+    summary.arrivalPrice;
+
+  const reversion1m_bps: number | null =
+    summary.reversion1m_price !== null && benchmarkPrice !== null && benchmarkPrice > 0
+      ? ((summary.reversion1m_price - benchmarkPrice) / benchmarkPrice) * -sideSign * 10_000
+      : null;
+
   return (
     <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
 
@@ -261,24 +305,18 @@ export function ParentSummaryCard({
         <span className="text-xs text-gray-400 dark:text-gray-500">Parent Order Summary</span>
       </div>
 
-      {/* ── Two-column body ────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
+      {/* ── Three-column body ──────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
 
-        {/* ── LEFT: Order Details ────────────────────────────────────────── */}
+        {/* ── COL 1: Order Details ────────────────────────────────────────── */}
         <div>
           <SectionLabel>Order Details</SectionLabel>
           <div>
-            <DetailRow label="Total Qty"       value={summary.totalQty.toLocaleString()} />
+            <DetailRow label="Total Qty"        value={summary.totalQty.toLocaleString()} />
             <DetailRow label="Order Avg. Price" value={summary.fillVwap.toLocaleString(undefined, {
               minimumFractionDigits: 2, maximumFractionDigits: 6,
             })} />
-            <DetailRow label="Duration"         value={fmtTtf(summary.duration_ms)} />
-            <DetailRow label="1σ Vol (bps)"     value={fmtBps(summary.vol_during_order_bps)} />
-            <DetailRow label="1σ Vol (price)"   value={
-              summary.vol_during_order_price !== null
-                ? summary.vol_during_order_price.toFixed(4)
-                : "N/A (needs BBG)"
-            } />
+            <DetailRow label="Duration"          value={fmtTtf(summary.duration_ms)} />
             <DetailRow label="Participation Rate" value={fmtPct(summary.participationRate)} />
             <EditableTimeRow
               label="Order Start (UTC)"
@@ -293,7 +331,23 @@ export function ParentSummaryCard({
           </div>
         </div>
 
-        {/* ── RIGHT: Benchmark Performance ──────────────────────────────── */}
+        {/* ── COL 2: Market Conditions ────────────────────────────────────── */}
+        <div>
+          <SectionLabel>Market Conditions</SectionLabel>
+          <div>
+            <BpsRow label="1σ Vol (bps)"    value={summary.vol_during_order_bps} neutral />
+            <DetailRow label="1σ Vol (price)" value={
+              summary.vol_during_order_price !== null
+                ? summary.vol_during_order_price.toFixed(4)
+                : "N/A (needs BBG)"
+            } />
+            <BpsRow label="Impact (bps)"    value={summary.MI_bps} neutral />
+            <BpsRow label="Reversion 1m (bps)" value={reversion1m_bps} invert />
+            <BpsRow label="TWAS (bps)"      value={summary.TWAS_bps} neutral />
+          </div>
+        </div>
+
+        {/* ── COL 3: Benchmark Performance ────────────────────────────────── */}
         <div>
           <SectionLabel>Benchmark Performance</SectionLabel>
           <div className="space-y-2.5">
