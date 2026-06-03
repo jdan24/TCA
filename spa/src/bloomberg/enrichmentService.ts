@@ -480,25 +480,24 @@ export async function enrichSingleOrder(
 
   if (arrivalPrice === null) return result; // can't proceed without arrival price
 
-  // ── VWAP (trade-tick-based for short orders, bar-based otherwise) ───────────
-  const isShortOrder =
-    lastFillTime.getTime() - orderTime.getTime() <= SHORT_ORDER_THRESHOLD_MS;
-
-  const vwap = isShortOrder
-    ? (() => {
-        const fromMs = orderTime.getTime();
-        const toMs   = lastFillTime.getTime();
-        let sumPV = 0, sumV = 0;
-        for (const tk of rawTradeTicks) {
-          const ms = new Date(tk.time).getTime();
-          if (ms >= fromMs && ms <= toMs && tk.size > 0) {
-            sumPV += tk.price * tk.size;
-            sumV  += tk.size;
-          }
-        }
-        return sumV > 0 ? sumPV / sumV : null;
-      })() ?? arrivalPrice
-    : computeVwap(bars, orderTime, lastFillTime) ?? arrivalPrice;
+  // ── VWAP: true tick Σ(price×size)/Σ(size) for all order durations ────────
+  // Previously, orders >5 min used bar close×volume which can diverge several
+  // ticks from the Bloomberg terminal figure.  Ticks are already fetched for
+  // the full window so we use them unconditionally; bars are the fallback only
+  // when the tick stream returns empty (e.g. illiquid afterhours window).
+  const vwap = (() => {
+    const fromMs = orderTime.getTime();
+    const toMs   = lastFillTime.getTime();
+    let sumPV = 0, sumV = 0;
+    for (const tk of rawTradeTicks) {
+      const ms = new Date(tk.time).getTime();
+      if (ms >= fromMs && ms <= toMs && tk.size > 0) {
+        sumPV += tk.price * tk.size;
+        sumV  += tk.size;
+      }
+    }
+    return sumV > 0 ? sumPV / sumV : null;
+  })() ?? computeVwap(bars, orderTime, lastFillTime) ?? arrivalPrice;
 
   // ── Reference fields ──────────────────────────────────────────────────────
   const dailyVol = annualizedPctToDaily(

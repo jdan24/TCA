@@ -193,85 +193,106 @@ export function computeParentOrderSummary(
     const e = enrichment[trade.orderId];
     if (!e) continue;
 
-    if (isShortOrder) {
-      // Scalar VWAP: true trade VWAP Σ(price×size)/Σ(size) over the full window
-      const fromMs = orderTime.getTime();
-      const toMs   = lastFillTime.getTime();
+    // ── Scalar market VWAP ────────────────────────────────────────────────
+    // True tick VWAP Σ(price×size)/Σ(size) for all order durations.
+    // Previously long orders used bar close×volume which diverges from the
+    // Bloomberg terminal figure.  Bars are kept as fallback only when the
+    // tick stream is empty (e.g. illiquid session, data gap).
+    {
       let sumPV = 0, sumV = 0;
       for (const tk of e.tradeTicks) {
         const ms = tk.time.getTime();
-        if (ms >= fromMs && ms <= toMs && tk.size > 0) {
+        if (ms >= orderMs && ms <= lastFillMs && tk.size > 0) {
           sumPV += tk.price * tk.size;
           sumV  += tk.size;
         }
       }
-      marketVwap = sumV > 0 ? sumPV / sumV : null;
-    } else {
-      // Scalar VWAP: volume-weighted close × volume over the bar window
-      let sumPV = 0, sumV = 0;
-      for (const bar of e.barsSnapshot) {
-        const barMs = new Date(bar.time).getTime();
-        if (barMs >= fromBarMs && barMs <= toBarMs) {
-          sumPV += bar.close * bar.volume;
-          sumV  += bar.volume;
+      if (sumV > 0) {
+        marketVwap = sumPV / sumV;
+      } else {
+        // Bar fallback: Σ(close×volume)/Σ(volume)
+        let bPV = 0, bV = 0;
+        for (const bar of e.barsSnapshot) {
+          const barMs = new Date(bar.time).getTime();
+          if (barMs >= fromBarMs && barMs <= toBarMs) {
+            bPV += bar.close * bar.volume;
+            bV  += bar.volume;
+          }
         }
+        if (bV > 0) marketVwap = bPV / bV;
       }
-      marketVwap = sumV > 0 ? sumPV / sumV : null;
     }
 
-    // Running VWAP: one point per fill, window = [orderTime, fillTime]
+    // ── Running market VWAP ───────────────────────────────────────────────
+    // Same tick-first / bar-fallback logic, computed up to each fill time.
     const points: Array<{ t: number; vwap: number }> = [];
     for (const fill of sortedFills) {
       const fillTimeMs = fill.lastFillTime.getTime();
       let vwap: number | null = null;
 
-      if (isShortOrder) {
-        // Up to and including the fill second — true VWAP Σ(price×size)/Σ(size)
-        const fromMs = orderTime.getTime();
-        let sumPV = 0, sumV = 0;
-        for (const tk of e.tradeTicks) {
-          const ms = tk.time.getTime();
-          if (ms >= fromMs && ms <= fillTimeMs && tk.size > 0) {
-            sumPV += tk.price * tk.size;
-            sumV  += tk.size;
-          }
+      let sumPV = 0, sumV = 0;
+      for (const tk of e.tradeTicks) {
+        const ms = tk.time.getTime();
+        if (ms >= orderMs && ms <= fillTimeMs && tk.size > 0) {
+          sumPV += tk.price * tk.size;
+          sumV  += tk.size;
         }
-        vwap = sumV > 0 ? sumPV / sumV : null;
+      }
+      if (sumV > 0) {
+        vwap = sumPV / sumV;
       } else {
-        // Up to and including the fill minute — bar close × volume
         const fillMinuteMs = Math.floor(fillTimeMs / ONE_MIN_MS) * ONE_MIN_MS;
-        let sumPV = 0, sumV = 0;
+        let bPV = 0, bV = 0;
         for (const bar of e.barsSnapshot) {
           const barMs = new Date(bar.time).getTime();
           if (barMs >= fromBarMs && barMs <= fillMinuteMs) {
-            sumPV += bar.close * bar.volume;
-            sumV  += bar.volume;
+            bPV += bar.close * bar.volume;
+            bV  += bar.volume;
           }
         }
-        vwap = sumV > 0 ? sumPV / sumV : null;
+        if (bV > 0) vwap = bPV / bV;
       }
 
       if (vwap !== null) points.push({ t: fillTimeMs, vwap });
     }
     runningMarketVwap = points.length > 0 ? points : null;
 
-    // Running TWAP: one point per fill, window = [orderTime, fillTime]
-    // Always uses last-traded prices from Bloomberg trade ticks regardless of order
-    // duration — accurate for the single-order page where only one order is loaded
-    // at a time so the data volume from a longer tick stream is acceptable.
+    // ── Running market TWAP: true time-weighted average ───────────────────
+    // Previous approach averaged tick prices equally — bursts of ticks in a
+    // busy second dominated quiet periods.  True TWAP weights each price by
+    // the duration it prevailed until the next tick (or window end), so a
+    // price that held for 30 seconds counts 30× more than one that lasted 1 s.
+    //
+    // Formula: Σ(price_i × hold_duration_i) / total_window_duration
+    // The first tick in each window is extended back to orderMs so the full
+    // window is covered even when the first tick arrives slightly after start.
     const twapPoints: Array<{ t: number; twap: number }> = [];
-    const twapFromMs = orderTime.getTime();
     for (const fill of sortedFills) {
-      const fillTimeMs = fill.lastFillTime.getTime();
-      const prices: number[] = [];
-      for (const tk of e.tradeTicks) {
+      const fillMs       = fill.lastFillTime.getTime();
+      const windowMs     = fillMs - orderMs;
+      if (windowMs <= 0) continue;
+
+      const windowTicks = e.tradeTicks.filter((tk) => {
         const ms = tk.time.getTime();
-        if (ms >= twapFromMs && ms <= fillTimeMs) {
-          prices.push(tk.price);
+        return ms >= orderMs && ms <= fillMs;
+      });
+
+      let twap: number | null = null;
+      if (windowTicks.length > 0) {
+        let weightedSum = 0;
+        for (let i = 0; i < windowTicks.length; i++) {
+          // Extend the first tick back to orderMs to cover any gap before it
+          const tMs   = i === 0 ? orderMs : windowTicks[i]!.time.getTime();
+          const nextMs = i + 1 < windowTicks.length
+            ? windowTicks[i + 1]!.time.getTime()
+            : fillMs;
+          const dur = nextMs - tMs;
+          if (dur > 0) weightedSum += windowTicks[i]!.price * dur;
         }
+        twap = weightedSum / windowMs;
       }
-      const twap = prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : null;
-      if (twap !== null) twapPoints.push({ t: fillTimeMs, twap });
+
+      if (twap !== null) twapPoints.push({ t: fillMs, twap });
     }
     runningMarketTwap = twapPoints.length > 0 ? twapPoints : null;
 
