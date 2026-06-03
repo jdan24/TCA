@@ -137,13 +137,19 @@ export function FAQModal({ onClose }: FAQModalProps) {
             <Entry name="Trade Ticks (Last Traded)" tag="IntradayTickRequest · TRADE">
               <Row label="Window" value="orderTime → lastFillTime + 30 s" />
               <Row label="Fields per tick" value="time, last price, size" />
-              <p>Used for market VWAP (all order durations on the single-order page) and for the time-weighted market TWAP. These are actual exchange prints, not quoted bid/ask mid-prices.</p>
+              <p>Used for market VWAP (all order durations on the single-order page), time-weighted market TWAP, and participation rate volume denominator. These are actual exchange prints, not quoted bid/ask mid-prices.</p>
             </Entry>
 
             <Entry name="Reference Data" tag="ReferenceDataRequest">
               <Row label="HIST_VOL_30D" value="30-day historical annualised volatility (%)" />
               <Row label="VOLUME_AVG_30D" value="30-day average daily volume (contracts)" />
               <p>Fetched once per unique symbol. Used for Market Impact estimation.</p>
+            </Entry>
+
+            <Entry name="FIX File Symbol Resolution" tag="tag 48 / tag 55">
+              <Row label="Primary" value="Tag 48 — SecurityID (raw RIC code, e.g. ESc1, CLZ4)" />
+              <Row label="Fallback" value="Tag 55 — Symbol (used when tag 48 is absent)" />
+              <p>When loading FIX execution report files, the parser prefers tag 48 (SecurityID) over tag 55 (Symbol) for the instrument identifier. Tag 48 typically carries a purer RIC code. A Bloomberg symbol mapping or manual override on the Single Order page will still apply on top of whichever tag is used.</p>
             </Entry>
           </Section>
 
@@ -158,7 +164,7 @@ export function FAQModal({ onClose }: FAQModalProps) {
               <Row label="sideSign" value="+1 for BUY, −1 for SELL" />
               <Row label="Favorable" value={<Pill color="green">negative</Pill>} />
               <Row label="Adverse" value={<Pill color="red">positive</Pill>} />
-              <p>Measures the total slippage cost of the order versus the price at decision time. A BUY that fills above arrival, or a SELL that fills below arrival, incurs a positive (adverse) IS.</p>
+              <p>Measures the total slippage cost of the order versus the price at decision time. A BUY that fills above arrival, or a SELL that fills below arrival, incurs a positive (adverse) IS. On the Single Order Parent Summary, IS is computed at the parent order level using the qty-weighted average fill price (fillVWAP) versus the arrival price.</p>
             </Entry>
 
             <Entry name="VWAP Deviation" tag="bps">
@@ -202,13 +208,14 @@ export function FAQModal({ onClose }: FAQModalProps) {
               <Row label="Q/ADV clipped to" value="[0, 1]" />
               <Row label="Positive" value={<><Pill color="red">cost</Pill> — you moved the market against yourself</>} />
               <p>An estimate of the price impact caused by the order itself. Larger orders relative to ADV in more volatile names produce higher estimated impact.</p>
+              <p className="text-gray-400 dark:text-gray-500 text-[11px] italic">Parent Order Summary: shows the qty-weighted average of MI across all fills in the order.</p>
             </Entry>
 
             <Entry name="1σ Volatility (price &amp; bps)" tag="sample std dev">
               <Formula>σ_price = stdDev( (barHigh + barLow) / 2 ) over [orderTime, lastFillTime]</Formula>
               <Formula>σ_bps = σ_price / mean(barMidpoints) × 10,000</Formula>
               <Row label="Source (long orders ≥ 2 bars)" value="(high+low)/2 per 1-min bar — bar midpoint represents where price spent time, not just the closing tick" />
-              <Row label="Source (short orders, fallback)" value="(bid+ask)/2 from Bloomberg bid/ask ticks" />
+              <Row label="Source (short orders, fallback)" value="last-traded price from Bloomberg TRADE ticks" />
               <p>The one-standard-deviation price range of the market during the execution window. High vol during a low-IS order indicates good execution in a turbulent environment.</p>
             </Entry>
 
@@ -216,39 +223,71 @@ export function FAQModal({ onClose }: FAQModalProps) {
               <Formula>TWAS = Σ( spreadᵢ_bps × Δtᵢ ) / totalDuration</Formula>
               <Formula>spreadᵢ_bps = (askᵢ − bidᵢ) / midᵢ × 10,000</Formula>
               <Row label="Δtᵢ" value="Time tick i was valid (until next tick, or lastFillTime for the final tick)" />
-              <Row label="Source" value="Bloomberg bid/ask ticks over [orderTime − 2 min, lastFillTime + 30 s]" />
+              <Row label="Source (per fill)" value="Bloomberg bid/ask ticks filtered to [orderTime, lastFillTime] for that fill" />
+              <Row label="Source (Parent Order Summary)" value="Single TWAS computed over the full parent order window [orderTime, lastFillTime] — not an average of per-fill values" />
               <p>A liquidity environment proxy: how wide the market spread was, on average, while the order was executing. Comparing TWAS to IS helps distinguish execution skill from market conditions — high IS in a wide-spread environment is less concerning than high IS with a tight spread.</p>
+            </Entry>
+
+            <Entry name="Trend Cost" tag="bps · IS decomposition">
+              <Formula>Trend Cost = IS − Market Impact − TWAS / 2</Formula>
+              <Row label="IS" value="Implementation Shortfall (see above)" />
+              <Row label="Market Impact" value="Almgren/Chriss estimated impact (see above)" />
+              <Row label="TWAS / 2" value="Estimated one-way spread cost (half the time-weighted average spread)" />
+              <Row label="Favorable" value={<Pill color="green">negative</Pill>} />
+              <Row label="Adverse" value={<Pill color="red">positive</Pill>} />
+              <p>
+                The residual execution cost after removing the two explainable components of IS: the estimated price impact you caused yourself (Market Impact) and the cost of crossing the bid/ask spread (TWAS/2). What remains is attributed to adverse market drift — the market moving against you during the execution window for reasons unrelated to your own order.
+              </p>
+              <p>
+                A negative Trend Cost means the market drifted in your favour during execution (you benefited from timing). A positive Trend Cost means the market moved adversely. Only shown on the Single Order Parent Summary when all three inputs are available (Bloomberg enrichment required).
+              </p>
             </Entry>
           </Section>
 
           {/* ── Post-Trade Reversion ─────────────────────────────────────── */}
           <Section title="Post-Trade Price Reversion">
             <Entry name="Reversion at +30 s and +1 m" tag="bps">
+              <p className="font-medium text-gray-700 dark:text-gray-200">Per-fill (Fill Detail table):</p>
               <Formula>Reversion_t = (priceAtT − avgFillPrice) / avgFillPrice × −sideSign × 10,000</Formula>
+              <p className="font-medium text-gray-700 dark:text-gray-200 mt-2">Parent Order Summary (Single Order page):</p>
+              <Formula>Reversion_1m = (price_1m_after_lastFill − benchmarkPrice) / benchmarkPrice × −sideSign × 10,000</Formula>
+              <Row label="benchmarkPrice" value="Arrival Price for Arrival/other algos · Market VWAP for VWAP algo · Market TWAP for TWAP algo (follows the selected algo's highlighted benchmark)" />
+              <Row label="price_1m_after_lastFill" value="Bloomberg 1-min bar close at the parent order's lastFillTime + 1 min" />
               <Row
-                label="+30 s price source"
+                label="+30 s price source (per fill)"
                 value="Last Bloomberg TRADE tick at or before lastFillTime + 30 s — the actual last-traded market price. Tick window is fetched to lastFillTime + 35 s for a 5-second capture buffer."
               />
               <Row
-                label="+1 m price source"
+                label="+1 m price source (per fill)"
                 value="Bloomberg 1-min bar close at lastFillTime + 1 min — last traded price in that minute bar."
               />
               <Row label="Fallback" value="If no tick / bar is available at the mark, avgFillPrice is used → 0 bps (conservative no-data signal)" />
-              <Row label="Positive" value={<><Pill color="green">favorable</Pill> — price reverted back toward arrival (temporary impact)</>} />
-              <Row label="Negative" value={<><Pill color="red">adverse</Pill> — price continued away from fill (permanent impact / information leakage)</>} />
+              <Row label="Positive" value={<><Pill color="green">favorable</Pill> — price reverted back (temporary impact)</>} />
+              <Row label="Negative" value={<><Pill color="red">adverse</Pill> — price continued away (permanent impact / information leakage)</>} />
               <p>
                 Measures whether the price movement caused by your order was temporary (it reversed) or permanent (it persisted).
                 A BUY that filled high but saw the price fall back within 30 s or 1 m registers positive reversion.
                 Consistent negative reversion may indicate information leakage or adverse selection.
               </p>
+              <p>
+                On the Parent Order Summary, Reversion 1m is computed relative to the selected algo's primary benchmark rather than the fill price, so it answers: "did the market return to the benchmark level after the order completed?" The active algo is selected from the Execution Algo dropdown on the Single Order page.
+              </p>
             </Entry>
           </Section>
 
-          {/* ── Single Order Charts ──────────────────────────────────────── */}
+          {/* ── Single Order Page ────────────────────────────────────────── */}
           <Section title="Single Order Page — Additional Metrics">
+            <Entry name="Parent Order Summary — column layout">
+              <p>The Parent Order Summary card is divided into three columns:</p>
+              <Row label="Order Details" value="Total Qty, Order Avg. Price (fillVWAP), Duration, Participation Rate, Order Start (UTC), Order End Time (UTC)" />
+              <Row label="Market Conditions" value="1σ Vol (bps), 1σ Vol (price), Impact (bps), Reversion 1m (bps), TWAS (bps), Trend Cost (bps)" />
+              <Row label="Benchmark Performance" value="Arrival Price with IS (bps) · Market VWAP with VWAP Slippage · Market TWAP with TWAP Slippage — the card corresponding to the selected Execution Algo is highlighted" />
+              <p className="text-gray-400 dark:text-gray-500 text-[11px] italic">Market Conditions metrics are computed at the parent order level across the full [orderTime, lastFillTime] window — see individual metric entries for details.</p>
+            </Entry>
+
             <Entry name="Participation Rate">
-              <Formula>Participation Rate = totalOrderQty / exchangeVolumeInWindow</Formula>
-              <Row label="exchangeVolumeInWindow" value="Sum of Bloomberg 1-min bar volumes over [orderTime, lastFillTime]" />
+              <Formula>Participation Rate = totalOrderQty / Σ(tradeTickSize) over [orderTime, lastFillTime]</Formula>
+              <Row label="Volume denominator" value="Sum of Bloomberg TRADE tick sizes (actual exchange prints) within the order window — not 1-min bar volumes" />
               <p>What fraction of total market volume during the order window your order represented. High participation may increase market impact; low participation may indicate excessive caution.</p>
             </Entry>
 
@@ -286,6 +325,7 @@ export function FAQModal({ onClose }: FAQModalProps) {
                     ["VWAP Deviation (bps)", "negative", "positive"],
                     ["TWAP Deviation (bps)", "negative", "positive"],
                     ["Market Impact (bps)", "—", "positive (always a cost)"],
+                    ["Trend Cost (bps)", "negative", "positive"],
                     ["Reversion +30s / +1m (bps)", "positive (price reverts)", "negative (price persists)"],
                     ["TWAS (bps)", "context only", "context only"],
                     ["Volatility", "context only", "context only"],
@@ -293,7 +333,7 @@ export function FAQModal({ onClose }: FAQModalProps) {
                   ].map(([metric, fav, adv]) => (
                     <tr key={metric}>
                       <td className="px-3 py-2 font-mono text-[11px]">{metric}</td>
-                      <td className="px-3 py-2"><Pill color={fav === "context only" ? "gray" : "green"}>{fav}</Pill></td>
+                      <td className="px-3 py-2"><Pill color={fav === "context only" || fav === "—" ? "gray" : "green"}>{fav}</Pill></td>
                       <td className="px-3 py-2"><Pill color={adv === "context only" ? "gray" : "red"}>{adv}</Pill></td>
                     </tr>
                   ))}
