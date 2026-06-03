@@ -341,16 +341,23 @@ export function parseFixFile(file: File): Promise<TradeRecord[]> {
           return;
         }
 
-        // Filter out individual legs of multi-leg orders.
-        // Rule: keep a message if tag 442 (MultiLegReportingType) is absent OR equals "3"
-        //   442 absent → plain single-leg fill → keep
-        //   442 = "3"  → spread-level fill → keep
-        //   442 = "1" or "2" → individual leg fill → drop
-        // If NO message in the file has tag 442, nothing is filtered (backward-compatible).
+        // Smart multi-leg filter (tag 442 — MultiLegReportingType):
+        //
+        //   442 absent → plain single-leg fill                  → always keep
+        //   442 = "3"  → spread-level fill                      → always keep
+        //   442 = "1" or "2" → individual leg of a spread order → conditional
+        //
+        // The filter is only applied when the file actually contains spread-level
+        // fills (442=3).  If no 442=3 messages exist the file contains single-leg
+        // orders whose fills are tagged 442=1 (e.g. Allianz.txt, abenmFS.txt) and
+        // we must keep them all.  When 442=3 messages ARE present (e.g. LCC.txt)
+        // the file is a spread order and we keep only the spread-level fills to
+        // avoid triple-counting the same notional via leg reports (442=1/2).
         const mlrtKey = String(FIX_TAGS.MultiLegReportingType); // "442"
-        const filteredMessages = messages.filter(
-          (m) => !m[mlrtKey] || m[mlrtKey] === "3",
-        );
+        const hasSpreadLevel = messages.some((m) => m[mlrtKey] === "3");
+        const filteredMessages = hasSpreadLevel
+          ? messages.filter((m) => !m[mlrtKey] || m[mlrtKey] === "3")
+          : messages;
 
         const trades = aggregate(filteredMessages);
 
@@ -406,17 +413,23 @@ export function parseFixFileSingleOrder(file: File): Promise<TradeRecord[]> {
           return;
         }
 
-        // ── Multi-leg filter is intentionally NOT applied in single-order mode ──
+        // Smart multi-leg filter — same logic as the multi-order parser:
         //
-        // In multi-order mode we drop individual-leg fills (442=1/2) and keep
-        // only spread-level rolls (442=3) to avoid double-counting.
+        //   • File has 442=3 messages  → spread order → keep only 442=3 (spread-
+        //     level fills) and discard 442=1/2 (individual leg fills) to avoid
+        //     double/triple-counting.  LCC.txt is an example: each fill generates
+        //     one 442=3 spread-level report and two 442=1/2 leg-level reports.
         //
-        // In single-order mode the user is analysing one specific parent order —
-        // which may itself be an individual leg (442=1/2). Filtering those out
-        // would leave zero messages and produce a spurious parse error.
-        // Pass all messages directly to aggregatePerFill.
+        //   • File has NO 442=3 messages → single-leg order where fills are tagged
+        //     442=1 (e.g. Allianz.txt, abenmFS.txt) or have no 442 tag at all →
+        //     keep everything.
+        const mlrtKey = String(FIX_TAGS.MultiLegReportingType); // "442"
+        const hasSpreadLevel = messages.some((m) => m[mlrtKey] === "3");
+        const filteredMessages = hasSpreadLevel
+          ? messages.filter((m) => !m[mlrtKey] || m[mlrtKey] === "3")
+          : messages;
 
-        const trades = aggregatePerFill(messages);
+        const trades = aggregatePerFill(filteredMessages);
 
         if (trades.length === 0) {
           reject(
