@@ -361,21 +361,12 @@ function SortIcon({ direction }: { direction: "asc" | "desc" | false }) {
 
 const col = createColumnHelper<TableRow>();
 
-// Columns that appear before the time block
-const PRE_TIME_COLS = [
+// Columns that appear before the time block (symbol column is built inside the component)
+const PRE_TIME_COLS_NO_SYMBOL = [
   col.accessor("orderId", {
     header: "Order ID",
     cell: (i) => (
       <span className="font-mono text-[11px] text-gray-400 dark:text-gray-500">
-        {i.getValue()}
-      </span>
-    ),
-    enableGlobalFilter: true,
-  }),
-  col.accessor("symbol", {
-    header: "Symbol",
-    cell: (i) => (
-      <span className="text-xs font-semibold text-gray-900 dark:text-white">
         {i.getValue()}
       </span>
     ),
@@ -562,6 +553,8 @@ interface TradeTableProps {
    * metrics).  Used in the Single Order Fill Detail table.
    */
   hideMetrics?: boolean;
+  /** Optional symbol resolver — translates raw RIC to BBG ticker + yellow key. */
+  resolveSymbol?: (ric: string) => string;
 }
 
 const PAGE_SIZES = [10, 25, 50] as const;
@@ -577,7 +570,7 @@ const METRIC_COLUMN_IDS = new Set([
   "TWAS_bps", "vol_during_order_price", "vol_during_order_bps",
 ]);
 
-export function TradeTable({ trades, results, title = "Trade Detail", hideMetrics = false }: TradeTableProps) {
+export function TradeTable({ trades, results, title = "Trade Detail", hideMetrics = false, resolveSymbol }: TradeTableProps) {
   const aggregationFilter = useTCAStore((s) => s.aggregationFilter);
   const setAggregationFilter = useTCAStore((s) => s.setAggregationFilter);
   const rawTrades   = useTCAStore((s) => s.rawTrades);
@@ -594,9 +587,18 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
     [rawTrades, setRawTrades],
   );
 
-  // Build the two editable time columns inside the component so they capture
-  // the handleTimeEdit callback. firstFillTime remains static (read-only).
+  // Build the symbol + editable time columns inside the component so they capture
+  // resolveSymbol and the handleTimeEdit callback. firstFillTime remains static (read-only).
   const allColumns = useMemo(() => {
+    const symbolCol = col.accessor("symbol", {
+      header: "Symbol",
+      cell: (i) => (
+        <span className="text-xs font-semibold text-gray-900 dark:text-white">
+          {resolveSymbol ? resolveSymbol(i.getValue()) : i.getValue()}
+        </span>
+      ),
+      enableGlobalFilter: true,
+    });
     const editOrderTime = col.accessor("orderTime", {
       header: "Order Time (UTC)",
       cell: (i) => (
@@ -619,8 +621,8 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
       sortingFn: "datetime",
       enableGlobalFilter: false,
     });
-    return [...PRE_TIME_COLS, editOrderTime, FIRST_FILL_COL, editLastFill, ...POST_TIME_COLS];
-  }, [handleTimeEdit]);
+    return [PRE_TIME_COLS_NO_SYMBOL[0]!, symbolCol, ...PRE_TIME_COLS_NO_SYMBOL.slice(1), editOrderTime, FIRST_FILL_COL, editLastFill, ...POST_TIME_COLS];
+  }, [handleTimeEdit, resolveSymbol]);
 
   // Pre-filter rows by aggregation selection
   const filteredIds = useMemo(

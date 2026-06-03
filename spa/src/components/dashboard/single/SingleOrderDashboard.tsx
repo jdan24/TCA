@@ -456,6 +456,7 @@ export function SingleOrderDashboard({
         <ParentSummaryCard
           summary={summary}
           highlightedBenchmark={selectedAlgo !== null ? highlightedBenchmark(selectedAlgo) : null}
+          resolveSymbol={symbolMap.resolve}
           onOrderTimeChange={(d) =>
             setSingleOrderTimeOverride({
               start: d,
@@ -539,7 +540,7 @@ export function SingleOrderDashboard({
       )}
 
       {/* ── Fill detail table ────────────────────────────────────────────── */}
-      <TradeTable trades={scaledTrades} results={results} title="Fill Detail" hideMetrics />
+      <TradeTable trades={scaledTrades} results={results} title="Fill Detail" hideMetrics resolveSymbol={symbolMap.resolve} />
     </div>
   );
 }

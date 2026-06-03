@@ -86,6 +86,8 @@ interface VolumePoint {
   market: number | null;
   /** Our actual fills in contracts (null when 0 — no dot drawn). Left axis. */
   ourOrder: number | null;
+  /** Ideal VWAP qty: total_our_qty distributed proportionally to actual market volume. Left axis. */
+  vwapSim: number | null;
 }
 
 function buildVolumeData(
@@ -121,6 +123,9 @@ function buildVolumeData(
   }
   const totalMktVol = [...mktByMin.values()].reduce((a, b) => a + b, 0);
 
+  // ── Total our qty for VWAP simulation ────────────────────────────────────
+  const totalOurQty = trades.reduce((sum, t) => sum + t.orderQty, 0);
+
   // ── Historical Smoothed % → normalised to window ──────────────────────────
   // Each minute's raw value from the CSV; missing rows = 0 (zero volume).
   const histWeights = minutes.map((t) => {
@@ -151,7 +156,11 @@ function buildVolumeData(
     const ourVol  = ourByMin.get(t) ?? 0;
     const ourOrder = ourVol > 0 ? ourVol : null;
 
-    return { t, timeLabel: `${hh}:${mm} UTC`, historical, market, ourOrder };
+    // VWAP sim: ideal qty per minute if distributed proportional to actual market volume
+    const simRaw = totalMktVol > 0 ? Math.round((mktByMin.get(t) ?? 0) / totalMktVol * totalOurQty) : 0;
+    const vwapSim = simRaw > 0 ? simRaw : null;
+
+    return { t, timeLabel: `${hh}:${mm} UTC`, historical, market, ourOrder, vwapSim };
   });
 }
 
@@ -166,9 +175,10 @@ interface VwapVolumeProfileProps {
 }
 
 const SERIES = {
-  ourOrder:   { label: "Our Execution (contracts)", color: "#f97316" },
-  market:     { label: "Market Volume % (BBG)",     color: "#3b82f6" },
-  historical: { label: "Historical Schedule %",     color: "#94a3b8" },
+  ourOrder:   { label: "Our Execution (contracts)",      color: "#f97316" },
+  market:     { label: "Market Volume % (BBG)",          color: "#3b82f6" },
+  historical: { label: "Historical Schedule %",          color: "#64748b" },
+  vwapSim:    { label: "Ideal VWAP Qty (mkt vol)",       color: "#9ca3af" },
 };
 
 export function VwapVolumeProfile({
@@ -290,7 +300,7 @@ export function VwapVolumeProfile({
                     const s = SERIES[key as keyof typeof SERIES];
                     if (!s || p.value == null) return null;
                     const v = p.value as number;
-                    const formatted = key === "ourOrder"
+                    const formatted = (key === "ourOrder" || key === "vwapSim")
                       ? v.toLocaleString()           // contracts — whole number
                       : `${v.toFixed(2)}%`;          // % series
                     return (
@@ -348,13 +358,28 @@ export function VwapVolumeProfile({
               yAxisId="pct"
               type="monotone"
               dataKey="historical"
-              stroke="#94a3b8"
-              strokeWidth={1.5}
+              stroke="#64748b"
+              strokeWidth={2}
               strokeDasharray="6 3"
               dot={false}
               activeDot={{ r: 3 }}
               isAnimationActive={false}
               hide={hidden.has("historical")}
+              connectNulls={false}
+            />
+          )}
+
+          {/* Ideal VWAP qty — dots only (no line), left contracts axis, shown when market data available */}
+          {hasMarket && (
+            <Line
+              yAxisId="order"
+              dataKey="vwapSim"
+              stroke="transparent"
+              strokeWidth={0}
+              dot={{ r: 3, fill: "#9ca3af", stroke: "white", strokeWidth: 1 }}
+              activeDot={{ r: 5, fill: "#9ca3af", stroke: "white", strokeWidth: 1.5 }}
+              isAnimationActive={false}
+              hide={hidden.has("vwapSim")}
               connectNulls={false}
             />
           )}

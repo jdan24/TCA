@@ -56,6 +56,8 @@ interface ParentSummaryCardProps {
   highlightedBenchmark: "arrival" | "vwap" | "twap" | null;
   onOrderTimeChange: (d: Date) => void;
   onLastFillTimeChange: (d: Date) => void;
+  /** Optional symbol resolver — translates raw RIC to BBG ticker + yellow key. */
+  resolveSymbol?: (ric: string) => string;
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -225,6 +227,7 @@ export function ParentSummaryCard({
   highlightedBenchmark,
   onOrderTimeChange,
   onLastFillTimeChange,
+  resolveSymbol,
 }: ParentSummaryCardProps) {
   const sideSign = summary.side === "BUY" ? 1 : -1;
 
@@ -246,7 +249,7 @@ export function ParentSummaryCard({
       {/* ── Title row ──────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-3 mb-5">
         <span className="text-lg font-bold text-gray-900 dark:text-white font-mono">
-          {summary.symbol}
+          {resolveSymbol ? resolveSymbol(summary.symbol) : summary.symbol}
         </span>
         <span className={`px-2 py-0.5 rounded text-xs font-bold tracking-wide ${
           summary.side === "BUY"
