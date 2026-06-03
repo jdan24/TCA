@@ -107,9 +107,25 @@ function aggregate(messages: FixMsg[]): TradeRecord[] {
         existing.bestCumQty = cumQtyRaw;
       }
 
-      // Append fill if this message represents an actual fill
+      // Append fill if this message represents an actual fill.
+      // Priority 1: explicit LastQty/LastPx.
+      // Priority 2: ExecType indicates a fill + delta CumQty (covers formats
+      //             that only report cumulative totals without LastQty/LastPx).
+      const execType = tag(msg, FIX_TAGS.ExecType);
+      const isFillExecType = ["1", "2", "F", "H", "3"].includes(execType)
+        || (execType === "" && cumQtyRaw > 0);
       if (lastQtyRaw > 0) {
         existing.fills.push({ transactTime, lastQty: lastQtyRaw, lastPx: lastPxRaw });
+      } else if (isFillExecType && cumQtyRaw > existing.bestCumQty && avgPxRaw > 0) {
+        // Delta fill from cumulative report
+        const deltaCumQty = cumQtyRaw - existing.bestCumQty;
+        const prevNotional = existing.bestAvgPx * existing.bestCumQty;
+        const impliedPx    = deltaCumQty > 0
+          ? (avgPxRaw * cumQtyRaw - prevNotional) / deltaCumQty
+          : avgPxRaw;
+        if (deltaCumQty > 0 && impliedPx > 0) {
+          existing.fills.push({ transactTime, lastQty: deltaCumQty, lastPx: impliedPx });
+        }
       }
     }
   }
@@ -191,28 +207,75 @@ function safeParseDate(s: string): Date {
  *   firstFillTime  = same
  *   lastFillTime   = same
  *   avgFillPrice   = fill's LastPx (tag 31) — THIS fill's price, not cumulative AvgPx
- *   orderQty       = fill's LastQty (tag 32) — quantity filled in THIS execution
+ *   orderQty       = fill's LastQty (tag 32) when available; delta CumQty otherwise
+ *
+ * Fill detection strategy (two passes in priority order):
+ *   1. LastQty (32) + LastPx (31) > 0 — standard per-fill notification.
+ *   2. Delta CumQty (14) + implied price from AvgPx (6) — covers FIX 4.4+
+ *      ExecType="F" (Trade) messages and "done for day" summaries that only
+ *      report cumulative totals without LastQty/LastPx.
  */
 function aggregatePerFill(messages: FixMsg[]): TradeRecord[] {
   const trades: TradeRecord[] = [];
   let fillIndex = 0;
 
+  // Track cumulative state per ClOrdID for the delta-fill fallback.
+  // Key = ClOrdID; Value = { cumQty seen so far, avgPx at that point }
+  const prevCumState = new Map<string, { cumQty: number; avgPx: number }>();
+
   for (const msg of messages) {
     if (tag(msg, FIX_TAGS.MsgType) !== "8") continue;
-
-    const lastQty = parseFloat(tag(msg, FIX_TAGS.LastQty) || "0");
-    const lastPx  = parseFloat(tag(msg, FIX_TAGS.LastPx)  || "0");
-
-    // Only process messages that represent an actual fill
-    if (lastQty <= 0 || lastPx <= 0) continue;
 
     const clOrdId      = tag(msg, FIX_TAGS.ClOrdID);
     const execId       = tag(msg, FIX_TAGS.ExecID);
     const transactTime = tag(msg, FIX_TAGS.TransactTime);
     const symbol       = tag(msg, FIX_TAGS.Symbol);
     const sideRaw      = tag(msg, FIX_TAGS.Side);
+    const execType     = tag(msg, FIX_TAGS.ExecType); // tag 150
 
     if (!symbol || !transactTime) continue;
+
+    const lastQty = parseFloat(tag(msg, FIX_TAGS.LastQty) || "0");
+    const lastPx  = parseFloat(tag(msg, FIX_TAGS.LastPx)  || "0");
+    const cumQty  = parseFloat(tag(msg, FIX_TAGS.CumQty)  || "0");
+    const avgPx   = parseFloat(tag(msg, FIX_TAGS.AvgPx)   || "0");
+
+    let fillQty = 0;
+    let fillPx  = 0;
+
+    // ── Priority 1: explicit LastQty / LastPx ─────────────────────────────
+    if (lastQty > 0 && lastPx > 0) {
+      fillQty = lastQty;
+      fillPx  = lastPx;
+    } else {
+      // ── Priority 2: ExecType indicates a fill + delta CumQty ─────────────
+      // FIX 4.2: ExecType "1" = Partial Fill, "2" = Fill
+      // FIX 4.4+: ExecType "F" = Trade (replaces "2"), "H" = Trade Correct
+      // Some systems also send ExecType "3" (Done for Day) with no LastQty.
+      const isFillExecType = ["1", "2", "F", "H", "3"].includes(execType)
+        || (execType === "" && cumQty > 0); // no ExecType tag at all → use CumQty
+      if (isFillExecType && cumQty > 0 && avgPx > 0) {
+        const prev      = clOrdId ? prevCumState.get(clOrdId) : undefined;
+        const prevCum   = prev?.cumQty ?? 0;
+        const prevAvgPx = prev?.avgPx  ?? 0;
+        const delta     = cumQty - prevCum;
+        if (delta > 0) {
+          fillQty = delta;
+          // Derive implied last-fill price from the weighted-average delta:
+          //   fillPx = (avgPx × cumQty − prevAvgPx × prevCum) / delta
+          fillPx = prevCum > 0
+            ? (avgPx * cumQty - prevAvgPx * prevCum) / delta
+            : avgPx; // first fill → avgPx equals the only fill price
+        }
+      }
+    }
+
+    // Update cumulative tracking for future delta calculations
+    if (clOrdId && cumQty > 0 && avgPx > 0) {
+      prevCumState.set(clOrdId, { cumQty, avgPx });
+    }
+
+    if (fillQty <= 0 || fillPx <= 0) continue;
 
     const fillTime = safeParseDate(transactTime);
     const orderId  = execId || (clOrdId ? `${clOrdId}_${fillIndex}` : `fill_${fillIndex}`);
@@ -223,8 +286,8 @@ function aggregatePerFill(messages: FixMsg[]): TradeRecord[] {
         orderId,
         symbol,
         side: normalizeSide(sideStr),
-        orderQty: lastQty,
-        avgFillPrice: lastPx,
+        orderQty: fillQty,
+        avgFillPrice: fillPx,
         arrivalPrice: null,
         orderTime:     fillTime,
         firstFillTime: fillTime,
@@ -343,19 +406,25 @@ export function parseFixFileSingleOrder(file: File): Promise<TradeRecord[]> {
           return;
         }
 
-        // Same multi-leg filter as parseFixFile: drop individual legs (442=1/2), keep spreads (442=3).
-        const mlrtKey = String(FIX_TAGS.MultiLegReportingType);
-        const filteredMessages = messages.filter(
-          (m) => !m[mlrtKey] || m[mlrtKey] === "3",
-        );
+        // ── Multi-leg filter is intentionally NOT applied in single-order mode ──
+        //
+        // In multi-order mode we drop individual-leg fills (442=1/2) and keep
+        // only spread-level rolls (442=3) to avoid double-counting.
+        //
+        // In single-order mode the user is analysing one specific parent order —
+        // which may itself be an individual leg (442=1/2). Filtering those out
+        // would leave zero messages and produce a spurious parse error.
+        // Pass all messages directly to aggregatePerFill.
 
-        const trades = aggregatePerFill(filteredMessages);
+        const trades = aggregatePerFill(messages);
 
         if (trades.length === 0) {
           reject(
             new Error(
-              "No fill executions (MsgType=8 with LastQty > 0) found. " +
-                "Ensure the file contains FIX execution reports with tag 32 (LastQty)."
+              "No fill executions found. " +
+                "The parser looks for MsgType=8 messages with either tag 32 (LastQty) > 0 " +
+                "or tag 150 (ExecType) indicating a fill (1/2/F) with tag 14 (CumQty) > 0. " +
+                "Check that the file contains FIX execution reports."
             )
           );
           return;
