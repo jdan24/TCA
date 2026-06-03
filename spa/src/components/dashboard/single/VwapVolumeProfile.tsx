@@ -153,12 +153,15 @@ function buildVolumeData(
   // ── Historical predicted schedule (whole contracts, largest remainder) ────
   // Use the Smoothed % values for each minute in the window, then allocate
   // totalOur contracts proportionally so the schedule sums to exactly totalOur.
+  // Minutes not in the CSV are treated as 0 volume (not excluded), so the line
+  // stays continuous at y=0 for those points per the user's preference.
   const rawHistWeights = minutes.map((t) => {
     if (!histCurve) return null;
     const d  = new Date(t);
     const hh = String(d.getUTCHours()).padStart(2, "0");
     const mm = String(d.getUTCMinutes()).padStart(2, "0");
-    return histCurve.get(`${hh}:${mm}`) ?? null;
+    // 0 for minutes absent from the CSV → zero scheduled, no break in line
+    return histCurve.get(`${hh}:${mm}`) ?? 0;
   });
   const scheduledQty = largestRemainder(totalOur, rawHistWeights);
 
@@ -211,9 +214,13 @@ export function VwapVolumeProfile({
 }: VwapVolumeProfileProps) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
-  const data     = buildVolumeData(trades, orderTime, lastFillTime, marketVolTicks, histVolCurve);
+  const data      = buildVolumeData(trades, orderTime, lastFillTime, marketVolTicks, histVolCurve);
   const hasMarket = (marketVolTicks?.length ?? 0) > 0;
   const hasHist   = histVolCurve !== null && histVolCurve.size > 0;
+  // True only when the CSV covers at least one minute in the order window.
+  // If the CSV is loaded but all minutes return null (e.g. time-range mismatch)
+  // we show a warning rather than a blank line.
+  const hasHistMatch = hasHist && data.some((d) => d.historical !== null);
 
   function toggle(key: string) {
     setHidden((prev) => {
@@ -253,8 +260,9 @@ export function VwapVolumeProfile({
 
   const subtitle = [
     "Contracts per minute — order window · click legend to mute",
-    !hasMarket && "fetch Bloomberg for market volume",
-    !hasHist   && "upload historical curve for schedule",
+    !hasMarket    && "fetch Bloomberg for market volume",
+    !hasHist      && "upload historical curve for schedule",
+    (hasHist && !hasHistMatch) && "⚠ historical curve time range doesn't match order window",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -368,7 +376,7 @@ export function VwapVolumeProfile({
           )}
 
           {/* Historical predicted schedule — dashed line on left axis */}
-          {hasHist && (
+          {hasHistMatch && (
             <Line
               yAxisId="order"
               type="monotone"
