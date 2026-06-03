@@ -26,6 +26,8 @@ interface ExecutionTimelineProps {
   trades: TradeRecord[];
   arrivalPrice: number | null;
   marketTicks: Array<{ t: number; price: number }> | null;
+  orderTime?: Date | null;
+  lastFillTime?: Date | null;
 }
 
 interface FillPoint {
@@ -41,7 +43,7 @@ function fmtTime(ms: number): string {
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
 }
 
-export function ExecutionTimeline({ trades, arrivalPrice, marketTicks }: ExecutionTimelineProps) {
+export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime, lastFillTime }: ExecutionTimelineProps) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
   if (trades.length === 0) {
@@ -92,6 +94,8 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks }: Executi
     ...fillPoints.map((p) => p.t),
     ...(marketTicks ?? []).map((t) => t.t),
   ];
+  if (orderTime) allTimes.push(orderTime.getTime());
+  if (lastFillTime) allTimes.push(lastFillTime.getTime());
   const tMin = Math.min(...allTimes);
   const tMax = Math.max(...allTimes);
   const tPad = (tMax - tMin) * 0.05 || 30_000;

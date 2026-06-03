@@ -161,6 +161,26 @@ export function SingleOrderDashboard({
     return { marketTicks: null, marketVolTicks: null };
   }, [trades, enrichment, summary]);
 
+  // Detect when the time override extends beyond the already-fetched Bloomberg tick range.
+  const bbgStale = useMemo(() => {
+    if (!singleOrderTimeOverride) return false;
+    for (const trade of trades) {
+      const e = enrichment[trade.orderId];
+      if (!e || e.tradeTicks.length === 0) continue;
+      let firstTickMs = Infinity, lastTickMs = -Infinity;
+      for (const tk of e.tradeTicks) {
+        const ms = tk.time.getTime();
+        if (ms < firstTickMs) firstTickMs = ms;
+        if (ms > lastTickMs) lastTickMs = ms;
+      }
+      if (!isFinite(firstTickMs)) return false;
+      const startMs = singleOrderTimeOverride.start.getTime();
+      const endMs   = singleOrderTimeOverride.end.getTime();
+      return startMs < firstTickMs || endMs > lastTickMs;
+    }
+    return false;
+  }, [trades, enrichment, singleOrderTimeOverride]);
+
   const isFetching = enrichProgress !== null;
   const pct =
     isFetching && enrichProgress.total > 0
@@ -388,17 +408,39 @@ export function SingleOrderDashboard({
         />
       )}
 
+      {/* ── Stale Bloomberg data indicator ──────────────────────────────── */}
+      {bbgStale && enrichedCount > 0 && !isFetching && (
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20 text-xs">
+          <span className="text-amber-700 dark:text-amber-400 flex-1">
+            Time range extends beyond the fetched Bloomberg window — market lines may be incomplete.
+          </span>
+          {bloombergConnected && (
+            <button
+              type="button"
+              onClick={onFetchBloomberg}
+              className="shrink-0 px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white font-medium transition-colors"
+            >
+              Re-fetch Bloomberg
+            </button>
+          )}
+        </div>
+      )}
+
       {/* ── Cumulative TWAP + Cumulative VWAP ──────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <CumulativeTWAP
           trades={scaledTrades}
           arrivalPrice={summary?.arrivalPrice ?? null}
           runningMarketTwap={summary?.runningMarketTwap ?? null}
+          orderTime={summary?.orderTime ?? null}
+          lastFillTime={summary?.lastFillTime ?? null}
         />
         <CumulativeVWAP
           trades={scaledTrades}
           arrivalPrice={summary?.arrivalPrice ?? null}
           runningMarketVwap={summary?.runningMarketVwap ?? null}
+          orderTime={summary?.orderTime ?? null}
+          lastFillTime={summary?.lastFillTime ?? null}
         />
       </div>
 
@@ -408,11 +450,15 @@ export function SingleOrderDashboard({
           trades={scaledTrades}
           arrivalPrice={summary?.arrivalPrice ?? null}
           marketTicks={marketTicks}
+          orderTime={summary?.orderTime ?? null}
+          lastFillTime={summary?.lastFillTime ?? null}
         />
         <RunningParticipation
           trades={scaledTrades}
           marketVolTicks={marketVolTicks}
           marketTicks={marketTicks}
+          orderTime={summary?.orderTime ?? null}
+          lastFillTime={summary?.lastFillTime ?? null}
         />
       </div>
 

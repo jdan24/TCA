@@ -25,6 +25,8 @@ interface RunningParticipationProps {
   trades: TradeRecord[];
   marketVolTicks: Array<{ t: number; size: number }> | null;
   marketTicks:    Array<{ t: number; price: number }> | null;
+  orderTime?: Date | null;
+  lastFillTime?: Date | null;
 }
 
 interface PartPoint {
@@ -69,7 +71,7 @@ function buildPartData(
   return points;
 }
 
-export function RunningParticipation({ trades, marketVolTicks, marketTicks }: RunningParticipationProps) {
+export function RunningParticipation({ trades, marketVolTicks, marketTicks, orderTime, lastFillTime }: RunningParticipationProps) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
   if (!marketVolTicks || marketVolTicks.length === 0) {
@@ -106,11 +108,13 @@ export function RunningParticipation({ trades, marketVolTicks, marketTicks }: Ru
   const pPad = (pMax - pMin) * 0.1 || pMin * 0.001;
   const yPriceDomain: [number, number] = [pMin - pPad, pMax + pPad];
 
-  // X domain spans both series
+  // X domain spans both series plus the explicit order window when provided
   const allTimes = [
     ...partData.map((d) => d.t),
     ...(marketTicks ?? []).map((t) => t.t),
   ];
+  if (orderTime) allTimes.push(orderTime.getTime());
+  if (lastFillTime) allTimes.push(lastFillTime.getTime());
   const tMin = Math.min(...allTimes);
   const tMax = Math.max(...allTimes);
   const tPad = (tMax - tMin) * 0.04 || 30_000;

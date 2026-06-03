@@ -30,6 +30,9 @@ interface CumulativeTWAPProps {
   arrivalPrice: number | null;
   /** Per-fill running market TWAP from order start to each fill. null/empty = not yet enriched. */
   runningMarketTwap: Array<{ t: number; twap: number }> | null;
+  /** Explicit order window — drives x-axis domain so the chart shifts when times are overridden. */
+  orderTime?: Date | null;
+  lastFillTime?: Date | null;
 }
 
 interface DataPoint {
@@ -83,7 +86,7 @@ const SERIES: Record<string, { label: string; color: string; dash?: string }> = 
   fillPrice:      { label: "Fill Price",         color: "#8b5cf6", dash: "4 2" },
 };
 
-export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap }: CumulativeTWAPProps) {
+export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, orderTime, lastFillTime }: CumulativeTWAPProps) {
   const twapByTime = new Map((runningMarketTwap ?? []).map((p) => [p.t, p.twap]));
   const data = buildData(trades, twapByTime);
   const hasMarketTwap = (runningMarketTwap?.length ?? 0) > 0;
@@ -104,6 +107,16 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap }: Cumu
   const pMax = Math.max(...allPrices);
   const pad = (pMax - pMin) * 0.08 || pMin * 0.001;
 
+  // X-axis domain: anchor to the order window when provided, but always include all fills
+  const fillTimes = data.map((d) => d.t);
+  const allTimes = [...fillTimes];
+  if (orderTime) allTimes.push(orderTime.getTime());
+  if (lastFillTime) allTimes.push(lastFillTime.getTime());
+  const tMin = Math.min(...allTimes);
+  const tMax = Math.max(...allTimes);
+  const tPad = (tMax - tMin) * 0.04 || 30_000;
+  const xDomain: [number, number] = [tMin - tPad, tMax + tPad];
+
   function toggleSeries(key: string) {
     setHidden((prev) => {
       const next = new Set(prev);
@@ -121,11 +134,15 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap }: Cumu
         <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
           <XAxis
-            dataKey="timeLabel"
+            dataKey="t"
+            type="number"
+            domain={xDomain}
+            tickCount={5}
+            minTickGap={60}
+            tickFormatter={fmtUtc}
             tick={{ fontSize: 9, fill: "#94a3b8" }}
             tickLine={false}
             axisLine={false}
-            interval="preserveStartEnd"
           />
           <YAxis
             domain={[pMin - pad, pMax + pad]}
@@ -135,12 +152,12 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap }: Cumu
             tickFormatter={(v: number) => v.toFixed(2)}
           />
           <Tooltip
-            content={({ payload, label }) => {
+            content={({ payload }) => {
               const d = payload?.[0]?.payload as DataPoint | undefined;
               if (!d) return null;
               return (
                 <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
-                  <p className="text-gray-500 dark:text-gray-400 mb-1 font-mono">{label}</p>
+                  <p className="text-gray-500 dark:text-gray-400 mb-1 font-mono">{d.timeLabel}</p>
                   {!hidden.has("runningFillAvg") && (
                     <p className="text-emerald-600 dark:text-emerald-400">
                       Avg Fill: <span className="font-semibold tabular-nums">{d.runningFillAvg.toFixed(4)}</span>
