@@ -80,9 +80,41 @@ function colVal(row: Record<string, string>, names: string[]): string | undefine
 interface VolumePoint {
   t: number;
   timeLabel: string;
-  historical: number | null;  // % of window (normalised from Smoothed)
-  market: number | null;      // % of market volume in window
-  ourOrder: number | null;    // % of our total order qty
+  /** Predicted schedule: whole contracts (largest-remainder method). Left axis. */
+  historical: number | null;
+  /** Actual market volume from Bloomberg ticks. Right axis. */
+  market: number | null;
+  /** Our actual fills (null when 0 so no dot is rendered). Left axis. */
+  ourOrder: number | null;
+}
+
+/**
+ * Distribute `total` whole-number units across `weights` (null = excluded)
+ * using the Largest Remainder Method so the result sums to exactly `total`.
+ */
+function largestRemainder(total: number, weights: (number | null)[]): (number | null)[] {
+  const totalWeight = weights.reduce<number>((s, w) => s + (w ?? 0), 0);
+  if (totalWeight === 0 || total === 0) return weights.map(() => null);
+
+  // Raw (fractional) allocation
+  const raw = weights.map((w) => (w !== null ? (total * w) / totalWeight : null));
+  // Floor each
+  const floored = raw.map((v) => (v !== null ? Math.floor(v) : null));
+  const currentSum = floored.reduce<number>((s, v) => s + (v ?? 0), 0);
+  let remainder = total - currentSum;
+
+  // Sort eligible indices by fractional part descending, add 1 each
+  const fracs = raw
+    .map((v, i) => ({ i, frac: v !== null ? v - Math.floor(v) : -1 }))
+    .filter((x) => x.frac >= 0)
+    .sort((a, b) => b.frac - a.frac);
+
+  const result = [...floored];
+  for (let j = 0; j < remainder && j < fracs.length; j++) {
+    const idx = fracs[j]!.i;
+    if (result[idx] !== null) result[idx] = result[idx]! + 1;
+  }
+  return result;
 }
 
 function buildVolumeData(
@@ -97,7 +129,11 @@ function buildVolumeData(
   const endMs   = Math.floor(lastFillTime.getTime() / ONE_MIN) * ONE_MIN;
   if (startMs > endMs) return [];
 
-  // ── Bucket our fills by minute ────────────────────────────────────────────
+  // ── Enumerate per-minute slots ────────────────────────────────────────────
+  const minutes: number[] = [];
+  for (let t = startMs; t <= endMs; t += ONE_MIN) minutes.push(t);
+
+  // ── Bucket our fills by minute (absolute qty) ─────────────────────────────
   const ourByMin = new Map<number, number>();
   for (const t of trades) {
     const min = Math.floor(t.lastFillTime.getTime() / ONE_MIN) * ONE_MIN;
@@ -105,7 +141,7 @@ function buildVolumeData(
   }
   const totalOur = [...ourByMin.values()].reduce((a, b) => a + b, 0);
 
-  // ── Bucket market volume by minute ────────────────────────────────────────
+  // ── Bucket market volume by minute (absolute contracts) ───────────────────
   const mktByMin = new Map<number, number>();
   if (marketVolTicks) {
     for (const tk of marketVolTicks) {
@@ -113,37 +149,32 @@ function buildVolumeData(
       mktByMin.set(min, (mktByMin.get(min) ?? 0) + tk.size);
     }
   }
-  const totalMkt = [...mktByMin.values()].reduce((a, b) => a + b, 0);
 
-  // ── Collect per-minute slots ──────────────────────────────────────────────
-  const minutes: number[] = [];
-  for (let t = startMs; t <= endMs; t += ONE_MIN) minutes.push(t);
-
-  // Raw historical values for the window; normalise over window sum so the
-  // scale matches the other two series (both sum to 100 % over the window).
-  const rawHist = minutes.map((t) => {
+  // ── Historical predicted schedule (whole contracts, largest remainder) ────
+  // Use the Smoothed % values for each minute in the window, then allocate
+  // totalOur contracts proportionally so the schedule sums to exactly totalOur.
+  const rawHistWeights = minutes.map((t) => {
     if (!histCurve) return null;
     const d  = new Date(t);
     const hh = String(d.getUTCHours()).padStart(2, "0");
     const mm = String(d.getUTCMinutes()).padStart(2, "0");
     return histCurve.get(`${hh}:${mm}`) ?? null;
   });
-  const histWindowSum = rawHist.reduce<number>((s, v) => s + (v ?? 0), 0);
+  const scheduledQty = largestRemainder(totalOur, rawHistWeights);
 
   return minutes.map((t, i) => {
     const d  = new Date(t);
     const hh = String(d.getUTCHours()).padStart(2, "0");
     const mm = String(d.getUTCMinutes()).padStart(2, "0");
 
-    const rh = rawHist[i] ?? null;
-    const historical =
-      rh !== null && histWindowSum > 0 ? (rh / histWindowSum) * 100 : null;
+    const historical = scheduledQty[i] ?? null;
 
-    const mktVol = mktByMin.get(t) ?? 0;
-    const market = totalMkt > 0 ? (mktVol / totalMkt) * 100 : null;
+    const mktVol = mktByMin.get(t);
+    const market = mktVol !== undefined && mktVol > 0 ? mktVol : null;
 
     const ourVol  = ourByMin.get(t) ?? 0;
-    const ourOrder = totalOur > 0 ? (ourVol / totalOur) * 100 : null;
+    // Null for empty minutes so no dot is drawn
+    const ourOrder = ourVol > 0 ? ourVol : null;
 
     return {
       t,
@@ -166,9 +197,9 @@ interface VwapVolumeProfileProps {
 }
 
 const SERIES = {
-  ourOrder:   { label: "Our Order %",    color: "#f97316" },
-  market:     { label: "Market % (BBG)", color: "#3b82f6" },
-  historical: { label: "Historical %",   color: "#94a3b8" },
+  ourOrder:   { label: "Our Execution (contracts)", color: "#f97316" },
+  market:     { label: "Market Volume (BBG)",        color: "#3b82f6" },
+  historical: { label: "Scheduled (historical)",     color: "#94a3b8" },
 };
 
 export function VwapVolumeProfile({
@@ -180,9 +211,7 @@ export function VwapVolumeProfile({
 }: VwapVolumeProfileProps) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
-  // Build chart data whenever inputs change
-  const data = buildVolumeData(trades, orderTime, lastFillTime, marketVolTicks, histVolCurve);
-
+  const data     = buildVolumeData(trades, orderTime, lastFillTime, marketVolTicks, histVolCurve);
   const hasMarket = (marketVolTicks?.length ?? 0) > 0;
   const hasHist   = histVolCurve !== null && histVolCurve.size > 0;
 
@@ -199,29 +228,33 @@ export function VwapVolumeProfile({
       <ChartCard
         id="so-chart-vwap-profile"
         title="VWAP Volume Profile"
-        subtitle="% of volume per minute — order execution window"
+        subtitle="Contracts per minute — order execution window"
       >
         <EmptyState message="No fill data in range" />
       </ChartCard>
     );
   }
 
-  // Determine how many x-axis ticks to show (aim for ~6 labels)
-  const nPoints  = data.length;
-  const interval = Math.max(1, Math.ceil(nPoints / 6)) - 1;
-
-  const yMax = Math.max(
-    ...data.flatMap((d) =>
-      [d.ourOrder, d.market, d.historical].filter((v): v is number => v !== null),
-    ),
-    0,
+  // ── Axis domains ─────────────────────────────────────────────────────────
+  // Left axis: our order + historical schedule (both in contracts, same scale)
+  const orderVals = data.flatMap((d) =>
+    [d.ourOrder, d.historical].filter((v): v is number => v !== null),
   );
-  const yDomain: [number, number] = [0, Math.ceil(yMax * 1.2) || 10];
+  const yOrderMax = Math.max(...orderVals, 1);
+  const yOrderDomain: [number, number] = [0, Math.ceil(yOrderMax * 1.25)];
+
+  // Right axis: market volume (usually much larger)
+  const mktVals = data.flatMap((d) => (d.market !== null ? [d.market] : []));
+  const yMktMax = Math.max(...mktVals, 1);
+  const yMktDomain: [number, number] = [0, Math.ceil(yMktMax * 1.25)];
+
+  // X-axis label thinning (~6 ticks)
+  const interval = Math.max(1, Math.ceil(data.length / 6)) - 1;
 
   const subtitle = [
-    "% of volume per minute — order window",
-    !hasMarket && "fetch Bloomberg for market series",
-    !hasHist   && "upload historical curve to add reference",
+    "Contracts per minute — order window · click legend to mute",
+    !hasMarket && "fetch Bloomberg for market volume",
+    !hasHist   && "upload historical curve for schedule",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -232,8 +265,8 @@ export function VwapVolumeProfile({
       title="VWAP Volume Profile"
       subtitle={subtitle}
     >
-      <ResponsiveContainer width="100%" height={260}>
-        <ComposedChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
+      <ResponsiveContainer width="100%" height={280}>
+        <ComposedChart data={data} margin={{ top: 8, right: 56, bottom: 8, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
           <XAxis
             dataKey="timeLabel"
@@ -242,14 +275,35 @@ export function VwapVolumeProfile({
             axisLine={false}
             interval={interval}
           />
+
+          {/* Left axis — our order + historical (contracts) */}
           <YAxis
-            domain={yDomain}
+            yAxisId="order"
+            orientation="left"
+            domain={yOrderDomain}
             tick={{ fontSize: 10, fill: "#94a3b8" }}
             tickLine={false}
             axisLine={false}
-            tickFormatter={(v: number) => `${v.toFixed(1)}%`}
+            tickFormatter={(v: number) => v.toLocaleString()}
             width={42}
           />
+
+          {/* Right axis — market volume (contracts) */}
+          {hasMarket && (
+            <YAxis
+              yAxisId="market"
+              orientation="right"
+              domain={yMktDomain}
+              tick={{ fontSize: 10, fill: "#3b82f6" }}
+              tickLine={false}
+              axisLine={false}
+              tickFormatter={(v: number) =>
+                v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v)
+              }
+              width={46}
+            />
+          )}
+
           <Tooltip
             cursor={{ fill: "rgba(148,163,184,0.08)" }}
             content={({ payload, label }) => {
@@ -261,11 +315,12 @@ export function VwapVolumeProfile({
                     const key = typeof p.dataKey === "string" ? p.dataKey : "";
                     const s = SERIES[key as keyof typeof SERIES];
                     if (!s || p.value == null) return null;
+                    const v = p.value as number;
                     return (
                       <p key={idx} style={{ color: s.color }}>
                         {s.label}:{" "}
                         <span className="font-semibold tabular-nums">
-                          {(p.value as number).toFixed(2)}%
+                          {v.toLocaleString()}
                         </span>
                       </p>
                     );
@@ -274,6 +329,7 @@ export function VwapVolumeProfile({
               );
             }}
           />
+
           <Legend
             onClick={(e) => {
               if (e?.dataKey && typeof e.dataKey === "string") toggle(e.dataKey);
@@ -298,33 +354,23 @@ export function VwapVolumeProfile({
             wrapperStyle={{ cursor: "pointer" }}
           />
 
-          {/* Our Order — bars */}
-          <Bar
-            dataKey="ourOrder"
-            fill="#f97316"
-            fillOpacity={0.8}
-            radius={[2, 2, 0, 0]}
-            isAnimationActive={false}
-            hide={hidden.has("ourOrder")}
-          />
-
-          {/* Market volume — line */}
+          {/* Market volume — bars on right axis */}
           {hasMarket && (
-            <Line
-              type="monotone"
+            <Bar
+              yAxisId="market"
               dataKey="market"
-              stroke="#3b82f6"
-              strokeWidth={2}
-              dot={false}
-              activeDot={{ r: 3 }}
+              fill="#3b82f6"
+              fillOpacity={0.35}
+              radius={[1, 1, 0, 0]}
               isAnimationActive={false}
               hide={hidden.has("market")}
             />
           )}
 
-          {/* Historical curve — dashed line */}
+          {/* Historical predicted schedule — dashed line on left axis */}
           {hasHist && (
             <Line
+              yAxisId="order"
               type="monotone"
               dataKey="historical"
               stroke="#94a3b8"
@@ -334,8 +380,22 @@ export function VwapVolumeProfile({
               activeDot={{ r: 3 }}
               isAnimationActive={false}
               hide={hidden.has("historical")}
+              connectNulls={false}
             />
           )}
+
+          {/* Our actual execution — dots only (no connecting line), left axis */}
+          <Line
+            yAxisId="order"
+            dataKey="ourOrder"
+            stroke="transparent"
+            strokeWidth={0}
+            dot={{ r: 5, fill: "#f97316", stroke: "white", strokeWidth: 1.5 }}
+            activeDot={{ r: 7, fill: "#f97316", stroke: "white", strokeWidth: 2 }}
+            isAnimationActive={false}
+            hide={hidden.has("ourOrder")}
+            connectNulls={false}
+          />
         </ComposedChart>
       </ResponsiveContainer>
     </ChartCard>
