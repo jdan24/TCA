@@ -149,7 +149,10 @@ export function FileDropZone({ onComplete, mode = "multi" }: FileDropZoneProps) 
     const text = pasteText.trim();
     if (!text) return;
     const isLikelyFix =
-      /^[\s"']*8=FIXT?\./m.test(text) || text.includes("\x01");
+      /^[\s"']*8=FIXT?\./m.test(text) ||   // tag 8 at line start (possibly quoted)
+      /\|8=FIXT?\./m.test(text)            ||   // tag 8 after pipe (non-standard tag order)
+      /^#fixmessage\b/im.test(text)        ||   // explicit #fixmessage header
+      text.includes("\x01");                    // native SOH-delimited FIX
     if (isLikelyFix) {
       const file = new File([text], "pasted.fix", { type: "text/plain" });
       const samples = sampleFixSymbols(text);

@@ -47,8 +47,16 @@ interface FillAccumulator {
  * Returns null if the line is blank or yields no tag=value pairs.
  */
 function parseLine(line: string): FixMsg | null {
-  const trimmed = line.trim();
+  let trimmed = line.trim();
   if (!trimmed) return null;
+
+  // Strip surrounding double-quotes (some loggers wrap each message in quotes,
+  // e.g. "59=0|8=FIX.4.4|...|10=060|")
+  if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length > 2) {
+    trimmed = trimmed.slice(1, -1);
+  } else if (trimmed.startsWith('"')) {
+    trimmed = trimmed.slice(1);
+  }
 
   // SOH (0x01) is the canonical FIX field separator; pipe is a common text variant.
   const delim = trimmed.includes("\x01") ? "\x01" : "|";
