@@ -362,14 +362,20 @@ function BpsCell({
   value,
   invert = false,
   neutral = false,
+  highlighted = false,
 }: {
   value: number | null;
   invert?: boolean;
   neutral?: boolean;
+  highlighted?: boolean;
 }) {
+  const ringCls = highlighted
+    ? "ring-2 ring-blue-400 dark:ring-blue-500 rounded px-1 py-0.5"
+    : "";
+
   if (value === null) {
     return (
-      <span className="text-gray-300 dark:text-gray-600 text-xs select-none">N/A</span>
+      <span className={`text-gray-300 dark:text-gray-600 text-xs select-none ${ringCls}`}>N/A</span>
     );
   }
   let cls: string;
@@ -383,9 +389,31 @@ function BpsCell({
   }
   const sign = value > 0 ? "+" : "";
   return (
-    <span className={`tabular-nums text-xs font-medium ${cls}`}>
+    <span className={`tabular-nums text-xs font-medium ${cls} ${ringCls}`}>
       {sign}{value.toFixed(1)}
     </span>
+  );
+}
+
+function AlgoSelectCell({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (v: string | null) => void;
+}) {
+  return (
+    <select
+      value={value ?? ""}
+      onChange={(e) => onChange(e.target.value || null)}
+      onClick={(e) => e.stopPropagation()}
+      className="text-xs bg-transparent text-gray-700 dark:text-gray-300 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500 rounded border border-gray-200 dark:border-gray-700 px-1 py-0.5 max-w-[90px]"
+    >
+      <option value="">—</option>
+      {ALGO_OPTIONS.map((a) => (
+        <option key={a} value={a}>{a}</option>
+      ))}
+    </select>
   );
 }
 
@@ -407,6 +435,8 @@ function SortIcon({ direction }: { direction: "asc" | "desc" | false }) {
 // the component, while the rest stay as module-level constants.
 
 const col = createColumnHelper<TableRow>();
+
+const ALGO_OPTIONS = ["TWAP", "VWAP", "POV", "Pegger", "Sniper", "ArtemIS", "Apollo"] as const;
 
 // Columns that appear before the time block (symbol column is built inside the component)
 const PRE_TIME_COLS_NO_SYMBOL = [
@@ -485,20 +515,52 @@ const FIRST_FILL_COL = col.accessor("firstFillTime", {
   enableGlobalFilter: false,
 });
 
-// Columns that appear after the time block (algo, metrics…)
+// Metric columns — ordered: primary benchmarks (with algo-driven highlight ring),
+// TWAS + Vol(bps), then secondary metrics.
+// Note: algo column is built inside the component so it can capture the edit callback.
 const POST_TIME_COLS = [
-  col.accessor("algo", {
-    header: "Algo",
+  // ── Primary benchmarks (blue ring on the relevant one per row) ────────────
+  col.accessor("IS_bps", {
+    header: "IS",
     cell: (i) => {
-      const v = i.getValue();
-      return v ? (
-        <span className="text-xs text-gray-700 dark:text-gray-300">{v}</span>
-      ) : (
-        <span className="text-[10px] text-gray-300 dark:text-gray-600 italic select-none">—</span>
-      );
+      const a = (i.row.original.algo ?? "").toLowerCase();
+      return <BpsCell value={i.getValue()} highlighted={a !== "vwap" && a !== "twap"} />;
     },
+    sortingFn: nullableSort,
     enableGlobalFilter: false,
   }),
+  col.accessor("VWAP_dev_bps", {
+    header: "vs Mkt VWAP",
+    cell: (i) => {
+      const a = (i.row.original.algo ?? "").toLowerCase();
+      return <BpsCell value={i.getValue()} highlighted={a === "vwap"} />;
+    },
+    sortingFn: nullableSort,
+    enableGlobalFilter: false,
+  }),
+  col.accessor("TWAP_dev_bps", {
+    header: "vs Mkt TWAP",
+    cell: (i) => {
+      const a = (i.row.original.algo ?? "").toLowerCase();
+      return <BpsCell value={i.getValue()} highlighted={a === "twap"} />;
+    },
+    sortingFn: nullableSort,
+    enableGlobalFilter: false,
+  }),
+  // ── Priority secondary ───────────────────────────────────────────────────
+  col.accessor("TWAS_bps", {
+    header: "TWAS",
+    cell: (i) => <BpsCell value={i.getValue()} neutral />,
+    sortingFn: nullableSort,
+    enableGlobalFilter: false,
+  }),
+  col.accessor("vol_during_order_bps", {
+    header: "Vol σ (bps)",
+    cell: (i) => <BpsCell value={i.getValue()} neutral />,
+    sortingFn: nullableSort,
+    enableGlobalFilter: false,
+  }),
+  // ── Everything else ──────────────────────────────────────────────────────
   col.accessor("timeToFill_ms", {
     header: "TTF",
     cell: (i) => (
@@ -506,18 +568,6 @@ const POST_TIME_COLS = [
         {fmtTtf(i.getValue())}
       </span>
     ),
-    enableGlobalFilter: false,
-  }),
-  col.accessor("IS_bps", {
-    header: "IS",
-    cell: (i) => <BpsCell value={i.getValue()} />,
-    sortingFn: nullableSort,
-    enableGlobalFilter: false,
-  }),
-  col.accessor("VWAP_dev_bps", {
-    header: "vs Mkt VWAP",
-    cell: (i) => <BpsCell value={i.getValue()} />,
-    sortingFn: nullableSort,
     enableGlobalFilter: false,
   }),
   col.accessor("marketVWAP_price", {
@@ -532,12 +582,6 @@ const POST_TIME_COLS = [
         <span className="text-gray-300 dark:text-gray-600 text-xs select-none">N/A</span>
       );
     },
-    sortingFn: nullableSort,
-    enableGlobalFilter: false,
-  }),
-  col.accessor("TWAP_dev_bps", {
-    header: "vs Mkt TWAP",
-    cell: (i) => <BpsCell value={i.getValue()} />,
     sortingFn: nullableSort,
     enableGlobalFilter: false,
   }),
@@ -559,12 +603,6 @@ const POST_TIME_COLS = [
     sortingFn: nullableSort,
     enableGlobalFilter: false,
   }),
-  col.accessor("TWAS_bps", {
-    header: "TWAS",
-    cell: (i) => <BpsCell value={i.getValue()} neutral />,
-    sortingFn: nullableSort,
-    enableGlobalFilter: false,
-  }),
   col.accessor("vol_during_order_price", {
     header: "Vol σ (price)",
     cell: (i) => {
@@ -577,12 +615,6 @@ const POST_TIME_COLS = [
         <span className="text-gray-300 dark:text-gray-600 text-xs select-none">N/A</span>
       );
     },
-    sortingFn: nullableSort,
-    enableGlobalFilter: false,
-  }),
-  col.accessor("vol_during_order_bps", {
-    header: "Vol σ (bps)",
-    cell: (i) => <BpsCell value={i.getValue()} neutral />,
     sortingFn: nullableSort,
     enableGlobalFilter: false,
   }),
@@ -639,8 +671,17 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
     [rawTrades, setRawTrades],
   );
 
-  // Build the symbol + editable time columns inside the component so they capture
-  // resolveSymbol and the handleTimeEdit callback. firstFillTime remains static (read-only).
+  const handleAlgoEdit = useCallback(
+    (orderId: string, algo: string | null) => {
+      setRawTrades(rawTrades.map((t) =>
+        t.orderId === orderId ? { ...t, algo } : t,
+      ));
+    },
+    [rawTrades, setRawTrades],
+  );
+
+  // Build the symbol + editable columns inside the component so they capture
+  // resolveSymbol and the edit callbacks.
   const allColumns = useMemo(() => {
     const symbolCol = col.accessor("symbol", {
       header: "Symbol",
@@ -673,8 +714,31 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
       sortingFn: "datetime",
       enableGlobalFilter: false,
     });
-    return [PRE_TIME_COLS_NO_SYMBOL[0]!, symbolCol, ...PRE_TIME_COLS_NO_SYMBOL.slice(1), editOrderTime, FIRST_FILL_COL, editLastFill, ...POST_TIME_COLS];
-  }, [handleTimeEdit, resolveSymbol]);
+    const algoCol = col.accessor("algo", {
+      header: "Algo",
+      cell: (i) => (
+        <AlgoSelectCell
+          value={i.getValue()}
+          onChange={(v) => handleAlgoEdit(i.row.original.orderId, v)}
+        />
+      ),
+      enableGlobalFilter: false,
+    });
+    // New column order:
+    //   Order Time · Symbol · Side · Qty · Fill Price · Arrival Price
+    //   · Algo · [benchmarks + metrics]
+    //   · First Fill · Last Fill · Order ID
+    return [
+      editOrderTime,
+      symbolCol,
+      ...PRE_TIME_COLS_NO_SYMBOL.slice(1), // side, qty, fillPrice, arrivalPrice
+      algoCol,
+      ...POST_TIME_COLS,                   // IS, vs VWAP, vs TWAP, TWAS, Vol(bps), then rest
+      FIRST_FILL_COL,
+      editLastFill,
+      PRE_TIME_COLS_NO_SYMBOL[0]!,         // Order ID — last
+    ];
+  }, [handleTimeEdit, handleAlgoEdit, resolveSymbol]);
 
   // Pre-filter rows by aggregation selection
   const filteredIds = useMemo(

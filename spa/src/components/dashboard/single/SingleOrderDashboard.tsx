@@ -384,9 +384,8 @@ export function SingleOrderDashboard({
 
       {/* ── Fill price scale ────────────────────────────────────────────── */}
       {(() => {
-        const rawSample    = trades[0]?.avgFillPrice ?? null;
-        const scaledSample = rawSample !== null && scale !== 1 ? rawSample * scale : null;
-        const isActive     = singleOrderPriceScale !== null && singleOrderPriceScale !== 1;
+        const rawSample = trades[0]?.avgFillPrice ?? null;
+        const isActive  = singleOrderPriceScale !== null && singleOrderPriceScale !== 1;
         return (
           <div className="flex items-center gap-3">
             <label
@@ -422,18 +421,31 @@ export function SingleOrderDashboard({
                 </button>
               )}
             </div>
-            {isActive && rawSample !== null && scaledSample !== null ? (
-              <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
-                {rawSample.toFixed(4)} × {singleOrderPriceScale} ={" "}
-                <span className="font-mono">{scaledSample.toFixed(4)}</span>
-              </span>
-            ) : (
-              <span className="text-[11px] text-gray-400 dark:text-gray-600">
-                Multiplier for fill prices — e.g.{" "}
-                <span className="font-mono">0.01</span> to divide by 100,{" "}
-                <span className="font-mono">100</span> to multiply
-              </span>
-            )}
+            {(() => {
+              const liveMultiplier = parseFloat(scaleInputStr);
+              const showLive = rawSample !== null && !isNaN(liveMultiplier) && liveMultiplier > 0 && liveMultiplier !== 1;
+              if (showLive) {
+                return (
+                  <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
+                    <span className="font-mono text-gray-500 dark:text-gray-400">{rawSample!.toFixed(4)}</span>
+                    <span className="text-gray-400">→</span>
+                    <span className="font-mono font-semibold">{(rawSample! * liveMultiplier).toFixed(4)}</span>
+                  </span>
+                );
+              }
+              if (rawSample !== null) {
+                return (
+                  <span className="text-[11px] text-gray-400 dark:text-gray-600">
+                    sample price: <span className="font-mono">{rawSample.toFixed(4)}</span>
+                  </span>
+                );
+              }
+              return (
+                <span className="text-[11px] text-gray-400 dark:text-gray-600">
+                  e.g. <span className="font-mono">0.01</span> ÷100 · <span className="font-mono">100</span> ×100
+                </span>
+              );
+            })()}
           </div>
         );
       })()}
