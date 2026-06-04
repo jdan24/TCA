@@ -180,23 +180,18 @@ function EditableTimeRow({
           </button>
         </div>
       ) : (
-        /* Date on line 2, time on line 3 */
-        <div className="mt-0.5">
-          <div className="flex items-center justify-between gap-1.5">
-            <span className="text-xs font-semibold font-mono text-gray-900 dark:text-white tabular-nums">
-              {fmtUtcDate(date)}
-            </span>
-            <button type="button" onClick={startEdit} title="Edit time (UTC)"
-              className="print:hidden p-0.5 text-gray-300 hover:text-blue-500 dark:text-gray-600 dark:hover:text-blue-400 transition-colors">
-              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round"
-                  d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
-              </svg>
-            </button>
-          </div>
-          <span className="text-xs font-mono text-gray-700 dark:text-gray-300 tabular-nums">
-            {fmtUtcTime(date)}
+        /* Date + time together on the line below the label */
+        <div className="mt-0.5 flex items-center justify-between gap-1.5">
+          <span className="text-xs font-semibold font-mono text-gray-900 dark:text-white tabular-nums">
+            {fmtUtcDate(date)}&nbsp;{fmtUtcTime(date)}
           </span>
+          <button type="button" onClick={startEdit} title="Edit time (UTC)"
+            className="print:hidden p-0.5 text-gray-300 hover:text-blue-500 dark:text-gray-600 dark:hover:text-blue-400 transition-colors shrink-0">
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+            </svg>
+          </button>
         </div>
       )}
       {error && (
@@ -210,10 +205,12 @@ function EditableTimeRow({
 
 function EditableStringRow({
   label,
+  subLabel,
   value,
   onChange,
 }: {
   label: string;
+  subLabel?: string;
   value: string | null;
   onChange: (v: string | null) => void;
 }) {
@@ -225,39 +222,44 @@ function EditableStringRow({
   function cancel() { setEditing(false); }
 
   return (
-    <div className="flex items-baseline justify-between gap-2 py-1.5 border-b border-gray-100 dark:border-gray-800 last:border-0">
-      <span className="text-[11px] text-gray-500 dark:text-gray-400 shrink-0">{label}</span>
+    <div className="py-1.5 border-b border-gray-100 dark:border-gray-800 last:border-0">
+      {/* Label + optional sub-label stacked above the value */}
+      <span className="text-[11px] text-gray-500 dark:text-gray-400">{label}</span>
+      {subLabel && (
+        <span className="block text-[10px] text-gray-400 dark:text-gray-600">{subLabel}</span>
+      )}
       {editing ? (
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 mt-0.5">
           <input
             type="text"
             value={inputVal}
             onChange={(e) => setInputVal(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") confirm(); if (e.key === "Escape") cancel(); }}
             placeholder="Enter value…"
-            className="text-[11px] font-mono rounded border border-gray-300 dark:border-gray-600 px-1.5 py-0.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 w-36"
+            className="text-[11px] font-mono rounded border border-gray-300 dark:border-gray-600 px-1.5 py-0.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 flex-1 min-w-0"
             autoFocus
           />
           <button type="button" onClick={confirm} title="Confirm"
-            className="p-0.5 text-green-600 hover:text-green-700 dark:text-green-400">
+            className="p-0.5 text-green-600 hover:text-green-700 dark:text-green-400 shrink-0">
             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
             </svg>
           </button>
           <button type="button" onClick={cancel} title="Cancel"
-            className="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+            className="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0">
             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
       ) : (
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-semibold font-mono text-gray-900 dark:text-white tabular-nums text-right">
+        /* Value on its own line below the label for maximum width */
+        <div className="mt-0.5 flex items-center justify-between gap-1.5">
+          <span className="text-xs font-semibold font-mono text-gray-900 dark:text-white tabular-nums break-all">
             {value ?? <span className="text-gray-400 dark:text-gray-600 font-normal">—</span>}
           </span>
           <button type="button" onClick={startEdit} title="Edit"
-            className="print:hidden p-0.5 text-gray-300 hover:text-blue-500 dark:text-gray-600 dark:hover:text-blue-400 transition-colors">
+            className="print:hidden p-0.5 text-gray-300 hover:text-blue-500 dark:text-gray-600 dark:hover:text-blue-400 transition-colors shrink-0">
             <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round"
                 d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
@@ -395,7 +397,8 @@ export function ParentSummaryCard({
           <SectionLabel>Order Details</SectionLabel>
           <div>
             <EditableStringRow
-              label="Order ID (Tag 37)"
+              label="Order ID"
+              subLabel="Tag 37"
               value={effectiveBrokerOrderId}
               onChange={onBrokerOrderIdChange ?? (() => {})}
             />

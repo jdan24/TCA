@@ -314,74 +314,170 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
 
         {/* ── Notes / Methodology ─────────────────────────────────────────────
              Static descriptions (no formulas) for the reader's reference.
-             Mirrors the content of the Methodology modal.
+             Matches the formatting of the on-screen Methodology modal.
         */}
         <section className="break-before-page">
           <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-            <h2 className="text-sm font-bold text-gray-900 dark:text-white mb-4">Methodology Notes</h2>
+            <h2 className="text-sm font-bold text-gray-900 mb-4">Methodology Notes</h2>
 
-            {/* Execution Benchmarks */}
-            <div className="mb-5">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-2 pb-1 border-b border-gray-100">Execution Benchmarks</h3>
-              <div className="space-y-2 text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
-                <p><strong>Arrival Price</strong> — The mid-price of the security at Order Start time, derived from the best bid and best ask at the moment the order was submitted. This is the theoretical "zero-impact" price; it represents what you could have traded at before any execution activity. Used as the reference for Implementation Shortfall.</p>
-                <p><strong>Implementation Shortfall (IS)</strong> — Measures the total execution cost relative to the decision price. A BUY that fills above arrival, or a SELL that fills below arrival, incurs a positive (adverse) IS. Negative IS means the order filled better than the arrival price. Reported in basis points at the parent order level using the qty-weighted average fill price.</p>
-                <p><strong>VWAP Deviation</strong> — Compares the average fill price to the market's volume-weighted average price over the same execution window, computed from actual exchange prints. Negative = favorable (filled below VWAP on a buy, above VWAP on a sell). The primary benchmark for VWAP-algo orders.</p>
-                <p><strong>TWAP Deviation</strong> — Compares the average fill price to the market's time-weighted average price, where each market print is weighted by how long it prevailed rather than by volume. Negative = favorable. The primary benchmark for TWAP-algo orders.</p>
+            {/* ── Execution Benchmarks ─────────────────────────────────────── */}
+            <div className="mb-6">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-3 pb-1 border-b border-gray-100">
+                Execution Benchmarks
+              </h3>
+              <div className="space-y-3">
+
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-sm font-semibold text-gray-900 mb-1.5">Arrival Price</p>
+                  <p className="text-xs text-gray-600 leading-relaxed">The mid-price of the security at Order Start time, derived from the best bid and ask at the moment the order was submitted. This is the theoretical "zero-impact" price — what you could have traded at before any execution activity. Used as the reference for Implementation Shortfall.</p>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <p className="text-sm font-semibold text-gray-900">Implementation Shortfall (IS)</p>
+                    <NotesPill type="gray">bps</NotesPill>
+                  </div>
+                  <div className="flex gap-3 mb-1.5 text-xs">
+                    <span className="text-gray-500">Favorable:</span><NotesPill type="green">negative</NotesPill>
+                    <span className="text-gray-500 ml-2">Adverse:</span><NotesPill type="red">positive</NotesPill>
+                  </div>
+                  <p className="text-xs text-gray-600 leading-relaxed">Measures the total execution cost relative to the decision price. A BUY that fills above arrival, or a SELL that fills below arrival, incurs a positive (adverse) IS. Negative IS means the order filled better than the arrival price. Reported at the parent order level using the qty-weighted average fill price.</p>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <p className="text-sm font-semibold text-gray-900">VWAP Deviation</p>
+                    <NotesPill type="gray">bps</NotesPill>
+                  </div>
+                  <div className="flex gap-3 mb-1.5 text-xs">
+                    <span className="text-gray-500">Favorable:</span><NotesPill type="green">negative</NotesPill>
+                    <span className="text-gray-500 ml-2">Adverse:</span><NotesPill type="red">positive</NotesPill>
+                  </div>
+                  <p className="text-xs text-gray-600 leading-relaxed">Compares the average fill price to the market's volume-weighted average price over the execution window, computed from actual exchange prints. Negative is favorable — you filled below market VWAP on a buy or above it on a sell. The primary benchmark for VWAP-algo orders.</p>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <p className="text-sm font-semibold text-gray-900">TWAP Deviation</p>
+                    <NotesPill type="gray">bps</NotesPill>
+                  </div>
+                  <div className="flex gap-3 mb-1.5 text-xs">
+                    <span className="text-gray-500">Favorable:</span><NotesPill type="green">negative</NotesPill>
+                    <span className="text-gray-500 ml-2">Adverse:</span><NotesPill type="red">positive</NotesPill>
+                  </div>
+                  <p className="text-xs text-gray-600 leading-relaxed">Compares the average fill price to the market's time-weighted average price, where each market print is weighted by how long it prevailed rather than by volume. Negative is favorable. The primary benchmark for TWAP-algo orders. Because price is weighted by hold duration, a 30-second quiet period weighs more than a burst of prints at the same price level.</p>
+                </div>
               </div>
             </div>
 
-            {/* Market Context */}
-            <div className="mb-5">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-2 pb-1 border-b border-gray-100">Market Context</h3>
-              <div className="space-y-2 text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
-                <p><strong>Market Impact (bps)</strong> — An estimate of the price impact caused by the order itself, modelled using the Almgren/Chriss square-root framework scaled by daily volatility and the order's share of average daily volume. This is always a cost (positive). Larger orders in more volatile, less liquid names produce higher estimated impact.</p>
-                <p><strong>1σ Volatility</strong> — The one-standard-deviation price range of the market during the execution window, expressed both in price terms and in basis points. High volatility during a low-IS order indicates strong execution quality in a difficult environment; it is a contextual metric, not a cost measure.</p>
-                <p><strong>TWAS — Time-Weighted Average Spread (bps)</strong> — The average bid/ask spread during the order window, weighted by the time each quote was valid. A liquidity environment proxy: wider spreads indicate a less liquid market. Comparing TWAS to IS helps distinguish skill from conditions — high IS in a wide-spread environment is less concerning than the same IS when spreads are tight.</p>
-                <p><strong>Trend Cost (bps)</strong> — The portion of Implementation Shortfall not explained by market impact or the bid/ask spread. It represents adverse market drift during execution — the market moving against you for reasons unrelated to your own order. Negative (favorable) means the market drifted in your favour; positive (adverse) means price continued away from arrival. Only available when Bloomberg enrichment is connected.</p>
+            {/* ── Market Context ───────────────────────────────────────────── */}
+            <div className="mb-6">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-3 pb-1 border-b border-gray-100">
+                Market Context
+              </h3>
+              <div className="space-y-3">
+
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <p className="text-sm font-semibold text-gray-900">Market Impact</p>
+                    <NotesPill type="gray">bps · Almgren/Chriss model</NotesPill>
+                  </div>
+                  <div className="flex gap-3 mb-1.5 text-xs">
+                    <span className="text-gray-500">Always:</span><NotesPill type="red">positive (cost)</NotesPill>
+                  </div>
+                  <p className="text-xs text-gray-600 leading-relaxed">An estimate of the price impact caused by the order itself, scaled by daily volatility and the order's share of average daily volume. Larger orders in more volatile, less liquid names produce higher estimated impact. This is always a cost — it represents what you paid to move the market against yourself.</p>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <p className="text-sm font-semibold text-gray-900">1σ Volatility</p>
+                    <NotesPill type="gray">price &amp; bps</NotesPill>
+                  </div>
+                  <div className="flex gap-3 mb-1.5 text-xs">
+                    <NotesPill type="gray">context only</NotesPill>
+                  </div>
+                  <p className="text-xs text-gray-600 leading-relaxed">The one-standard-deviation price range of the market during the execution window. High volatility during a low-IS order indicates strong execution quality in a turbulent environment. It is a contextual measure of market conditions, not a direct cost metric.</p>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <p className="text-sm font-semibold text-gray-900">TWAS — Time-Weighted Average Spread</p>
+                    <NotesPill type="gray">bps</NotesPill>
+                  </div>
+                  <div className="flex gap-3 mb-1.5 text-xs">
+                    <NotesPill type="gray">context only</NotesPill>
+                  </div>
+                  <p className="text-xs text-gray-600 leading-relaxed">The average bid/ask spread during the order window, weighted by the time each quote was valid. A liquidity environment proxy: wider spreads indicate a less liquid market. Comparing TWAS to IS helps distinguish execution skill from market conditions — high IS in a wide-spread environment is less alarming than the same IS when spreads are tight.</p>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <p className="text-sm font-semibold text-gray-900">Trend Cost</p>
+                    <NotesPill type="gray">bps · IS decomposition</NotesPill>
+                  </div>
+                  <div className="flex gap-3 mb-1.5 text-xs">
+                    <span className="text-gray-500">Favorable:</span><NotesPill type="green">negative</NotesPill>
+                    <span className="text-gray-500 ml-2">Adverse:</span><NotesPill type="red">positive</NotesPill>
+                  </div>
+                  <p className="text-xs text-gray-600 leading-relaxed">The residual portion of IS after removing the two explainable components: estimated market impact and half the time-weighted spread. What remains is attributed to adverse market drift — the market moving against you during execution for reasons unrelated to your order. Negative means the market drifted in your favour; positive means it continued away from arrival.</p>
+                </div>
               </div>
             </div>
 
-            {/* Post-Trade Reversion */}
-            <div className="mb-5">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-2 pb-1 border-b border-gray-100">Post-Trade Price Reversion</h3>
-              <div className="space-y-2 text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
-                <p><strong>Reversion +30 s / +1 m (bps)</strong> — Measures whether the price movement caused by the order was temporary or permanent. A BUY that filled high but saw the price fall back within 30 seconds or 1 minute registers positive (favorable) reversion — the market impact was transient. Consistently negative reversion (price continuing away after completion) may indicate permanent market impact or information leakage.</p>
-                <p>On the Parent Order Summary, reversion is measured relative to the selected algo's primary benchmark rather than the fill price, answering: "did the market return to the benchmark level after the order completed?" The benchmark follows the algo selected in the Execution Algo dropdown.</p>
+            {/* ── Post-Trade Price Reversion ───────────────────────────────── */}
+            <div className="mb-6">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-3 pb-1 border-b border-gray-100">
+                Post-Trade Price Reversion
+              </h3>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <p className="text-sm font-semibold text-gray-900">Reversion +30 s / +1 m</p>
+                  <NotesPill type="gray">bps</NotesPill>
+                </div>
+                <div className="flex gap-3 mb-1.5 text-xs flex-wrap">
+                  <span className="text-gray-500">Favorable:</span><NotesPill type="green">positive (price reverts)</NotesPill>
+                  <span className="text-gray-500 ml-2">Adverse:</span><NotesPill type="red">negative (price persists)</NotesPill>
+                </div>
+                <p className="text-xs text-gray-600 leading-relaxed mb-1.5">Measures whether the price movement caused by the order was temporary or permanent. A BUY that filled high but saw the price fall back within 30 seconds or 1 minute registers positive (favorable) reversion — the market impact was transient. Consistently negative reversion (price continuing away after completion) may indicate permanent market impact or information leakage.</p>
+                <p className="text-xs text-gray-600 leading-relaxed">On the Parent Order Summary, reversion is measured relative to the selected algo's primary benchmark — answering: "did the market return to the benchmark level after the order completed?" The benchmark follows the algo selected in the Execution Algo dropdown.</p>
               </div>
             </div>
 
-            {/* Sign Convention */}
+            {/* ── Sign Convention Summary ──────────────────────────────────── */}
             <div>
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-2 pb-1 border-b border-gray-100">Sign Convention Summary</h3>
-              <table className="w-full text-xs border border-gray-200 rounded overflow-hidden">
-                <thead>
-                  <tr className="bg-gray-50 text-gray-500 text-left">
-                    <th className="px-3 py-1.5 font-medium border-b border-gray-200">Metric</th>
-                    <th className="px-3 py-1.5 font-medium border-b border-gray-200">Favorable</th>
-                    <th className="px-3 py-1.5 font-medium border-b border-gray-200">Adverse</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 text-gray-700">
-                  {[
-                    ["IS (bps)",                    "negative",               "positive"],
-                    ["VWAP Deviation (bps)",         "negative",               "positive"],
-                    ["TWAP Deviation (bps)",         "negative",               "positive"],
-                    ["Market Impact (bps)",          "— (always a cost)",      "positive"],
-                    ["Trend Cost (bps)",             "negative",               "positive"],
-                    ["Reversion +30s / +1m (bps)",  "positive (price reverts)","negative (price persists)"],
-                    ["TWAS (bps)",                   "context only",           "context only"],
-                    ["Volatility",                   "context only",           "context only"],
-                    ["Participation Rate",           "context only",           "context only"],
-                  ].map(([metric, fav, adv]) => (
-                    <tr key={metric}>
-                      <td className="px-3 py-1.5 font-mono text-[11px]">{metric}</td>
-                      <td className="px-3 py-1.5">{fav}</td>
-                      <td className="px-3 py-1.5">{adv}</td>
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-3 pb-1 border-b border-gray-100">
+                Sign Convention Summary
+              </h3>
+              <div className="rounded-lg border border-gray-200 overflow-hidden text-xs">
+                <table className="w-full">
+                  <thead>
+                    <tr className="bg-gray-100 text-gray-500 text-left">
+                      <th className="px-3 py-2 font-medium">Metric</th>
+                      <th className="px-3 py-2 font-medium">Favorable</th>
+                      <th className="px-3 py-2 font-medium">Adverse</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 text-gray-700">
+                    {([
+                      ["IS (bps)",                   "green", "negative",               "red",  "positive"],
+                      ["VWAP Deviation (bps)",        "green", "negative",               "red",  "positive"],
+                      ["TWAP Deviation (bps)",        "green", "negative",               "red",  "positive"],
+                      ["Market Impact (bps)",         "gray",  "— (always a cost)",      "red",  "positive"],
+                      ["Trend Cost (bps)",            "green", "negative",               "red",  "positive"],
+                      ["Reversion +30s / +1m (bps)", "green", "positive (reverts)",     "red",  "negative (persists)"],
+                      ["TWAS (bps)",                 "gray",  "context only",            "gray", "context only"],
+                      ["Volatility",                 "gray",  "context only",            "gray", "context only"],
+                      ["Participation Rate",         "gray",  "context only",            "gray", "context only"],
+                    ] as const).map(([metric, favType, fav, advType, adv]) => (
+                      <tr key={metric}>
+                        <td className="px-3 py-2 font-mono text-[11px]">{metric}</td>
+                        <td className="px-3 py-2"><NotesPill type={favType}>{fav}</NotesPill></td>
+                        <td className="px-3 py-2"><NotesPill type={advType}>{adv}</NotesPill></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </section>
@@ -407,6 +503,18 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
         <div className="print:hidden h-16" />
       </div>
     </div>
+  );
+}
+
+function NotesPill({ children, type }: { children: React.ReactNode; type: "green" | "red" | "gray" }) {
+  const cls =
+    type === "green" ? "bg-emerald-100 text-emerald-700"
+    : type === "red" ? "bg-red-100 text-red-600"
+    : "bg-gray-100 text-gray-600";
+  return (
+    <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded ${cls}`}>
+      {children}
+    </span>
   );
 }
 
