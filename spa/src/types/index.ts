@@ -244,8 +244,9 @@ export const FIX_TAGS = {
   ClOrdID: 11,
   ExecID: 17,
   OrderID: 37,
-  SecurityID: 48, // purer RIC code; preferred over tag 55 (Symbol) when present
+  SecurityID: 48,
   Symbol: 55,
+  MaturityMonthYear: 200,
   Side: 54,
   OrderQty: 38,
   LastQty: 32,

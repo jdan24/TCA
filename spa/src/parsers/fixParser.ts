@@ -2,7 +2,19 @@ import type { TradeRecord } from "@/types";
 import { FIX_TAGS } from "@/types";
 import { parseTimestamp, normalizeSide } from "@/tca/normalize";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Public types ──────────────────────────────────────────────────────────────
+
+/** Which FIX tag(s) to use when resolving the instrument symbol. */
+export type FixSymbolFormat = "tag55" | "tag48" | "tag55+200";
+
+/** One unique (tag55, tag48, tag200) combination sampled from the file — used by the symbol picker UI. */
+export interface SymbolSample {
+  tag55:  string;
+  tag48:  string;
+  tag200: string;
+}
+
+// ── Internal types ────────────────────────────────────────────────────────────
 
 type FixMsg = Record<string, string>;
 
@@ -58,8 +70,38 @@ function tag(msg: FixMsg, t: number): string {
   return msg[String(t)] ?? "";
 }
 
+/**
+ * Scan FIX text and return up to maxSamples unique (tag55, tag48, tag200)
+ * combinations from MsgType=8 messages. Powers the symbol-format picker UI.
+ */
+export function sampleFixSymbols(text: string, maxSamples = 8): SymbolSample[] {
+  const seen = new Map<string, SymbolSample>();
+  for (const line of text.split(/\r?\n/)) {
+    const msg = parseLine(line);
+    if (!msg || msg["35"] !== "8") continue;
+    const t55  = (msg["55"]  ?? "").trim();
+    const t48  = (msg["48"]  ?? "").trim();
+    const t200 = (msg["200"] ?? "").trim();
+    const key  = `${t55}|${t48}|${t200}`;
+    if (!seen.has(key)) seen.set(key, { tag55: t55, tag48: t48, tag200: t200 });
+    if (seen.size >= maxSamples) break;
+  }
+  return Array.from(seen.values());
+}
+
+function resolveFixSymbol(msg: FixMsg, format: FixSymbolFormat): string {
+  const t55  = tag(msg, FIX_TAGS.Symbol).trim();
+  const t48  = tag(msg, FIX_TAGS.SecurityID).trim();
+  const t200 = tag(msg, FIX_TAGS.MaturityMonthYear).trim();
+  switch (format) {
+    case "tag48":     return t48 || t55;
+    case "tag55+200": return (t55 && t200) ? `${t55} ${t200}` : (t55 || t48);
+    default:          return t55 || t48;  // "tag55"
+  }
+}
+
 /** Aggregate an array of raw FIX messages into TradeRecord[]. */
-function aggregate(messages: FixMsg[]): TradeRecord[] {
+function aggregate(messages: FixMsg[], format: FixSymbolFormat): TradeRecord[] {
   const map = new Map<string, FillAccumulator>();
 
   for (const msg of messages) {
@@ -87,7 +129,7 @@ function aggregate(messages: FixMsg[]): TradeRecord[] {
       map.set(groupKey, {
         groupKey,
         brokerOrderId: orderIdT37,
-        symbol: tag(msg, FIX_TAGS.SecurityID) || tag(msg, FIX_TAGS.Symbol),
+        symbol: resolveFixSymbol(msg, format),
         side: tag(msg, FIX_TAGS.Side),
         orderQty: parseFloat(tag(msg, FIX_TAGS.OrderQty) || "0"),
         fills:
@@ -101,7 +143,7 @@ function aggregate(messages: FixMsg[]): TradeRecord[] {
     } else {
       // Update symbol/side/orderQty/brokerOrderId from later messages if earlier one was blank
       if (!existing.brokerOrderId) existing.brokerOrderId = orderIdT37;
-      if (!existing.symbol) existing.symbol = tag(msg, FIX_TAGS.SecurityID) || tag(msg, FIX_TAGS.Symbol);
+      if (!existing.symbol) existing.symbol = resolveFixSymbol(msg, format);
       if (!existing.side) existing.side = tag(msg, FIX_TAGS.Side);
       if (!existing.orderQty) {
         existing.orderQty = parseFloat(tag(msg, FIX_TAGS.OrderQty) || "0");
@@ -227,7 +269,7 @@ function safeParseDate(s: string): Date {
  *      ExecType="F" (Trade) messages and "done for day" summaries that only
  *      report cumulative totals without LastQty/LastPx.
  */
-function aggregatePerFill(messages: FixMsg[]): TradeRecord[] {
+function aggregatePerFill(messages: FixMsg[], format: FixSymbolFormat): TradeRecord[] {
   const trades: TradeRecord[] = [];
   let fillIndex = 0;
 
@@ -241,7 +283,7 @@ function aggregatePerFill(messages: FixMsg[]): TradeRecord[] {
     const clOrdId      = tag(msg, FIX_TAGS.ClOrdID);
     const execId       = tag(msg, FIX_TAGS.ExecID);
     const transactTime = tag(msg, FIX_TAGS.TransactTime);
-    const symbol       = tag(msg, FIX_TAGS.SecurityID) || tag(msg, FIX_TAGS.Symbol);
+    const symbol       = resolveFixSymbol(msg, format);
     const sideRaw      = tag(msg, FIX_TAGS.Side);
     const execType     = tag(msg, FIX_TAGS.ExecType); // tag 150
 
@@ -329,7 +371,7 @@ function aggregatePerFill(messages: FixMsg[]): TradeRecord[] {
  * Read a pipe-delimited FIX execution report file and return TradeRecord[].
  * Filters for MsgType=8 only; aggregates multiple fills per ClOrdID.
  */
-export function parseFixFile(file: File): Promise<TradeRecord[]> {
+export function parseFixFile(file: File, symbolFormat: FixSymbolFormat = "tag55"): Promise<TradeRecord[]> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
@@ -372,7 +414,7 @@ export function parseFixFile(file: File): Promise<TradeRecord[]> {
           ? messages.filter((m) => !m[mlrtKey] || m[mlrtKey] === "3")
           : messages;
 
-        const trades = aggregate(filteredMessages);
+        const trades = aggregate(filteredMessages, symbolFormat);
 
         if (trades.length === 0) {
           reject(
@@ -401,7 +443,7 @@ export function parseFixFile(file: File): Promise<TradeRecord[]> {
  * Used in Mode 2 (Single Order TCA) so the Execution Timeline can plot
  * every fill as a separate point at its actual execution time.
  */
-export function parseFixFileSingleOrder(file: File): Promise<TradeRecord[]> {
+export function parseFixFileSingleOrder(file: File, symbolFormat: FixSymbolFormat = "tag55"): Promise<TradeRecord[]> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
@@ -442,7 +484,7 @@ export function parseFixFileSingleOrder(file: File): Promise<TradeRecord[]> {
           ? messages.filter((m) => !m[mlrtKey] || m[mlrtKey] === "3")
           : messages;
 
-        const trades = aggregatePerFill(filteredMessages);
+        const trades = aggregatePerFill(filteredMessages, symbolFormat);
 
         if (trades.length === 0) {
           reject(
