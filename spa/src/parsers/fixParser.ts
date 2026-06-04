@@ -8,6 +8,8 @@ type FixMsg = Record<string, string>;
 
 interface FillAccumulator {
   clOrdId: string;
+  /** FIX tag 37 OrderID — broker/exchange identifier; first non-empty value wins. */
+  brokerOrderId: string;
   symbol: string;
   side: string;
   orderQty: number;
@@ -77,6 +79,7 @@ function aggregate(messages: FixMsg[]): TradeRecord[] {
     if (!existing) {
       map.set(clOrdId, {
         clOrdId,
+        brokerOrderId: tag(msg, FIX_TAGS.OrderID),
         symbol: tag(msg, FIX_TAGS.SecurityID) || tag(msg, FIX_TAGS.Symbol),
         side: tag(msg, FIX_TAGS.Side),
         orderQty: parseFloat(tag(msg, FIX_TAGS.OrderQty) || "0"),
@@ -89,7 +92,8 @@ function aggregate(messages: FixMsg[]): TradeRecord[] {
         earliestTime: transactTime,
       });
     } else {
-      // Update symbol/side/orderQty from later messages if earlier one was blank
+      // Update symbol/side/orderQty/brokerOrderId from later messages if earlier one was blank
+      if (!existing.brokerOrderId) existing.brokerOrderId = tag(msg, FIX_TAGS.OrderID);
       if (!existing.symbol) existing.symbol = tag(msg, FIX_TAGS.SecurityID) || tag(msg, FIX_TAGS.Symbol);
       if (!existing.side) existing.side = tag(msg, FIX_TAGS.Side);
       if (!existing.orderQty) {
@@ -164,6 +168,7 @@ function aggregate(messages: FixMsg[]): TradeRecord[] {
 
     trades.push({
       orderId: acc.clOrdId,
+      brokerOrderId: acc.brokerOrderId || null,
       symbol: acc.symbol,
       side: normalizeSide(sideRaw),
       orderQty: acc.orderQty,
@@ -284,6 +289,7 @@ function aggregatePerFill(messages: FixMsg[]): TradeRecord[] {
     try {
       trades.push({
         orderId,
+        brokerOrderId: tag(msg, FIX_TAGS.OrderID) || null,
         symbol,
         side: normalizeSide(sideStr),
         orderQty: fillQty,

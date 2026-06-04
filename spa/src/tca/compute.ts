@@ -379,6 +379,7 @@ export function computeParentOrderSummary(
   return {
     symbol: firstTrade.symbol,
     side,
+    brokerOrderId: firstTrade.brokerOrderId ?? null,
     totalQty,
     fillVwap,
     arrivalPrice,

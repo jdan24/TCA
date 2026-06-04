@@ -48,6 +48,7 @@ export function ColumnMapper({
       accountDescription: suggested.accountDescription ?? UNMAPPED,
       fileVwap: suggested.fileVwap ?? UNMAPPED,
       fileTwap: suggested.fileTwap ?? UNMAPPED,
+      brokerOrderId: suggested.brokerOrderId ?? UNMAPPED,
     };
     return init;
   });

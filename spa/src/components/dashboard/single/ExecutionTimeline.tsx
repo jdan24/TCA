@@ -123,7 +123,7 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime
   const xDomain: [number, number] = [tMin - leftPad, tMax + rightPad];
 
   const subtitle = hasMarket
-    ? "Fill prices vs market last (BBG) · click legend to mute"
+    ? "Fill prices vs market last (BBG)"
     : `Fill price vs time — ${side} · fetch Bloomberg to add market line`;
 
   const renderFillDot = (dotProps: unknown) => {

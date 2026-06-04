@@ -196,7 +196,7 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, market
     <ChartCard
       id="so-chart-twap"
       title="Cumulative Fill TWAP"
-      subtitle="Running avg fill · market TWAP · fill prices — click legend to mute"
+      subtitle="Running avg fill · market TWAP · fill prices"
     >
       <ResponsiveContainer width="100%" height={260}>
         <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>

@@ -129,8 +129,8 @@ export function RunningParticipation({ trades, marketVolTicks, marketTicks, orde
       title="Running Participation Rate"
       subtitle={
         finalPct !== null
-          ? `Final: ${finalPct.toFixed(2)}% · click legend to mute`
-          : "our cumulative qty / Σ market prints · click legend to mute"
+          ? `Final: ${finalPct.toFixed(2)}%`
+          : "our cumulative qty / Σ market prints"
       }
     >
       <ResponsiveContainer width="100%" height={260}>

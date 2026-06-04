@@ -178,6 +178,9 @@ export function normalizeRows(data: RawFileData, mapping: ColumnMapping): TradeR
       const accountDescRaw = get(mapping.accountDescription);
       const accountDescription = accountDescRaw !== "" ? accountDescRaw : null;
 
+      const brokerOrderIdRaw = get(mapping.brokerOrderId);
+      const brokerOrderId = brokerOrderIdRaw !== "" ? brokerOrderIdRaw : null;
+
       // Hard-required fields: skip the row rather than aborting the whole import.
       // Rows with a null sentinel ("-", "N/A", etc.) or genuinely blank values
       // in these columns cannot be analysed and are silently dropped.
@@ -187,6 +190,7 @@ export function normalizeRows(data: RawFileData, mapping: ColumnMapping): TradeR
 
       trades.push({
         orderId,
+        brokerOrderId,
         symbol,
         side,
         orderQty,

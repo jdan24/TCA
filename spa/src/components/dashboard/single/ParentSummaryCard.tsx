@@ -13,12 +13,14 @@ import { fmtTtf } from "@/components/dashboard/dashboardUtils";
 
 // ── UTC helpers ───────────────────────────────────────────────────────────────
 
-function fmtUtc(d: Date): string {
+function fmtUtcDate(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
-    `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} UTC`
-  );
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+}
+
+function fmtUtcTime(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} UTC`;
 }
 
 function toInputUtc(d: Date): string {
@@ -55,6 +57,9 @@ interface ParentSummaryCardProps {
   onOrderTimeChange: (d: Date) => void;
   onLastFillTimeChange: (d: Date) => void;
   resolveSymbol?: (ric: string) => string;
+  /** Manual override for the broker/exchange order ID (FIX tag 37). undefined = use summary value. */
+  brokerOrderId?: string | null | undefined;
+  onBrokerOrderIdChange?: (id: string | null) => void;
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -134,7 +139,6 @@ function EditableTimeRow({
     setError(false);
     setEditing(true);
   }
-
   function confirm() {
     const d = parseInputAsUtc(inputVal);
     if (!d) { setError(true); return; }
@@ -142,43 +146,45 @@ function EditableTimeRow({
     setEditing(false);
     setError(false);
   }
-
   function cancel() { setEditing(false); setError(false); }
 
   return (
     <div className="py-1.5 border-b border-gray-100 dark:border-gray-800 last:border-0">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] text-gray-500 dark:text-gray-400 shrink-0">{label}</span>
-        {editing ? (
-          <div className="flex items-center gap-1">
-            <input
-              type="datetime-local"
-              step="1"
-              value={inputVal}
-              onChange={(e) => { setInputVal(e.target.value); setError(false); }}
-              onKeyDown={(e) => { if (e.key === "Enter") confirm(); if (e.key === "Escape") cancel(); }}
-              className={`text-[11px] font-mono rounded border px-1.5 py-0.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                error ? "border-red-400" : "border-gray-300 dark:border-gray-600"
-              }`}
-              autoFocus
-            />
-            <button type="button" onClick={confirm} title="Confirm (UTC)"
-              className="p-0.5 text-green-600 hover:text-green-700 dark:text-green-400">
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-            </button>
-            <button type="button" onClick={cancel} title="Cancel"
-              className="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-1.5">
+      {/* Label on its own line */}
+      <span className="text-[11px] text-gray-500 dark:text-gray-400">{label}</span>
+
+      {editing ? (
+        <div className="flex items-center gap-1 mt-0.5">
+          <input
+            type="datetime-local"
+            step="1"
+            value={inputVal}
+            onChange={(e) => { setInputVal(e.target.value); setError(false); }}
+            onKeyDown={(e) => { if (e.key === "Enter") confirm(); if (e.key === "Escape") cancel(); }}
+            className={`text-[11px] font-mono rounded border px-1.5 py-0.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+              error ? "border-red-400" : "border-gray-300 dark:border-gray-600"
+            }`}
+            autoFocus
+          />
+          <button type="button" onClick={confirm} title="Confirm (UTC)"
+            className="p-0.5 text-green-600 hover:text-green-700 dark:text-green-400">
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </button>
+          <button type="button" onClick={cancel} title="Cancel"
+            className="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      ) : (
+        /* Date on line 2, time on line 3 */
+        <div className="mt-0.5">
+          <div className="flex items-center justify-between gap-1.5">
             <span className="text-xs font-semibold font-mono text-gray-900 dark:text-white tabular-nums">
-              {fmtUtc(date)}
+              {fmtUtcDate(date)}
             </span>
             <button type="button" onClick={startEdit} title="Edit time (UTC)"
               className="print:hidden p-0.5 text-gray-300 hover:text-blue-500 dark:text-gray-600 dark:hover:text-blue-400 transition-colors">
@@ -188,12 +194,76 @@ function EditableTimeRow({
               </svg>
             </button>
           </div>
-        )}
-      </div>
+          <span className="text-xs font-mono text-gray-700 dark:text-gray-300 tabular-nums">
+            {fmtUtcTime(date)}
+          </span>
+        </div>
+      )}
       {error && (
-        <p className="text-[10px] text-red-500 mt-0.5 text-right">
+        <p className="text-[10px] text-red-500 mt-0.5">
           Invalid date — use format YYYY-MM-DDTHH:MM:SS
         </p>
+      )}
+    </div>
+  );
+}
+
+function EditableStringRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string | null;
+  onChange: (v: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [inputVal, setInputVal] = useState("");
+
+  function startEdit() { setInputVal(value ?? ""); setEditing(true); }
+  function confirm() { onChange(inputVal.trim() || null); setEditing(false); }
+  function cancel() { setEditing(false); }
+
+  return (
+    <div className="flex items-baseline justify-between gap-2 py-1.5 border-b border-gray-100 dark:border-gray-800 last:border-0">
+      <span className="text-[11px] text-gray-500 dark:text-gray-400 shrink-0">{label}</span>
+      {editing ? (
+        <div className="flex items-center gap-1">
+          <input
+            type="text"
+            value={inputVal}
+            onChange={(e) => setInputVal(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") confirm(); if (e.key === "Escape") cancel(); }}
+            placeholder="Enter value…"
+            className="text-[11px] font-mono rounded border border-gray-300 dark:border-gray-600 px-1.5 py-0.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 w-36"
+            autoFocus
+          />
+          <button type="button" onClick={confirm} title="Confirm"
+            className="p-0.5 text-green-600 hover:text-green-700 dark:text-green-400">
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </button>
+          <button type="button" onClick={cancel} title="Cancel"
+            className="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-semibold font-mono text-gray-900 dark:text-white tabular-nums text-right">
+            {value ?? <span className="text-gray-400 dark:text-gray-600 font-normal">—</span>}
+          </span>
+          <button type="button" onClick={startEdit} title="Edit"
+            className="print:hidden p-0.5 text-gray-300 hover:text-blue-500 dark:text-gray-600 dark:hover:text-blue-400 transition-colors">
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+            </svg>
+          </button>
+        </div>
       )}
     </div>
   );
@@ -260,7 +330,13 @@ export function ParentSummaryCard({
   onOrderTimeChange,
   onLastFillTimeChange,
   resolveSymbol,
+  brokerOrderId: brokerOrderIdProp,
+  onBrokerOrderIdChange,
 }: ParentSummaryCardProps) {
+  // Effective order ID: manual override takes priority over the value from the file
+  const effectiveBrokerOrderId = brokerOrderIdProp !== undefined
+    ? brokerOrderIdProp
+    : (summary.brokerOrderId ?? null);
   const sideSign = summary.side === "BUY" ? 1 : -1;
 
   const vwapSlippage: number | null =
@@ -318,6 +394,11 @@ export function ParentSummaryCard({
         <div>
           <SectionLabel>Order Details</SectionLabel>
           <div>
+            <EditableStringRow
+              label="Order ID (Tag 37)"
+              value={effectiveBrokerOrderId}
+              onChange={onBrokerOrderIdChange ?? (() => {})}
+            />
             <DetailRow label="Total Qty"        value={summary.totalQty.toLocaleString()} />
             <DetailRow label="Order Avg. Price" value={summary.fillVwap.toLocaleString(undefined, {
               minimumFractionDigits: 2, maximumFractionDigits: 6,

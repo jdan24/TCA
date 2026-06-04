@@ -196,7 +196,7 @@ export function CumulativeVWAP({ trades, arrivalPrice, runningMarketVwap, market
     <ChartCard
       id="so-chart-vwap"
       title="Cumulative Fill VWAP"
-      subtitle="Running avg fill · market VWAP · fill prices — click legend to mute"
+      subtitle="Running avg fill · market VWAP · fill prices"
     >
       <ResponsiveContainer width="100%" height={260}>
         <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>

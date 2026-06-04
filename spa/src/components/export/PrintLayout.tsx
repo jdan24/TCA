@@ -25,9 +25,11 @@ interface PrintLayoutProps {
   resolveSymbol?:       (ric: string) => string;
   /** Mirror of the live dashboard's algo selection — highlights the matching benchmark card. */
   highlightedBenchmark?: "arrival" | "vwap" | "twap" | null;
+  /** Manual Order ID override carried from the live dashboard into the print view. */
+  brokerOrderId?: string | null | undefined;
 }
 
-export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlightedBenchmark = null }: PrintLayoutProps) {
+export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlightedBenchmark = null, brokerOrderId }: PrintLayoutProps) {
   const { logoDataUrl, disclaimerText, reportTitle, setLogo, setDisclaimer, setTitle } = useCorporateTemplate();
   const [showBranding, setShowBranding] = useState(false);
   const brandingRef  = useRef<HTMLDivElement>(null);
@@ -256,6 +258,7 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
             <ParentSummaryCard
               summary={summary}
               highlightedBenchmark={highlightedBenchmark}
+              brokerOrderId={brokerOrderId}
               onOrderTimeChange={() => {}}
               onLastFillTimeChange={() => {}}
               {...(resolveSymbol ? { resolveSymbol } : {})}
@@ -307,6 +310,80 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
               />
             </div>
           )}
+        </section>
+
+        {/* ── Notes / Methodology ─────────────────────────────────────────────
+             Static descriptions (no formulas) for the reader's reference.
+             Mirrors the content of the Methodology modal.
+        */}
+        <section className="break-before-page">
+          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+            <h2 className="text-sm font-bold text-gray-900 dark:text-white mb-4">Methodology Notes</h2>
+
+            {/* Execution Benchmarks */}
+            <div className="mb-5">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-2 pb-1 border-b border-gray-100">Execution Benchmarks</h3>
+              <div className="space-y-2 text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
+                <p><strong>Arrival Price</strong> — The mid-price of the security at Order Start time, derived from the best bid and best ask at the moment the order was submitted. This is the theoretical "zero-impact" price; it represents what you could have traded at before any execution activity. Used as the reference for Implementation Shortfall.</p>
+                <p><strong>Implementation Shortfall (IS)</strong> — Measures the total execution cost relative to the decision price. A BUY that fills above arrival, or a SELL that fills below arrival, incurs a positive (adverse) IS. Negative IS means the order filled better than the arrival price. Reported in basis points at the parent order level using the qty-weighted average fill price.</p>
+                <p><strong>VWAP Deviation</strong> — Compares the average fill price to the market's volume-weighted average price over the same execution window, computed from actual exchange prints. Negative = favorable (filled below VWAP on a buy, above VWAP on a sell). The primary benchmark for VWAP-algo orders.</p>
+                <p><strong>TWAP Deviation</strong> — Compares the average fill price to the market's time-weighted average price, where each market print is weighted by how long it prevailed rather than by volume. Negative = favorable. The primary benchmark for TWAP-algo orders.</p>
+              </div>
+            </div>
+
+            {/* Market Context */}
+            <div className="mb-5">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-2 pb-1 border-b border-gray-100">Market Context</h3>
+              <div className="space-y-2 text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
+                <p><strong>Market Impact (bps)</strong> — An estimate of the price impact caused by the order itself, modelled using the Almgren/Chriss square-root framework scaled by daily volatility and the order's share of average daily volume. This is always a cost (positive). Larger orders in more volatile, less liquid names produce higher estimated impact.</p>
+                <p><strong>1σ Volatility</strong> — The one-standard-deviation price range of the market during the execution window, expressed both in price terms and in basis points. High volatility during a low-IS order indicates strong execution quality in a difficult environment; it is a contextual metric, not a cost measure.</p>
+                <p><strong>TWAS — Time-Weighted Average Spread (bps)</strong> — The average bid/ask spread during the order window, weighted by the time each quote was valid. A liquidity environment proxy: wider spreads indicate a less liquid market. Comparing TWAS to IS helps distinguish skill from conditions — high IS in a wide-spread environment is less concerning than the same IS when spreads are tight.</p>
+                <p><strong>Trend Cost (bps)</strong> — The portion of Implementation Shortfall not explained by market impact or the bid/ask spread. It represents adverse market drift during execution — the market moving against you for reasons unrelated to your own order. Negative (favorable) means the market drifted in your favour; positive (adverse) means price continued away from arrival. Only available when Bloomberg enrichment is connected.</p>
+              </div>
+            </div>
+
+            {/* Post-Trade Reversion */}
+            <div className="mb-5">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-2 pb-1 border-b border-gray-100">Post-Trade Price Reversion</h3>
+              <div className="space-y-2 text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
+                <p><strong>Reversion +30 s / +1 m (bps)</strong> — Measures whether the price movement caused by the order was temporary or permanent. A BUY that filled high but saw the price fall back within 30 seconds or 1 minute registers positive (favorable) reversion — the market impact was transient. Consistently negative reversion (price continuing away after completion) may indicate permanent market impact or information leakage.</p>
+                <p>On the Parent Order Summary, reversion is measured relative to the selected algo's primary benchmark rather than the fill price, answering: "did the market return to the benchmark level after the order completed?" The benchmark follows the algo selected in the Execution Algo dropdown.</p>
+              </div>
+            </div>
+
+            {/* Sign Convention */}
+            <div>
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-2 pb-1 border-b border-gray-100">Sign Convention Summary</h3>
+              <table className="w-full text-xs border border-gray-200 rounded overflow-hidden">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-500 text-left">
+                    <th className="px-3 py-1.5 font-medium border-b border-gray-200">Metric</th>
+                    <th className="px-3 py-1.5 font-medium border-b border-gray-200">Favorable</th>
+                    <th className="px-3 py-1.5 font-medium border-b border-gray-200">Adverse</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-gray-700">
+                  {[
+                    ["IS (bps)",                    "negative",               "positive"],
+                    ["VWAP Deviation (bps)",         "negative",               "positive"],
+                    ["TWAP Deviation (bps)",         "negative",               "positive"],
+                    ["Market Impact (bps)",          "— (always a cost)",      "positive"],
+                    ["Trend Cost (bps)",             "negative",               "positive"],
+                    ["Reversion +30s / +1m (bps)",  "positive (price reverts)","negative (price persists)"],
+                    ["TWAS (bps)",                   "context only",           "context only"],
+                    ["Volatility",                   "context only",           "context only"],
+                    ["Participation Rate",           "context only",           "context only"],
+                  ].map(([metric, fav, adv]) => (
+                    <tr key={metric}>
+                      <td className="px-3 py-1.5 font-mono text-[11px]">{metric}</td>
+                      <td className="px-3 py-1.5">{fav}</td>
+                      <td className="px-3 py-1.5">{adv}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </section>
 
         {/* ── Disclaimer (if set) ───────────────────────────────────────────── */}

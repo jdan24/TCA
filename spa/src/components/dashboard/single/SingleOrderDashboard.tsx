@@ -62,6 +62,8 @@ export function SingleOrderDashboard({
   const [selectedAlgo, setSelectedAlgo] = useState<AlgoOption | null>(null);
   const [printCharts, setPrintCharts]   = useState<ChartImages | null>(null);
   const [printHighlight, setPrintHighlight] = useState<"arrival" | "vwap" | "twap" | null>(null);
+  /** Manual override for the broker/exchange order ID (FIX tag 37). */
+  const [brokerOrderIdOverride, setBrokerOrderIdOverride] = useState<string | null | undefined>(undefined);
   const symbolMap = useSymbolMap();
 
   // Historical volume curve uploaded by the user (VWAP algo only).
@@ -249,6 +251,7 @@ export function SingleOrderDashboard({
         summary={summary}
         charts={printCharts}
         highlightedBenchmark={printHighlight}
+        brokerOrderId={brokerOrderIdOverride}
         onBack={() => setPrintCharts(null)}
         resolveSymbol={resolveSymbol}
       />
@@ -512,6 +515,8 @@ export function SingleOrderDashboard({
           summary={summary}
           highlightedBenchmark={selectedAlgo !== null ? highlightedBenchmark(selectedAlgo) : null}
           resolveSymbol={resolveSymbol}
+          brokerOrderId={brokerOrderIdOverride}
+          onBrokerOrderIdChange={setBrokerOrderIdOverride}
           onOrderTimeChange={(d) =>
             setSingleOrderTimeOverride({
               start: d,

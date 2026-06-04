@@ -83,6 +83,11 @@ const FIELD_ALIASES: Record<RequiredField | OptionalField, string[]> = {
     "benchmarktwap", "benchmark_twap", "markettwap", "market_twap",
     "mktwap", "mkt_twap", "referencetwap", "reference_twap",
   ],
+  brokerOrderId: [
+    "brokerorderid", "broker_order_id", "parentorderid", "parent_order_id",
+    "exchangeorderid", "exchange_order_id", "orderid37", "tag37",
+    "brokerid", "broker_id", "fixorderid", "fix_order_id",
+  ],
 };
 
 // Strip everything except a-z and 0-9 for comparison
@@ -155,6 +160,7 @@ export const OPTIONAL_FIELDS: OptionalField[] = [
   "accountDescription",
   "fileVwap",
   "fileTwap",
+  "brokerOrderId",
 ];
 
 /** Human-readable labels and descriptions for the ColumnMapper UI */
@@ -201,5 +207,9 @@ export const FIELD_META: Record<
   fileTwap: {
     label: "Source TWAP",
     description: "Market TWAP from your file — used for TWAP deviation when Bloomberg is offline",
+  },
+  brokerOrderId: {
+    label: "Broker / Exchange Order ID",
+    description: "FIX tag 37 OrderID — broker or exchange order identifier (optional)",
   },
 };

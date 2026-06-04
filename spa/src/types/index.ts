@@ -16,6 +16,8 @@ export type TCAMode = "multi" | "single";
 // ── Raw normalized trade record ──────────────────────────────────────────────
 export interface TradeRecord {
   orderId: string;
+  /** FIX tag 37 OrderID — broker/exchange order identifier; null when absent. */
+  brokerOrderId: string | null;
   symbol: string;
   side: "BUY" | "SELL";
   orderQty: number;
@@ -80,6 +82,8 @@ export interface BloombergEnrichment {
 export interface ParentOrderSummary {
   symbol: string;
   side: "BUY" | "SELL";
+  /** FIX tag 37 OrderID — broker/exchange identifier; null when absent or not provided. */
+  brokerOrderId: string | null;
   totalQty: number;
   fillVwap: number; // qty-weighted avg fill price across all slices
   arrivalPrice: number | null;
@@ -184,7 +188,8 @@ export type OptionalField =
   | "accountId"
   | "accountDescription"
   | "fileVwap"
-  | "fileTwap";
+  | "fileTwap"
+  | "brokerOrderId";
 
 export type ColumnMapping = Record<RequiredField, string> &
   Partial<Record<OptionalField, string>>;
@@ -238,6 +243,7 @@ export interface TCAStore {
 export const FIX_TAGS = {
   ClOrdID: 11,
   ExecID: 17,
+  OrderID: 37,
   SecurityID: 48, // purer RIC code; preferred over tag 55 (Symbol) when present
   Symbol: 55,
   Side: 54,
