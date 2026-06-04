@@ -30,6 +30,8 @@ interface ExecutionTimelineProps {
   lastFillTime?: Date | null;
   /** When provided, price axis labels and tooltip values use this formatter (e.g. Treasury 32nds). */
   priceFormatter?: (v: number) => string;
+  /** When provided, generates Y-axis ticks snapped to the contract's price grid (no duplicate labels). */
+  yTicksForRange?: (pMin: number, pMax: number) => number[];
 }
 
 interface FillPoint {
@@ -45,7 +47,7 @@ function fmtTime(ms: number): string {
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
 }
 
-export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime, lastFillTime, priceFormatter }: ExecutionTimelineProps) {
+export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime, lastFillTime, priceFormatter, yTicksForRange }: ExecutionTimelineProps) {
   const fmtPrice = priceFormatter ?? ((v: number) => v.toFixed(4));
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
@@ -90,8 +92,21 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime
   if (arrivalPrice !== null) allPrices.push(arrivalPrice);
   const pMin = Math.min(...allPrices);
   const pMax = Math.max(...allPrices);
-  const pPad = (pMax - pMin) * 0.1 || pMin * 0.001;
-  const yDomain: [number, number] = [pMin - pPad, pMax + pPad];
+
+  // When a Treasury tick generator is provided, snap Y-axis ticks to valid price
+  // boundaries so no two ticks format to the same 32nds string.  The domain is
+  // derived from the tick array so there is no blank whitespace outside the ticks.
+  const snappedTicks = yTicksForRange ? yTicksForRange(pMin, pMax) : undefined;
+  const yDomain: [number, number] = (() => {
+    if (snappedTicks && snappedTicks.length >= 1) {
+      const first = snappedTicks[0]!;
+      const last  = snappedTicks[snappedTicks.length - 1]!;
+      const step  = snappedTicks.length >= 2 ? snappedTicks[1]! - snappedTicks[0]! : first * 0.001;
+      return [first - step * 0.4, last + step * 0.4];
+    }
+    const pPad = (pMax - pMin) * 0.1 || pMin * 0.001;
+    return [pMin - pPad, pMax + pPad];
+  })();
 
   const allTimes = [
     ...fillPoints.map((p) => p.t),
@@ -136,7 +151,9 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime
             tick={{ fontSize: 9, fill: "#94a3b8" }} tickLine={false} axisLine={false}
           />
           <YAxis
-            type="number" domain={yDomain}
+            type="number"
+            domain={yDomain}
+            {...(snappedTicks && { ticks: snappedTicks })}
             tick={{ fontSize: 10, fill: "#94a3b8" }} tickLine={false} axisLine={false}
             tickFormatter={fmtPrice}
             {...(priceFormatter && { width: 72 })}

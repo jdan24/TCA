@@ -37,6 +37,8 @@ interface CumulativeTWAPProps {
   lastFillTime?: Date | null;
   /** When provided, price axis labels and tooltip values use this formatter (e.g. Treasury 32nds). */
   priceFormatter?: (v: number) => string;
+  /** When provided, generates Y-axis ticks snapped to the contract's price grid (no duplicate labels). */
+  yTicksForRange?: (pMin: number, pMax: number) => number[];
 }
 
 interface DataPoint {
@@ -125,7 +127,7 @@ const SERIES: Record<string, { label: string; color: string; dash?: string }> = 
   fillPrice:      { label: "Fill Price",         color: "#8b5cf6", dash: "4 2" },
 };
 
-export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, marketTwap, orderTime, lastFillTime, priceFormatter }: CumulativeTWAPProps) {
+export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, marketTwap, orderTime, lastFillTime, priceFormatter, yTicksForRange }: CumulativeTWAPProps) {
   const fmtPrice = priceFormatter ?? ((v: number) => v.toFixed(4));
   const twapByTime = new Map((runningMarketTwap ?? []).map((p) => [p.t, p.twap]));
   const hasMarketTwap = (runningMarketTwap?.length ?? 0) > 0;
@@ -155,7 +157,18 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, market
   if (runningMarketTwap) runningMarketTwap.forEach((p) => allPrices.push(p.twap));
   const pMin = Math.min(...allPrices);
   const pMax = Math.max(...allPrices);
-  const pad = (pMax - pMin) * 0.08 || pMin * 0.001;
+
+  const snappedTicks = yTicksForRange ? yTicksForRange(pMin, pMax) : undefined;
+  const yAxisDomain: [number, number] = (() => {
+    if (snappedTicks && snappedTicks.length >= 1) {
+      const first = snappedTicks[0]!;
+      const last  = snappedTicks[snappedTicks.length - 1]!;
+      const step  = snappedTicks.length >= 2 ? snappedTicks[1]! - snappedTicks[0]! : first * 0.001;
+      return [first - step * 0.4, last + step * 0.4];
+    }
+    const pad = (pMax - pMin) * 0.08 || pMin * 0.001;
+    return [pMin - pad, pMax + pad];
+  })();
 
   // X-axis domain: anchor to the order window when provided, but always include all fills.
   // When orderTime is explicit use it as the hard left boundary (no padding) so the chart
@@ -199,7 +212,8 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, market
             axisLine={false}
           />
           <YAxis
-            domain={[pMin - pad, pMax + pad]}
+            domain={yAxisDomain}
+            {...(snappedTicks && { ticks: snappedTicks })}
             tick={{ fontSize: 10, fill: "#94a3b8" }}
             tickLine={false}
             axisLine={false}
@@ -210,22 +224,30 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, market
             content={({ payload }) => {
               const d = payload?.[0]?.payload as DataPoint | undefined;
               if (!d) return null;
+              const fmtAvg  = (!hidden.has("runningFillAvg") && d.runningFillAvg !== null)
+                ? fmtPrice(d.runningFillAvg) : null;
+              const fmtTwap = (!hidden.has("marketTwapLine") && d.marketTwapLine !== undefined)
+                ? fmtPrice(d.marketTwapLine) : null;
+              const fmtFill = (!hidden.has("fillPrice") && d.fillPrice !== null)
+                ? fmtPrice(d.fillPrice) : null;
+              const showTwap = fmtTwap !== null && fmtTwap !== fmtAvg;
+              const showFill = fmtFill !== null && fmtFill !== fmtAvg && fmtFill !== fmtTwap;
               return (
                 <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
                   <p className="text-gray-500 dark:text-gray-400 mb-1 font-mono">{d.timeLabel}</p>
-                  {!hidden.has("runningFillAvg") && d.runningFillAvg !== null && (
+                  {fmtAvg !== null && (
                     <p className="text-emerald-600 dark:text-emerald-400">
-                      Avg Fill: <span className="font-semibold tabular-nums">{fmtPrice(d.runningFillAvg)}</span>
+                      Avg Fill: <span className="font-semibold tabular-nums">{fmtAvg}</span>
                     </p>
                   )}
-                  {!hidden.has("marketTwapLine") && d.marketTwapLine !== undefined && (
+                  {showTwap && (
                     <p className="text-amber-600 dark:text-amber-400">
-                      Mkt TWAP: <span className="font-semibold tabular-nums">{fmtPrice(d.marketTwapLine)}</span>
+                      Mkt TWAP: <span className="font-semibold tabular-nums">{fmtTwap}</span>
                     </p>
                   )}
-                  {!hidden.has("fillPrice") && d.fillPrice !== null && (
+                  {showFill && (
                     <p className="text-violet-600 dark:text-violet-400">
-                      Fill: <span className="font-semibold tabular-nums">{fmtPrice(d.fillPrice)}</span>
+                      Fill: <span className="font-semibold tabular-nums">{fmtFill}</span>
                     </p>
                   )}
                   <p className="text-gray-400 dark:text-gray-500 mt-0.5">

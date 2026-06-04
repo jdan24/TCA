@@ -18,7 +18,7 @@ import { computeParentOrderSummary } from "@/tca/compute";
 import { useTCAStore } from "@/store/useTCAStore";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { ExportBar, type ChartImages } from "@/components/export/ExportBar";
-import { getTreasuryPrecision, decToTreasuryFrac } from "@/tca/treasuryFrac";
+import { getTreasuryPrecision, decToTreasuryFrac, generateTreasuryYTicks } from "@/tca/treasuryFrac";
 import { PrintLayout } from "@/components/export/PrintLayout";
 import { TradeTable } from "@/components/table/TradeTable";
 import { ParentSummaryCard } from "./ParentSummaryCard";
@@ -108,16 +108,23 @@ export function SingleOrderDashboard({
     [singleOrderBbgSymbol, symbolMap],
   );
 
-  // Detect US Treasury futures from the resolved Bloomberg symbol and build a
-  // per-product fractional price formatter for the charts (32nds/64ths/128ths).
+  // Detect US Treasury futures from the resolved Bloomberg symbol and build:
+  //   priceFormatter  — decimal → 32nds string for chart axes and tooltips
+  //   yTicksForRange  — (pMin, pMax) → tick array snapped to valid price boundaries
   // The parent summary card stays in decimal; only chart axes + tooltips use fractions.
-  const priceFormatter = useMemo((): ((v: number) => string) | undefined => {
+  const { priceFormatter, yTicksForRange } = useMemo((): {
+    priceFormatter?: (v: number) => string;
+    yTicksForRange?: (pMin: number, pMax: number) => number[];
+  } => {
     const ric = trades[0]?.symbol;
-    if (!ric) return undefined;
+    if (!ric) return {};
     const bbgSym = resolveSymbol(ric);
     const precision = getTreasuryPrecision(bbgSym);
-    if (!precision) return undefined;
-    return (v: number) => decToTreasuryFrac(v, precision);
+    if (!precision) return {};
+    return {
+      priceFormatter:  (v: number)                    => decToTreasuryFrac(v, precision),
+      yTicksForRange:  (pMin: number, pMax: number)   => generateTreasuryYTicks(pMin, pMax, precision),
+    };
   }, [trades, resolveSymbol]);
 
   // Controlled input string for the scale field (separate from the parsed store value)
@@ -542,7 +549,8 @@ export function SingleOrderDashboard({
           marketTwap={summary?.marketTwap ?? null}
           orderTime={summary?.orderTime ?? null}
           lastFillTime={summary?.lastFillTime ?? null}
-          {...(priceFormatter && { priceFormatter })}
+          {...(priceFormatter  && { priceFormatter  })}
+          {...(yTicksForRange  && { yTicksForRange  })}
         />
         <CumulativeVWAP
           trades={scaledTrades}
@@ -551,7 +559,8 @@ export function SingleOrderDashboard({
           marketVwap={summary?.marketVwap ?? null}
           orderTime={summary?.orderTime ?? null}
           lastFillTime={summary?.lastFillTime ?? null}
-          {...(priceFormatter && { priceFormatter })}
+          {...(priceFormatter  && { priceFormatter  })}
+          {...(yTicksForRange  && { yTicksForRange  })}
         />
       </div>
 
@@ -563,7 +572,8 @@ export function SingleOrderDashboard({
           marketTicks={marketTicks}
           orderTime={summary?.orderTime ?? null}
           lastFillTime={summary?.lastFillTime ?? null}
-          {...(priceFormatter && { priceFormatter })}
+          {...(priceFormatter  && { priceFormatter  })}
+          {...(yTicksForRange  && { yTicksForRange  })}
         />
         <RunningParticipation
           trades={scaledTrades}
