@@ -102,8 +102,9 @@ export function FileDropZone({ onComplete, mode = "multi" }: FileDropZoneProps) 
   function handleTextParse() {
     const text = pasteText.trim();
     if (!text) return;
-    // Treat as FIX if any line starts with BeginString (8=FIX…) or raw SOH bytes present
-    const isLikelyFix = /^8=FIXT?\./m.test(text) || text.includes("\x01");
+    // Treat as FIX if any line starts with BeginString (8=FIX…) — allowing optional
+    // leading whitespace or quote characters (some loggers wrap lines in double quotes).
+    const isLikelyFix = /^[\s"']*8=FIXT?\./m.test(text) || text.includes("\x01");
     const fileName = isLikelyFix ? "pasted.fix" : "pasted.csv";
     void processFile(new File([text], fileName, { type: "text/plain" }));
   }
