@@ -221,16 +221,17 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
       <div className="max-w-4xl mx-auto px-6 py-6 print:max-w-none print:mx-0 print:px-0 print:py-0">
 
         {/*
-          PAGE 1: Logo → Summary (3-col) → TWAP + VWAP charts
-          On print: flex column filling exactly one A4 page.
-            - Logo + rule + summary card: shrink-0 (take natural height)
-            - Charts row: flex-1, min-h-0 so it fills remaining vertical space
+          PAGE 1: Logo → Title → Summary (3-col) → TWAP + VWAP charts
+          On print: natural flow — browser places page breaks between blocks.
+          break-inside-avoid on every card prevents a card from being
+          split mid-render; the browser moves the whole card to the next
+          page instead of clipping it at the paper edge.
         */}
-        <section className="print:h-screen print:flex print:flex-col print:overflow-hidden">
+        <section>
 
           {/* ── Branding logo — full width, first element on print ───────── */}
           {logoDataUrl && (
-            <div className="mb-2 print:mb-2 print:shrink-0">
+            <div className="mb-2 print:mb-2">
               <img
                 src={logoDataUrl}
                 alt="Company logo"
@@ -241,15 +242,15 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
 
           {/* ── Report title — below logo, above separator ────────────────── */}
           {reportTitle.trim() && (
-            <p className="text-[30px] font-semibold text-gray-800 mb-3 print:mb-2 print:shrink-0">
+            <p className="text-[30px] font-semibold text-gray-800 mb-3 print:mb-2">
               {reportTitle.trim()}
             </p>
           )}
 
-          <hr className="mb-4 border-gray-200 print:mb-3 print:shrink-0" />
+          <hr className="mb-4 border-gray-200 print:mb-3" />
 
-          {/* ── Parent Order Summary (3-column, same as live dashboard) ─── */}
-          <div className="print:shrink-0">
+          {/* ── Parent Order Summary (3-column) — never split across pages ── */}
+          <div className="break-inside-avoid">
             <ParentSummaryCard
               summary={summary}
               highlightedBenchmark={null}
@@ -259,10 +260,12 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
             />
           </div>
 
-          {/* ── TWAP then VWAP — stacked, inside a card matching the summary ─ */}
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 mt-4 flex flex-col gap-4 print:mt-3 print:gap-3">
+          {/* ── TWAP then VWAP — each chart in its own avoid-break wrapper ─ */}
+          <div className="mt-4 print:mt-3 flex flex-col gap-4 print:gap-3">
             {page1Charts.map(([src, alt], i) => (
-              <ChartCell key={i} src={src} alt={alt} />
+              <div key={i} className="break-inside-avoid bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                <ChartCell src={src} alt={alt} />
+              </div>
             ))}
           </div>
         </section>
@@ -276,27 +279,31 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
 
         {/*
           PAGE 2: Execution Timeline + Running Participation (+ VWAP profile)
-          On print: flex column filling exactly one A4 page.
-            - Timeline + Participation 2-col grid: flex-1 (fills page) unless VWAP profile present
-            - VWAP profile (if present): ~40% height below the grid
+          break-before-page forces a new page here regardless of where
+          the page 1 content ended.  Each chart card has break-inside-avoid
+          so it is never split at the paper edge.
         */}
-        <section className="break-before-page print:h-screen print:flex print:flex-col print:overflow-hidden">
-          <p className="text-xs text-gray-400 mb-3 print:mb-2 print:shrink-0">
+        <section className="break-before-page">
+          <p className="text-xs text-gray-400 mb-3 print:mb-2">
             {summary.symbol}&nbsp;&nbsp;{summary.side}&nbsp;&middot;&nbsp;Execution Detail
           </p>
 
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 flex flex-col gap-4 print:gap-3">
+          <div className="flex flex-col gap-4 print:gap-3">
             {page2Charts.map(([src, alt], i) => (
-              <ChartCell key={i} src={src} alt={alt} />
+              <div key={i} className="break-inside-avoid bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                <ChartCell src={src} alt={alt} />
+              </div>
             ))}
           </div>
 
           {vwapProfile && (
-            <img
-              src={vwapProfile}
-              alt="VWAP Volume Profile"
-              className="w-full h-auto mt-4 print:mt-2"
-            />
+            <div className="break-inside-avoid mt-4 print:mt-2">
+              <img
+                src={vwapProfile}
+                alt="VWAP Volume Profile"
+                className="w-full h-auto"
+              />
+            </div>
           )}
         </section>
 
