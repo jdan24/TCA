@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { autoDetectMapping, REQUIRED_FIELDS } from "@/parsers/autoDetect";
 import { parseCsvFile } from "@/parsers/csvParser";
 import { parseFixFile, parseFixFileSingleOrder } from "@/parsers/fixParser";
@@ -109,6 +109,40 @@ export function FileDropZone({ onComplete, mode = "multi" }: FileDropZoneProps) 
       setPhase({ tag: "error", message });
     }
   }
+
+  // ── Clipboard paste ──────────────────────────────────────────────────────
+
+  // Track latest phase tag via ref so the document-level listener never
+  // needs to be re-registered just because phase changed.
+  const phaseTagRef = useRef(phase.tag);
+  useEffect(() => { phaseTagRef.current = phase.tag; }, [phase.tag]);
+
+  useEffect(() => {
+    function handlePaste(e: ClipboardEvent) {
+      // Don't intercept pastes inside text inputs or contenteditable elements
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      ) return;
+
+      const current = phaseTagRef.current;
+      if (current !== "idle" && current !== "error") return;
+
+      const text = e.clipboardData?.getData("text");
+      if (!text?.trim()) return;
+
+      // Treat as FIX if the text contains a BeginString tag (8=FIX…) or SOH bytes
+      const isLikelyFix = /^8=FIXT?\./m.test(text) || text.includes("\x01");
+      const fileName = isLikelyFix ? "pasted.fix" : "pasted.csv";
+      const file = new File([text], fileName, { type: "text/plain" });
+      void processFile(file);
+    }
+
+    document.addEventListener("paste", handlePaste);
+    return () => document.removeEventListener("paste", handlePaste);
+  }, [processFile]);
 
   // ── Drag events ──────────────────────────────────────────────────────────
 
@@ -225,6 +259,9 @@ export function FileDropZone({ onComplete, mode = "multi" }: FileDropZoneProps) 
           </p>
           <p className="text-xs text-gray-400 dark:text-gray-600">
             CSV · XLSX · FIX execution reports
+          </p>
+          <p className="text-xs text-gray-300 dark:text-gray-700">
+            or paste FIX / CSV with Ctrl+V
           </p>
         </>
       )}

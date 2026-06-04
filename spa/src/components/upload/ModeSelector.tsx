@@ -22,19 +22,6 @@ export function ModeSelector() {
       </p>
       <div className="grid grid-cols-2 gap-3">
         <ModeCard
-          mode="multi"
-          active={mode === "multi"}
-          onSelect={setMode}
-          title="Multiple Order TCA"
-          subtitle="Aggregate analytics across a portfolio of parent orders"
-          icon={
-            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
-              <path strokeLinecap="round" strokeLinejoin="round"
-                d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h1.5C5.496 19.5 6 18.996 6 18.375m-3.75.125A1.125 1.125 0 012.25 18.375V15m0 3.375v-3.375m0 0a1.125 1.125 0 011.125-1.125h1.5c.621 0 1.125.504 1.125 1.125M2.25 15V6.75m0 0A1.125 1.125 0 013.375 5.625h1.5C5.496 5.625 6 6.129 6 6.75m-3.75 0v8.25M6 6.75h12M6 6.75V18.375M18 6.75v11.625M18 6.75A1.125 1.125 0 0116.875 5.625h-1.5C14.754 5.625 14.25 6.129 14.25 6.75M18 18.375c0 .621-.504 1.125-1.125 1.125h-1.5A1.125 1.125 0 0114.25 18.375V6.75" />
-            </svg>
-          }
-        />
-        <ModeCard
           mode="single"
           active={mode === "single"}
           onSelect={setMode}
@@ -44,6 +31,19 @@ export function ModeSelector() {
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round"
                 d="M8.25 6.75h7.5M8.25 9.75h7.5m-7.5 3h4.5M3.75 3h16.5A1.5 1.5 0 0121.75 4.5v15a1.5 1.5 0 01-1.5 1.5H3.75a1.5 1.5 0 01-1.5-1.5v-15A1.5 1.5 0 013.75 3z" />
+            </svg>
+          }
+        />
+        <ModeCard
+          mode="multi"
+          active={mode === "multi"}
+          onSelect={setMode}
+          title="Multiple Order TCA"
+          subtitle="Aggregate analytics across a portfolio of parent orders"
+          icon={
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h1.5C5.496 19.5 6 18.996 6 18.375m-3.75.125A1.125 1.125 0 012.25 18.375V15m0 3.375v-3.375m0 0a1.125 1.125 0 011.125-1.125h1.5c.621 0 1.125.504 1.125 1.125M2.25 15V6.75m0 0A1.125 1.125 0 013.375 5.625h1.5C5.496 5.625 6 6.129 6 6.75m-3.75 0v8.25M6 6.75h12M6 6.75V18.375M18 6.75v11.625M18 6.75A1.125 1.125 0 0116.875 5.625h-1.5C14.754 5.625 14.25 6.129 14.25 6.75M18 18.375c0 .621-.504 1.125-1.125 1.125h-1.5A1.125 1.125 0 0114.25 18.375V6.75" />
             </svg>
           }
         />

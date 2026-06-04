@@ -9,7 +9,7 @@ import type {
 } from "@/types";
 
 const initialState = {
-  mode: "multi" as TCAMode,
+  mode: "single" as TCAMode,
   rawTrades: [] as TradeRecord[],
   results: [] as TCAResult[],
   enrichment: {} as Record<string, BloombergEnrichment>,
