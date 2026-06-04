@@ -70,8 +70,8 @@ function buildTradeRows(trades: TradeRecord[], results: TCAResult[]): ExportRow[
       "Rev +30s (bps)":    fmt(r?.reversion_30s_bps ?? null),
       "Rev +1m (bps)":     fmt(r?.reversion_1m_bps ?? null),
       "TWAS (bps)":        fmt(r?.TWAS_bps ?? null),
-      "Vol σ (price)":     fmt(r?.vol_during_order_price ?? null),
-      "Vol σ (bps)":       fmt(r?.vol_during_order_bps ?? null),
+      "1σ Vol (price)":    fmt(r?.vol_during_order_price ?? null),
+      "1σ Vol (bps)":      fmt(r?.vol_during_order_bps ?? null),
     };
   });
 }
