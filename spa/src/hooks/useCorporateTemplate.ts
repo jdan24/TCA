@@ -1,13 +1,16 @@
 import { useState, useCallback } from "react";
 
-const LOGO_KEY       = "tca-corp-logo";
-const DISCLAIMER_KEY = "tca-corp-disclaimer";
+const LOGO_KEY        = "tca-corp-logo";
+const DISCLAIMER_KEY  = "tca-corp-disclaimer";
+const TITLE_KEY       = "tca-corp-title";
 
 export interface CorporateTemplate {
-  logoDataUrl:   string | null;
+  logoDataUrl:    string | null;
   disclaimerText: string;
-  setLogo:       (dataUrl: string | null) => void;
-  setDisclaimer: (text: string) => void;
+  reportTitle:    string;
+  setLogo:        (dataUrl: string | null) => void;
+  setDisclaimer:  (text: string) => void;
+  setTitle:       (text: string) => void;
 }
 
 export function useCorporateTemplate(): CorporateTemplate {
@@ -16,6 +19,9 @@ export function useCorporateTemplate(): CorporateTemplate {
   );
   const [disclaimerText, setDisclaimerState] = useState<string>(
     () => localStorage.getItem(DISCLAIMER_KEY) ?? "",
+  );
+  const [reportTitle, setTitleState] = useState<string>(
+    () => localStorage.getItem(TITLE_KEY) ?? "",
   );
 
   const setLogo = useCallback((dataUrl: string | null) => {
@@ -32,5 +38,10 @@ export function useCorporateTemplate(): CorporateTemplate {
     setDisclaimerState(text);
   }, []);
 
-  return { logoDataUrl, disclaimerText, setLogo, setDisclaimer };
+  const setTitle = useCallback((text: string) => {
+    localStorage.setItem(TITLE_KEY, text);
+    setTitleState(text);
+  }, []);
+
+  return { logoDataUrl, disclaimerText, reportTitle, setLogo, setDisclaimer, setTitle };
 }

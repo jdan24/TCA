@@ -26,7 +26,7 @@ interface PrintLayoutProps {
 }
 
 export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLayoutProps) {
-  const { logoDataUrl, disclaimerText, setLogo, setDisclaimer } = useCorporateTemplate();
+  const { logoDataUrl, disclaimerText, reportTitle, setLogo, setDisclaimer, setTitle } = useCorporateTemplate();
   const [showBranding, setShowBranding] = useState(false);
   const brandingRef  = useRef<HTMLDivElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -64,7 +64,7 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
     reader.readAsDataURL(file);
   }
 
-  const hasBranding = !!(logoDataUrl || disclaimerText.trim());
+  const hasBranding = !!(logoDataUrl || disclaimerText.trim() || reportTitle.trim());
 
   const page1Charts: [string | null, string][] = [
     [charts.twap,  "Cumulative TWAP"],
@@ -174,6 +174,17 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
                   )}
                 </div>
 
+                <div className="mb-3">
+                  <p className="text-xs text-gray-500 mb-1.5">Report Title</p>
+                  <input
+                    type="text"
+                    value={reportTitle}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="Wells Fargo Futures TCA Report"
+                    className="w-full text-xs rounded-lg border border-gray-300 bg-white text-gray-900 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400"
+                  />
+                </div>
+
                 <div>
                   <p className="text-xs text-gray-500 mb-1.5">
                     Disclaimer <span className="text-gray-400">(own last page)</span>
@@ -217,17 +228,25 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
         */}
         <section className="print:h-screen print:flex print:flex-col print:overflow-hidden">
 
-          {/* ── Branding logo — first element on every print ─────────────── */}
+          {/* ── Branding logo — full width, first element on print ───────── */}
           {logoDataUrl && (
-            <div className="mb-4 text-center print:mb-3 print:shrink-0">
+            <div className="mb-2 print:mb-2 print:shrink-0">
               <img
                 src={logoDataUrl}
                 alt="Company logo"
-                className="max-h-16 max-w-full inline-block"
+                className="w-full object-contain max-h-20"
               />
             </div>
           )}
-          <hr className="mb-5 border-gray-200 print:mb-3 print:shrink-0" />
+
+          {/* ── Report title — below logo, above separator ────────────────── */}
+          {reportTitle.trim() && (
+            <p className="text-base font-semibold text-gray-800 mb-3 print:mb-2 print:shrink-0">
+              {reportTitle.trim()}
+            </p>
+          )}
+
+          <hr className="mb-4 border-gray-200 print:mb-3 print:shrink-0" />
 
           {/* ── Parent Order Summary (3-column, same as live dashboard) ─── */}
           <div className="print:shrink-0">
@@ -240,8 +259,8 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
             />
           </div>
 
-          {/* ── TWAP then VWAP — full width, stacked ─────────────────────── */}
-          <div className="flex flex-col gap-4 mt-5 print:mt-3 print:gap-3 print:flex-1 print:min-h-0">
+          {/* ── TWAP then VWAP — stacked, inside a card matching the summary ─ */}
+          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 mt-4 flex flex-col gap-4 print:mt-3 print:gap-3 print:flex-1 print:min-h-0">
             {page1Charts.map(([src, alt], i) => (
               <div key={i} className="print:flex-1 print:min-h-0">
                 <ChartCell src={src} alt={alt} />
@@ -269,6 +288,7 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
           </p>
 
           <div className={[
+            "bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5",
             "flex flex-col gap-4 print:gap-3",
             vwapProfile
               ? "print:h-[57%] print:shrink-0"
