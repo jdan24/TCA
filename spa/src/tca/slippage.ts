@@ -12,8 +12,9 @@
 import type { TradeRecord } from "@/types";
 import { sideSign, toBps } from "./tcaUtils";
 
-export function computeSlippage(trade: TradeRecord): number | null {
-  const { avgFillPrice, arrivalPrice, side } = trade;
+export function computeSlippage(trade: TradeRecord, enrichmentArrivalPrice?: number | null): number | null {
+  const { avgFillPrice, side } = trade;
+  const arrivalPrice = trade.arrivalPrice ?? enrichmentArrivalPrice ?? null;
 
   if (arrivalPrice === null || arrivalPrice === 0) return null;
 

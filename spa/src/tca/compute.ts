@@ -53,7 +53,7 @@ export function computeAll(
 
     return {
       orderId: trade.orderId,
-      IS_bps: computeSlippage(trade),
+      IS_bps: computeSlippage(trade, e?.arrivalPrice ?? null),
       VWAP_dev_bps: computeVWAPDeviation(trade, e),
       MI_bps: computeMarketImpact(trade, e),
       timeToFill_ms: computeTimeToFill(trade),

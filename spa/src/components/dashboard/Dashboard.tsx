@@ -16,7 +16,7 @@ import type { EnrichProgress } from "@/bloomberg/enrichmentService";
 import type { AggregationSet, DataFilter, TCAResult, TradeRecord } from "@/types";
 import { EMPTY_FILTER } from "@/types";
 import { buildAggregations } from "@/tca/aggregate";
-import { ExportBar } from "@/components/export/ExportBar";
+import { MultiOrderPrintLayout } from "@/components/export/MultiOrderPrintLayout";
 import { TradeTable } from "@/components/table/TradeTable";
 import { AggregationSection } from "./AggregationSection";
 import { FilterBar } from "./FilterBar";
@@ -45,6 +45,7 @@ export function Dashboard({
   onFetchBloomberg,
   onReset,
 }: DashboardProps) {
+  const [showPrintLayout, setShowPrintLayout] = useState(false);
   const isFetching = enrichProgress !== null;
   const pct =
     isFetching && enrichProgress.total > 0
@@ -84,6 +85,16 @@ export function Dashboard({
   );
 
   const isFiltered = filteredTrades.length !== trades.length;
+
+  if (showPrintLayout) {
+    return (
+      <MultiOrderPrintLayout
+        trades={filteredTrades}
+        results={filteredResults}
+        onBack={() => setShowPrintLayout(false)}
+      />
+    );
+  }
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 py-6 space-y-4">
@@ -135,7 +146,18 @@ export function Dashboard({
             </span>
           )}
 
-          <ExportBar trades={filteredTrades} results={filteredResults} aggregations={aggregations} />
+          <button
+            type="button"
+            onClick={() => setShowPrintLayout(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            title="Open print layout"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+            Print Layout
+          </button>
 
           <button
             type="button"
@@ -151,7 +173,7 @@ export function Dashboard({
       <FilterBar trades={trades} filter={filter} onChange={setFilter} />
 
       {/* ── KPI tiles ───────────────────────────────────────────────────── */}
-      <SummaryCards results={filteredResults} />
+      <SummaryCards results={filteredResults} trades={filteredTrades} />
 
       {/* ── Order detail table (full width) ──────────────────────────────── */}
       <TradeTable trades={filteredTrades} results={filteredResults} title="Order Detail" />

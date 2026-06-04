@@ -26,7 +26,7 @@ import {
   type SortingState,
   type VisibilityState,
 } from "@tanstack/react-table";
-import type { TCAResult, TradeRecord } from "@/types";
+import type { BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
 import { useTCAStore } from "@/store/useTCAStore";
 
 // ── Merged row type ───────────────────────────────────────────────────────────
@@ -55,18 +55,19 @@ interface TableRow {
   marketVWAP_price: number | null;
 }
 
-function mergeRows(trades: TradeRecord[], results: TCAResult[]): TableRow[] {
+function mergeRows(trades: TradeRecord[], results: TCAResult[], enrichment: Record<string, BloombergEnrichment>): TableRow[] {
   const resultMap = new Map<string, TCAResult>();
   for (const r of results) resultMap.set(r.orderId, r);
   return trades.map((t) => {
     const r = resultMap.get(t.orderId);
+    const e = enrichment[t.orderId];
     return {
       orderId: t.orderId,
       symbol: t.symbol,
       side: t.side,
       orderQty: t.orderQty,
       avgFillPrice: t.avgFillPrice,
-      arrivalPrice: t.arrivalPrice,
+      arrivalPrice: t.arrivalPrice ?? e?.arrivalPrice ?? null,
       orderTime: t.orderTime,
       firstFillTime: t.firstFillTime,
       lastFillTime: t.lastFillTime,
@@ -108,8 +109,8 @@ const COLUMN_LABELS: Record<string, string> = {
   reversion_30s_bps: "Rev +30s",
   reversion_1m_bps: "Rev +1m",
   TWAS_bps: "TWAS",
-  vol_during_order_price: "Vol σ (price)",
-  vol_during_order_bps: "Vol σ (bps)",
+  vol_during_order_price: "1σ Vol (price)",
+  vol_during_order_bps: "1σ Vol (bps)",
 };
 
 // ── Null-safe sort: null values always go to bottom ───────────────────────────
@@ -291,8 +292,8 @@ const CSV_COLUMNS: Array<{
   { header: "Rev +30s (bps)",     value: (r) => r.reversion_30s_bps },
   { header: "Rev +1m (bps)",      value: (r) => r.reversion_1m_bps },
   { header: "TWAS (bps)",         value: (r) => r.TWAS_bps },
-  { header: "Vol σ (price)",      value: (r) => r.vol_during_order_price },
-  { header: "Vol σ (bps)",        value: (r) => r.vol_during_order_bps },
+  { header: "1σ Vol (price)",      value: (r) => r.vol_during_order_price },
+  { header: "1σ Vol (bps)",        value: (r) => r.vol_during_order_bps },
 ];
 
 // ── XLSX export (visible columns only) ────────────────────────────────────────
@@ -319,8 +320,8 @@ const XLSX_COL_DEFS: Record<string, XlsxColDef> = {
   reversion_30s_bps:      { header: "Rev +30s (bps)",    value: (r) => r.reversion_30s_bps },
   reversion_1m_bps:       { header: "Rev +1m (bps)",     value: (r) => r.reversion_1m_bps },
   TWAS_bps:               { header: "TWAS (bps)",        value: (r) => r.TWAS_bps },
-  vol_during_order_price: { header: "Vol σ (price)",     value: (r) => r.vol_during_order_price },
-  vol_during_order_bps:   { header: "Vol σ (bps)",       value: (r) => r.vol_during_order_bps },
+  vol_during_order_price: { header: "1σ Vol (price)",     value: (r) => r.vol_during_order_price },
+  vol_during_order_bps:   { header: "1σ Vol (bps)",       value: (r) => r.vol_during_order_bps },
 };
 
 function exportFillDetailToXlsx(data: TableRow[], visibleColumnIds: string[], filename: string) {
@@ -555,7 +556,7 @@ const POST_TIME_COLS = [
     enableGlobalFilter: false,
   }),
   col.accessor("vol_during_order_bps", {
-    header: "Vol σ (bps)",
+    header: "1σ Vol (bps)",
     cell: (i) => <BpsCell value={i.getValue()} neutral />,
     sortingFn: nullableSort,
     enableGlobalFilter: false,
@@ -604,7 +605,7 @@ const POST_TIME_COLS = [
     enableGlobalFilter: false,
   }),
   col.accessor("vol_during_order_price", {
-    header: "Vol σ (price)",
+    header: "1σ Vol (price)",
     cell: (i) => {
       const v = i.getValue();
       return v !== null ? (
@@ -659,6 +660,7 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
   const setAggregationFilter = useTCAStore((s) => s.setAggregationFilter);
   const rawTrades   = useTCAStore((s) => s.rawTrades);
   const setRawTrades = useTCAStore((s) => s.setRawTrades);
+  const enrichment  = useTCAStore((s) => s.enrichment);
 
   // Write an edited time back to rawTrades in the store so Bloomberg re-fetches
   // will use the corrected window on the next "Fetch Bloomberg Data" click.
@@ -746,7 +748,7 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
     [aggregationFilter],
   );
 
-  const allData = useMemo(() => mergeRows(trades, results), [trades, results]);
+  const allData = useMemo(() => mergeRows(trades, results, enrichment), [trades, results, enrichment]);
   const data = useMemo(
     () => (filteredIds ? allData.filter((r) => filteredIds.has(r.orderId)) : allData),
     [allData, filteredIds],

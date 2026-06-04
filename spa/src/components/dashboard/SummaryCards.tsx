@@ -8,11 +8,12 @@
  * Color coding: favorable values (negative IS/VWAP) → green; adverse → red.
  */
 
-import type { TCAResult } from "@/types";
+import type { TCAResult, TradeRecord } from "@/types";
 import { fmtBps, fmtTtf, safeAvg } from "./dashboardUtils";
 
 interface SummaryCardsProps {
   results: TCAResult[];
+  trades: TradeRecord[];
 }
 
 // ── KPI card ──────────────────────────────────────────────────────────────────
@@ -52,7 +53,7 @@ function bpsSentiment(v: number | null): Sentiment {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function SummaryCards({ results }: SummaryCardsProps) {
+export function SummaryCards({ results, trades }: SummaryCardsProps) {
   const n = results.length;
 
   const isVals = results.map((r) => r.IS_bps);
@@ -69,13 +70,9 @@ export function SummaryCards({ results }: SummaryCardsProps) {
 
   const avgTtf = safeAvg(results.map((r) => r.timeToFill_ms));
 
-  const miVals = results.map((r) => r.MI_bps);
-  const avgMI = safeAvg(miVals);
-  const miCount = miVals.filter((v) => v !== null).length;
+  const uniqueOrderCount = new Set(results.map((r) => r.orderId)).size;
 
-  const volVals = results.map((r) => r.vol_during_order_bps);
-  const avgVol = safeAvg(volVals);
-  const volCount = volVals.filter((v) => v !== null).length;
+  const totalQty = trades.reduce((s, t) => s + t.orderQty, 0);
 
   function subOf(count: number) {
     return count === n ? `${n} trade${n !== 1 ? "s" : ""}` : `${count} of ${n} trades`;
@@ -108,15 +105,15 @@ export function SummaryCards({ results }: SummaryCardsProps) {
         sentiment="neutral"
       />
       <KpiCard
-        label="Avg Mkt Impact"
-        value={fmtBps(avgMI)}
-        sub={subOf(miCount)}
-        sentiment={avgMI !== null && avgMI > 0 ? "bad" : "neutral"}
+        label="# Orders"
+        value={uniqueOrderCount.toLocaleString()}
+        sub={`unique order${uniqueOrderCount !== 1 ? "s" : ""}`}
+        sentiment="neutral"
       />
       <KpiCard
-        label="Avg Vol (1σ)"
-        value={fmtBps(avgVol)}
-        sub={volCount > 0 ? subOf(volCount) : "requires Bloomberg"}
+        label="Total Contracts"
+        value={totalQty.toLocaleString()}
+        sub={`${n} trade${n !== 1 ? "s" : ""}`}
         sentiment="neutral"
       />
     </div>
