@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { autoDetectMapping, REQUIRED_FIELDS } from "@/parsers/autoDetect";
 import { parseCsvFile } from "@/parsers/csvParser";
 import { parseFixFile, parseFixFileSingleOrder } from "@/parsers/fixParser";
@@ -49,6 +49,7 @@ interface FileDropZoneProps {
 
 export function FileDropZone({ onComplete, mode = "multi" }: FileDropZoneProps) {
   const [phase, setPhase] = useState<Phase>({ tag: "idle" });
+  const [pasteText, setPasteText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   // ── File processing ──────────────────────────────────────────────────────
@@ -96,6 +97,17 @@ export function FileDropZone({ onComplete, mode = "multi" }: FileDropZoneProps) 
     [onComplete, mode]
   );
 
+  // ── Paste area parse ─────────────────────────────────────────────────────
+
+  function handleTextParse() {
+    const text = pasteText.trim();
+    if (!text) return;
+    // Treat as FIX if any line starts with BeginString (8=FIX…) or raw SOH bytes present
+    const isLikelyFix = /^8=FIXT?\./m.test(text) || text.includes("\x01");
+    const fileName = isLikelyFix ? "pasted.fix" : "pasted.csv";
+    void processFile(new File([text], fileName, { type: "text/plain" }));
+  }
+
   // ── Mapping confirmed ────────────────────────────────────────────────────
 
   function handleMappingConfirm(mapping: ColumnMapping) {
@@ -109,40 +121,6 @@ export function FileDropZone({ onComplete, mode = "multi" }: FileDropZoneProps) 
       setPhase({ tag: "error", message });
     }
   }
-
-  // ── Clipboard paste ──────────────────────────────────────────────────────
-
-  // Track latest phase tag via ref so the document-level listener never
-  // needs to be re-registered just because phase changed.
-  const phaseTagRef = useRef(phase.tag);
-  useEffect(() => { phaseTagRef.current = phase.tag; }, [phase.tag]);
-
-  useEffect(() => {
-    function handlePaste(e: ClipboardEvent) {
-      // Don't intercept pastes inside text inputs or contenteditable elements
-      const target = e.target as HTMLElement;
-      if (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
-      ) return;
-
-      const current = phaseTagRef.current;
-      if (current !== "idle" && current !== "error") return;
-
-      const text = e.clipboardData?.getData("text");
-      if (!text?.trim()) return;
-
-      // Treat as FIX if the text contains a BeginString tag (8=FIX…) or SOH bytes
-      const isLikelyFix = /^8=FIXT?\./m.test(text) || text.includes("\x01");
-      const fileName = isLikelyFix ? "pasted.fix" : "pasted.csv";
-      const file = new File([text], fileName, { type: "text/plain" });
-      void processFile(file);
-    }
-
-    document.addEventListener("paste", handlePaste);
-    return () => document.removeEventListener("paste", handlePaste);
-  }, [processFile]);
 
   // ── Drag events ──────────────────────────────────────────────────────────
 
@@ -185,86 +163,135 @@ export function FileDropZone({ onComplete, mode = "multi" }: FileDropZoneProps) 
     );
   }
 
-  // ── Render: drop zone ────────────────────────────────────────────────────
+  // ── Render: drop zone + paste area ──────────────────────────────────────
 
   const isDragging = phase.tag === "dragging";
-  const isParsing = phase.tag === "parsing";
-  const isError = phase.tag === "error";
+  const isParsing  = phase.tag === "parsing";
+  const isError    = phase.tag === "error";
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-label="File upload area"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-      onClick={() => !isParsing && inputRef.current?.click()}
-      onKeyDown={(e) => e.key === "Enter" && !isParsing && inputRef.current?.click()}
-      className={[
-        "w-full max-w-xl rounded-xl border-2 border-dashed p-12",
-        "flex flex-col items-center justify-center gap-3",
-        "transition-colors duration-150 select-none",
-        isParsing
-          ? "border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/20 cursor-wait"
-          : isError
-            ? "border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/20 cursor-pointer"
-            : isDragging
-              ? "border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-950/20 cursor-copy"
-              : "border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500 bg-transparent cursor-pointer",
-      ].join(" ")}
-    >
-      <input
-        ref={inputRef}
-        type="file"
-        accept=".csv,.xlsx,.xls,.txt,.fix,.log,.dat"
-        className="sr-only"
-        onChange={handleInputChange}
-        tabIndex={-1}
-        aria-hidden
-      />
+    <div className="w-full max-w-xl flex flex-col gap-4">
 
-      {isParsing ? (
-        <ParseIcon />
-      ) : isError ? (
-        <ErrorIcon />
-      ) : (
-        <UploadIcon dragging={isDragging} />
-      )}
+      {/* ── File drop zone ──────────────────────────────────────────────── */}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label="File upload area"
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        onClick={() => !isParsing && inputRef.current?.click()}
+        onKeyDown={(e) => e.key === "Enter" && !isParsing && inputRef.current?.click()}
+        className={[
+          "w-full rounded-xl border-2 border-dashed p-12",
+          "flex flex-col items-center justify-center gap-3",
+          "transition-colors duration-150 select-none",
+          isParsing
+            ? "border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/20 cursor-wait"
+            : isError
+              ? "border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/20 cursor-pointer"
+              : isDragging
+                ? "border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-950/20 cursor-copy"
+                : "border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500 bg-transparent cursor-pointer",
+        ].join(" ")}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".csv,.xlsx,.xls,.txt,.fix,.log,.dat"
+          className="sr-only"
+          onChange={handleInputChange}
+          tabIndex={-1}
+          aria-hidden
+        />
 
-      {isParsing && (
-        <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
-          Parsing file…
-        </p>
-      )}
+        {isParsing ? (
+          <ParseIcon />
+        ) : isError ? (
+          <ErrorIcon />
+        ) : (
+          <UploadIcon dragging={isDragging} />
+        )}
 
-      {isError && phase.tag === "error" && (
-        <>
-          <p className="text-sm font-semibold text-red-600 dark:text-red-400">
-            Parse failed
+        {isParsing && (
+          <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
+            Parsing…
           </p>
-          <p className="text-xs text-red-500 dark:text-red-400 text-center max-w-xs">
-            {phase.message}
-          </p>
-          <p className="text-xs text-gray-400 dark:text-gray-600">
-            Click to try a different file
-          </p>
-        </>
-      )}
+        )}
 
-      {!isParsing && !isError && (
-        <>
-          <p className="text-sm font-medium text-gray-600 dark:text-gray-300">
-            {isDragging ? "Drop file to upload" : "Drop file here or click to browse"}
-          </p>
-          <p className="text-xs text-gray-400 dark:text-gray-600">
-            CSV · XLSX · FIX execution reports
-          </p>
-          <p className="text-xs text-gray-300 dark:text-gray-700">
-            or paste FIX / CSV with Ctrl+V
-          </p>
-        </>
-      )}
+        {isError && phase.tag === "error" && (
+          <>
+            <p className="text-sm font-semibold text-red-600 dark:text-red-400">
+              Parse failed
+            </p>
+            <p className="text-xs text-red-500 dark:text-red-400 text-center max-w-xs">
+              {phase.message}
+            </p>
+            <p className="text-xs text-gray-400 dark:text-gray-600">
+              Click to try a different file
+            </p>
+          </>
+        )}
+
+        {!isParsing && !isError && (
+          <>
+            <p className="text-sm font-medium text-gray-600 dark:text-gray-300">
+              {isDragging ? "Drop file to upload" : "Drop file here or click to browse"}
+            </p>
+            <p className="text-xs text-gray-400 dark:text-gray-600">
+              CSV · XLSX · FIX execution reports
+            </p>
+          </>
+        )}
+      </div>
+
+      {/* ── Paste area ──────────────────────────────────────────────────── */}
+      <div>
+        {/* Divider */}
+        <div className="flex items-center gap-3 mb-3">
+          <div className="flex-1 h-px bg-gray-200 dark:bg-gray-800" />
+          <span className="text-xs text-gray-400 dark:text-gray-600 select-none">
+            or paste FIX / CSV below
+          </span>
+          <div className="flex-1 h-px bg-gray-200 dark:bg-gray-800" />
+        </div>
+
+        <textarea
+          value={pasteText}
+          onChange={(e) => setPasteText(e.target.value)}
+          disabled={isParsing}
+          placeholder={"Paste FIX messages or CSV rows here…\n\nYou can paste multiple times to accumulate data before parsing."}
+          rows={8}
+          className={[
+            "w-full font-mono text-xs rounded-xl border px-3 py-2.5 resize-y",
+            "focus:outline-none focus:ring-2 focus:ring-blue-500",
+            "placeholder:text-gray-300 dark:placeholder:text-gray-700",
+            isParsing
+              ? "border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/20 text-gray-400 cursor-wait"
+              : "border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100",
+          ].join(" ")}
+        />
+
+        <div className="flex items-center justify-between mt-2">
+          <button
+            type="button"
+            onClick={() => { setPasteText(""); setPhase({ tag: "idle" }); }}
+            disabled={!pasteText && phase.tag !== "error"}
+            className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-500 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            onClick={handleTextParse}
+            disabled={!pasteText.trim() || isParsing}
+            className="text-xs px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {isParsing ? "Parsing…" : "Parse"}
+          </button>
+        </div>
+      </div>
+
     </div>
   );
 }
