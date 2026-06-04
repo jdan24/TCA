@@ -194,6 +194,7 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, market
 
   return (
     <ChartCard
+      id="so-chart-twap"
       title="Cumulative Fill TWAP"
       subtitle="Running avg fill · market TWAP · fill prices — click legend to mute"
     >
@@ -224,30 +225,22 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, market
             content={({ payload }) => {
               const d = payload?.[0]?.payload as DataPoint | undefined;
               if (!d) return null;
-              const fmtAvg  = (!hidden.has("runningFillAvg") && d.runningFillAvg !== null)
-                ? fmtPrice(d.runningFillAvg) : null;
-              const fmtTwap = (!hidden.has("marketTwapLine") && d.marketTwapLine !== undefined)
-                ? fmtPrice(d.marketTwapLine) : null;
-              const fmtFill = (!hidden.has("fillPrice") && d.fillPrice !== null)
-                ? fmtPrice(d.fillPrice) : null;
-              const showTwap = fmtTwap !== null && fmtTwap !== fmtAvg;
-              const showFill = fmtFill !== null && fmtFill !== fmtAvg && fmtFill !== fmtTwap;
               return (
                 <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
                   <p className="text-gray-500 dark:text-gray-400 mb-1 font-mono">{d.timeLabel}</p>
-                  {fmtAvg !== null && (
+                  {!hidden.has("runningFillAvg") && d.runningFillAvg !== null && (
                     <p className="text-emerald-600 dark:text-emerald-400">
-                      Avg Fill: <span className="font-semibold tabular-nums">{fmtAvg}</span>
+                      Avg Fill: <span className="font-semibold tabular-nums">{fmtPrice(d.runningFillAvg)}</span>
                     </p>
                   )}
-                  {showTwap && (
+                  {!hidden.has("marketTwapLine") && d.marketTwapLine !== undefined && (
                     <p className="text-amber-600 dark:text-amber-400">
-                      Mkt TWAP: <span className="font-semibold tabular-nums">{fmtTwap}</span>
+                      Mkt TWAP: <span className="font-semibold tabular-nums">{fmtPrice(d.marketTwapLine)}</span>
                     </p>
                   )}
-                  {showFill && (
+                  {!hidden.has("fillPrice") && d.fillPrice !== null && (
                     <p className="text-violet-600 dark:text-violet-400">
-                      Fill: <span className="font-semibold tabular-nums">{fmtFill}</span>
+                      Fill: <span className="font-semibold tabular-nums">{fmtPrice(d.fillPrice)}</span>
                     </p>
                   )}
                   <p className="text-gray-400 dark:text-gray-500 mt-0.5">

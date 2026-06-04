@@ -125,6 +125,7 @@ export function RunningParticipation({ trades, marketVolTicks, marketTicks, orde
 
   return (
     <ChartCard
+      id="so-chart-participation"
       title="Running Participation Rate"
       subtitle={
         finalPct !== null

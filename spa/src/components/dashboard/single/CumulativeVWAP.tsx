@@ -194,6 +194,7 @@ export function CumulativeVWAP({ trades, arrivalPrice, runningMarketVwap, market
 
   return (
     <ChartCard
+      id="so-chart-vwap"
       title="Cumulative Fill VWAP"
       subtitle="Running avg fill · market VWAP · fill prices — click legend to mute"
     >
@@ -224,36 +225,22 @@ export function CumulativeVWAP({ trades, arrivalPrice, runningMarketVwap, market
             content={({ payload }) => {
               const d = payload?.[0]?.payload as DataPoint | undefined;
               if (!d) return null;
-              // Compute formatted strings first so we can suppress duplicate values.
-              // When fills are at the same price as the benchmark (or when only one
-              // fill has occurred so runningFillAvg === fillPrice), showing the same
-              // 32nds string three times is confusing — keep only the first occurrence.
-              const fmtAvg  = (!hidden.has("runningFillAvg") && d.runningFillAvg !== null)
-                ? fmtPrice(d.runningFillAvg) : null;
-              const fmtVwap = (!hidden.has("marketVwapLine") && d.marketVwapLine !== undefined)
-                ? fmtPrice(d.marketVwapLine) : null;
-              const fmtFill = (!hidden.has("fillPrice") && d.fillPrice !== null)
-                ? fmtPrice(d.fillPrice) : null;
-              // Only show Mkt VWAP when it's a different price from Avg Fill.
-              const showVwap = fmtVwap !== null && fmtVwap !== fmtAvg;
-              // Only show Fill when it's different from both other displayed values.
-              const showFill = fmtFill !== null && fmtFill !== fmtAvg && fmtFill !== fmtVwap;
               return (
                 <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
                   <p className="text-gray-500 dark:text-gray-400 mb-1 font-mono">{d.timeLabel}</p>
-                  {fmtAvg !== null && (
+                  {!hidden.has("runningFillAvg") && d.runningFillAvg !== null && (
                     <p className="text-emerald-600 dark:text-emerald-400">
-                      Avg Fill: <span className="font-semibold tabular-nums">{fmtAvg}</span>
+                      Avg Fill: <span className="font-semibold tabular-nums">{fmtPrice(d.runningFillAvg)}</span>
                     </p>
                   )}
-                  {showVwap && (
+                  {!hidden.has("marketVwapLine") && d.marketVwapLine !== undefined && (
                     <p className="text-blue-600 dark:text-blue-400">
-                      Mkt VWAP: <span className="font-semibold tabular-nums">{fmtVwap}</span>
+                      Mkt VWAP: <span className="font-semibold tabular-nums">{fmtPrice(d.marketVwapLine)}</span>
                     </p>
                   )}
-                  {showFill && (
+                  {!hidden.has("fillPrice") && d.fillPrice !== null && (
                     <p className="text-violet-600 dark:text-violet-400">
-                      Fill: <span className="font-semibold tabular-nums">{fmtFill}</span>
+                      Fill: <span className="font-semibold tabular-nums">{fmtPrice(d.fillPrice)}</span>
                     </p>
                   )}
                   <p className="text-gray-400 dark:text-gray-500 mt-0.5">
