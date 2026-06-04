@@ -61,6 +61,7 @@ export function SingleOrderDashboard({
 }: SingleOrderDashboardProps) {
   const [selectedAlgo, setSelectedAlgo] = useState<AlgoOption | null>(null);
   const [printCharts, setPrintCharts]   = useState<ChartImages | null>(null);
+  const [printHighlight, setPrintHighlight] = useState<"arrival" | "vwap" | "twap" | null>(null);
   const symbolMap = useSymbolMap();
 
   // Historical volume curve uploaded by the user (VWAP algo only).
@@ -247,6 +248,7 @@ export function SingleOrderDashboard({
       <PrintLayout
         summary={summary}
         charts={printCharts}
+        highlightedBenchmark={printHighlight}
         onBack={() => setPrintCharts(null)}
         resolveSymbol={resolveSymbol}
       />
@@ -299,7 +301,10 @@ export function SingleOrderDashboard({
                   trades={scaledTrades}
                   results={results}
                   summary={summary ?? undefined}
-                  onPrintLayout={setPrintCharts}
+                  onPrintLayout={(charts) => {
+                    setPrintCharts(charts);
+                    setPrintHighlight(selectedAlgo !== null ? highlightedBenchmark(selectedAlgo) : null);
+                  }}
                   hideExcel
                 />
 

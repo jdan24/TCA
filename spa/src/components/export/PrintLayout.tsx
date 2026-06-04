@@ -19,13 +19,15 @@ import { ParentSummaryCard } from "@/components/dashboard/single/ParentSummaryCa
 import type { ChartImages } from "@/components/export/ExportBar";
 
 interface PrintLayoutProps {
-  summary:         ParentOrderSummary;
-  charts:          ChartImages;
-  onBack:          () => void;
-  resolveSymbol?:  (ric: string) => string;
+  summary:              ParentOrderSummary;
+  charts:               ChartImages;
+  onBack:               () => void;
+  resolveSymbol?:       (ric: string) => string;
+  /** Mirror of the live dashboard's algo selection — highlights the matching benchmark card. */
+  highlightedBenchmark?: "arrival" | "vwap" | "twap" | null;
 }
 
-export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLayoutProps) {
+export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlightedBenchmark = null }: PrintLayoutProps) {
   const { logoDataUrl, disclaimerText, reportTitle, setLogo, setDisclaimer, setTitle } = useCorporateTemplate();
   const [showBranding, setShowBranding] = useState(false);
   const brandingRef  = useRef<HTMLDivElement>(null);
@@ -253,7 +255,7 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
           <div className="break-inside-avoid">
             <ParentSummaryCard
               summary={summary}
-              highlightedBenchmark={null}
+              highlightedBenchmark={highlightedBenchmark}
               onOrderTimeChange={() => {}}
               onLastFillTimeChange={() => {}}
               {...(resolveSymbol ? { resolveSymbol } : {})}
