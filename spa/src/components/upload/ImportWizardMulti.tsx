@@ -354,6 +354,16 @@ export function ImportWizardMulti({
 
   const unmappedCount = symbolRows.filter((r) => !r.bbgTicker.trim()).length;
 
+  // One sample fill price per file-symbol, used to show live "before → after" previews
+  // in the Price Multiplier column as the user types.
+  const samplePriceByRic = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const t of trades) {
+      if (!(t.symbol in map)) map[t.symbol] = t.avgFillPrice;
+    }
+    return map;
+  }, [trades]);
+
   function updateSymbolRow(ric: string, patch: Partial<SymbolRow>) {
     setSymbolRows((rows) =>
       rows.map((r) => (r.ric === ric ? { ...r, ...patch } : r)),
@@ -658,9 +668,9 @@ export function ImportWizardMulti({
                         </select>
                       </td>
 
-                      {/* Price multiplier input */}
+                      {/* Price multiplier input + live before→after preview */}
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <input
                             type="text"
                             inputMode="decimal"
@@ -680,11 +690,24 @@ export function ImportWizardMulti({
                                 : "border-gray-300 dark:border-gray-600",
                             ].join(" ")}
                           />
-                          {isActive && (
-                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium tabular-nums">
-                              ×{mult.toFixed(4)}
-                            </span>
-                          )}
+                          {(() => {
+                            const sample = samplePriceByRic[row.ric] ?? null;
+                            if (sample === null) return null;
+                            if (isActive) {
+                              return (
+                                <span className="text-[10px] tabular-nums flex items-center gap-1">
+                                  <span className="font-mono text-gray-400 dark:text-gray-500">{sample.toFixed(4)}</span>
+                                  <span className="text-gray-400">→</span>
+                                  <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">{(sample * mult).toFixed(4)}</span>
+                                </span>
+                              );
+                            }
+                            return (
+                              <span className="text-[10px] font-mono text-gray-400 dark:text-gray-600 tabular-nums">
+                                {sample.toFixed(4)}
+                              </span>
+                            );
+                          })()}
                         </div>
                       </td>
                     </tr>
