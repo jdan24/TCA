@@ -5,11 +5,10 @@
  *   ┌─ Toolbar ─────────────────────────────────────────────────────────┐
  *   │ trade count · enriched count · [Fetch Bloomberg] · [↺ New file]  │
  *   ├─ SummaryCards (6 KPI tiles, full width) ──────────────────────────┤
+ *   ├─ OrderDetail / TradeTable (full width) ───────────────────────────┤
  *   ├─ SlippageChart ──── VWAPDeviation ────────────────────────────────┤
- *   ├─ TimingHeatmap (full width) ──────────────────────────────────────┤
  *   ├─ ReversionChart ── SpreadScatter ─────────────────────────────────┤
- *   ├─ AggregationSection (By Symbol / Algo / Symbol+Algo / Symbol+Side)┤
- *   └─ TradeTable (full width) ──────────────────────────────────────────┘
+ *   └─ AggregationSection (By Symbol / Algo / Symbol+Algo / Symbol+Side)┘
  */
 
 import { useMemo, useState } from "react";
@@ -25,7 +24,6 @@ import { ReversionChart } from "./ReversionChart";
 import { SlippageChart } from "./SlippageChart";
 import { SpreadScatter } from "./SpreadScatter";
 import { SummaryCards } from "./SummaryCards";
-import { TimingHeatmap } from "./TimingHeatmap";
 import { VWAPDeviation } from "./VWAPDeviation";
 
 interface DashboardProps {
@@ -155,14 +153,14 @@ export function Dashboard({
       {/* ── KPI tiles ───────────────────────────────────────────────────── */}
       <SummaryCards results={filteredResults} />
 
+      {/* ── Order detail table (full width) ──────────────────────────────── */}
+      <TradeTable trades={filteredTrades} results={filteredResults} title="Order Detail" />
+
       {/* ── Scatter charts (2-col) ───────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <SlippageChart trades={filteredTrades} results={filteredResults} />
         <VWAPDeviation trades={filteredTrades} results={filteredResults} />
       </div>
-
-      {/* ── Timing heatmap (full width) ──────────────────────────────────── */}
-      <TimingHeatmap trades={filteredTrades} results={filteredResults} />
 
       {/* ── Line + scatter (2-col) ───────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -172,9 +170,6 @@ export function Dashboard({
 
       {/* ── Aggregation tables ───────────────────────────────────────────── */}
       <AggregationSection aggregations={aggregations} />
-
-      {/* ── Trade detail table (full width) ──────────────────────────────── */}
-      <TradeTable trades={filteredTrades} results={filteredResults} />
     </div>
   );
 }

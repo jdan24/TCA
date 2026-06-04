@@ -7,7 +7,8 @@ import { parseTimestamp, normalizeSide } from "@/tca/normalize";
 type FixMsg = Record<string, string>;
 
 interface FillAccumulator {
-  clOrdId: string;
+  /** Primary grouping key: tag 37 (OrderID) when present, else tag 11 (ClOrdID). */
+  groupKey: string;
   /** FIX tag 37 OrderID — broker/exchange identifier; first non-empty value wins. */
   brokerOrderId: string;
   symbol: string;
@@ -65,8 +66,14 @@ function aggregate(messages: FixMsg[]): TradeRecord[] {
     // Only process Execution Reports (MsgType = 8)
     if (tag(msg, FIX_TAGS.MsgType) !== "8") continue;
 
-    const clOrdId = tag(msg, FIX_TAGS.ClOrdID);
-    if (!clOrdId) continue;
+    // Use OrderID (tag 37) as the stable parent-order key; fall back to ClOrdID
+    // (tag 11) for systems that don't populate tag 37. This ensures all fills for
+    // a single parent order are rolled up into one TradeRecord even when the order
+    // goes through cancel/replace cycles (which would otherwise change tag 11).
+    const clOrdId   = tag(msg, FIX_TAGS.ClOrdID);
+    const orderIdT37 = tag(msg, FIX_TAGS.OrderID);
+    const groupKey  = orderIdT37 || clOrdId;
+    if (!groupKey) continue;
 
     const transactTime = tag(msg, FIX_TAGS.TransactTime);
     const lastQtyRaw = parseFloat(tag(msg, FIX_TAGS.LastQty) || "0");
@@ -74,12 +81,12 @@ function aggregate(messages: FixMsg[]): TradeRecord[] {
     const avgPxRaw = parseFloat(tag(msg, FIX_TAGS.AvgPx) || "0");
     const cumQtyRaw = parseFloat(tag(msg, FIX_TAGS.CumQty) || "0");
 
-    const existing = map.get(clOrdId);
+    const existing = map.get(groupKey);
 
     if (!existing) {
-      map.set(clOrdId, {
-        clOrdId,
-        brokerOrderId: tag(msg, FIX_TAGS.OrderID),
+      map.set(groupKey, {
+        groupKey,
+        brokerOrderId: orderIdT37,
         symbol: tag(msg, FIX_TAGS.SecurityID) || tag(msg, FIX_TAGS.Symbol),
         side: tag(msg, FIX_TAGS.Side),
         orderQty: parseFloat(tag(msg, FIX_TAGS.OrderQty) || "0"),
@@ -93,7 +100,7 @@ function aggregate(messages: FixMsg[]): TradeRecord[] {
       });
     } else {
       // Update symbol/side/orderQty/brokerOrderId from later messages if earlier one was blank
-      if (!existing.brokerOrderId) existing.brokerOrderId = tag(msg, FIX_TAGS.OrderID);
+      if (!existing.brokerOrderId) existing.brokerOrderId = orderIdT37;
       if (!existing.symbol) existing.symbol = tag(msg, FIX_TAGS.SecurityID) || tag(msg, FIX_TAGS.Symbol);
       if (!existing.side) existing.side = tag(msg, FIX_TAGS.Side);
       if (!existing.orderQty) {
@@ -167,7 +174,7 @@ function aggregate(messages: FixMsg[]): TradeRecord[] {
     const sideRaw = acc.side === "1" ? "BUY" : acc.side === "2" ? "SELL" : acc.side;
 
     trades.push({
-      orderId: acc.clOrdId,
+      orderId: acc.groupKey,
       brokerOrderId: acc.brokerOrderId || null,
       symbol: acc.symbol,
       side: normalizeSide(sideRaw),
