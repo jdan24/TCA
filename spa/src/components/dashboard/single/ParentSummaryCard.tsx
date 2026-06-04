@@ -450,20 +450,20 @@ export function ParentSummaryCard({
               highlighted={highlightedBenchmark === "arrival"}
             />
             <BenchmarkRow
-              benchmarkLabel="Market VWAP (BBG)"
-              benchmarkValue={fmtPrice(summary.marketVwap)}
-              slippageLabel="VWAP Slippage (bps)"
-              slippageBps={vwapSlippage}
-              missing={summary.marketVwap === null}
-              highlighted={highlightedBenchmark === "vwap"}
-            />
-            <BenchmarkRow
               benchmarkLabel="Market TWAP (BBG)"
               benchmarkValue={fmtPrice(summary.marketTwap)}
               slippageLabel="TWAP Slippage (bps)"
               slippageBps={twapSlippage}
               missing={summary.marketTwap === null}
               highlighted={highlightedBenchmark === "twap"}
+            />
+            <BenchmarkRow
+              benchmarkLabel="Market VWAP (BBG)"
+              benchmarkValue={fmtPrice(summary.marketVwap)}
+              slippageLabel="VWAP Slippage (bps)"
+              slippageBps={vwapSlippage}
+              missing={summary.marketVwap === null}
+              highlighted={highlightedBenchmark === "vwap"}
             />
           </div>
         </div>

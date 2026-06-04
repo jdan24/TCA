@@ -204,7 +204,7 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
 
                 <div>
                   <p className="text-xs text-gray-500 mb-1.5">
-                    Disclaimer <span className="text-gray-400">(own last page)</span>
+                    Disclaimer <span className="text-gray-400">(follows content, can span pages)</span>
                   </p>
                   <textarea
                     value={disclaimerText}
@@ -252,7 +252,7 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
               <img
                 src={logoDataUrl}
                 alt="Company logo"
-                className="w-full object-contain max-h-20"
+                className="w-full object-contain object-left max-h-20"
               />
             </div>
           )}
@@ -497,20 +497,12 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
 
         {/* ── Disclaimer (if set) ───────────────────────────────────────────── */}
         {disclaimerText.trim() && (
-          <>
-            <div className="print:hidden my-8 flex items-center gap-3 text-xs text-gray-400 select-none">
-              <div className="flex-1 border-t border-dashed border-gray-300" />
-              <span>page break</span>
-              <div className="flex-1 border-t border-dashed border-gray-300" />
-            </div>
-
-            <section className="break-before-page">
-              <hr className="border-gray-200 mb-5" />
-              <p className="text-xs text-gray-600 whitespace-pre-wrap leading-relaxed">
-                {disclaimerText.trim()}
-              </p>
-            </section>
-          </>
+          <div className="mt-8 print:mt-6">
+            <hr className="border-gray-200 mb-5" />
+            <p className="text-xs text-gray-600 whitespace-pre-wrap leading-relaxed">
+              {disclaimerText.trim()}
+            </p>
+          </div>
         )}
 
         <div className="print:hidden h-16" />
