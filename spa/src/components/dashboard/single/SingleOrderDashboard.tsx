@@ -18,6 +18,7 @@ import { computeParentOrderSummary } from "@/tca/compute";
 import { useTCAStore } from "@/store/useTCAStore";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { ExportBar, type ChartImages } from "@/components/export/ExportBar";
+import { getTreasuryPrecision, decToTreasuryFrac } from "@/tca/treasuryFrac";
 import { PrintLayout } from "@/components/export/PrintLayout";
 import { TradeTable } from "@/components/table/TradeTable";
 import { ParentSummaryCard } from "./ParentSummaryCard";
@@ -106,6 +107,18 @@ export function SingleOrderDashboard({
     },
     [singleOrderBbgSymbol, symbolMap],
   );
+
+  // Detect US Treasury futures from the resolved Bloomberg symbol and build a
+  // per-product fractional price formatter for the charts (32nds/64ths/128ths).
+  // The parent summary card stays in decimal; only chart axes + tooltips use fractions.
+  const priceFormatter = useMemo((): ((v: number) => string) | undefined => {
+    const ric = trades[0]?.symbol;
+    if (!ric) return undefined;
+    const bbgSym = resolveSymbol(ric);
+    const precision = getTreasuryPrecision(bbgSym);
+    if (!precision) return undefined;
+    return (v: number) => decToTreasuryFrac(v, precision);
+  }, [trades, resolveSymbol]);
 
   // Controlled input string for the scale field (separate from the parsed store value)
   const [scaleInputStr, setScaleInputStr] = useState(
@@ -529,6 +542,7 @@ export function SingleOrderDashboard({
           marketTwap={summary?.marketTwap ?? null}
           orderTime={summary?.orderTime ?? null}
           lastFillTime={summary?.lastFillTime ?? null}
+          {...(priceFormatter && { priceFormatter })}
         />
         <CumulativeVWAP
           trades={scaledTrades}
@@ -537,6 +551,7 @@ export function SingleOrderDashboard({
           marketVwap={summary?.marketVwap ?? null}
           orderTime={summary?.orderTime ?? null}
           lastFillTime={summary?.lastFillTime ?? null}
+          {...(priceFormatter && { priceFormatter })}
         />
       </div>
 
@@ -548,6 +563,7 @@ export function SingleOrderDashboard({
           marketTicks={marketTicks}
           orderTime={summary?.orderTime ?? null}
           lastFillTime={summary?.lastFillTime ?? null}
+          {...(priceFormatter && { priceFormatter })}
         />
         <RunningParticipation
           trades={scaledTrades}

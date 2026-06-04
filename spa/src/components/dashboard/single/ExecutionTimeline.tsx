@@ -28,6 +28,8 @@ interface ExecutionTimelineProps {
   marketTicks: Array<{ t: number; price: number }> | null;
   orderTime?: Date | null;
   lastFillTime?: Date | null;
+  /** When provided, price axis labels and tooltip values use this formatter (e.g. Treasury 32nds). */
+  priceFormatter?: (v: number) => string;
 }
 
 interface FillPoint {
@@ -43,7 +45,8 @@ function fmtTime(ms: number): string {
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
 }
 
-export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime, lastFillTime }: ExecutionTimelineProps) {
+export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime, lastFillTime, priceFormatter }: ExecutionTimelineProps) {
+  const fmtPrice = priceFormatter ?? ((v: number) => v.toFixed(4));
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
   if (trades.length === 0) {
@@ -135,7 +138,8 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime
           <YAxis
             type="number" domain={yDomain}
             tick={{ fontSize: 10, fill: "#94a3b8" }} tickLine={false} axisLine={false}
-            tickFormatter={(v: number) => v.toFixed(2)}
+            tickFormatter={fmtPrice}
+            {...(priceFormatter && { width: 72 })}
           />
 
           {arrivalPrice !== null && (
@@ -197,7 +201,7 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime
                   <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
                     <p className="font-mono text-gray-400 dark:text-gray-500 mb-1">{d.label}</p>
                     <p className="text-gray-800 dark:text-gray-200">
-                      Fill: <span className="font-semibold tabular-nums">{d.fillPrice.toFixed(4)}</span>
+                      Fill: <span className="font-semibold tabular-nums">{fmtPrice(d.fillPrice)}</span>
                     </p>
                     <p className="text-gray-800 dark:text-gray-200">
                       Qty: <span className="font-semibold tabular-nums">{d.qty.toLocaleString()}</span>
@@ -211,7 +215,7 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime
               return (
                 <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
                   <p className="text-gray-400 dark:text-gray-500 mb-0.5">Market Last</p>
-                  <p className="text-gray-800 dark:text-gray-200 font-semibold tabular-nums">{(mkt.price as number).toFixed(4)}</p>
+                  <p className="text-gray-800 dark:text-gray-200 font-semibold tabular-nums">{fmtPrice(mkt.price as number)}</p>
                   <p className="text-gray-500 dark:text-gray-400 font-mono">{fmtTime(mkt.t as number)}</p>
                 </div>
               );

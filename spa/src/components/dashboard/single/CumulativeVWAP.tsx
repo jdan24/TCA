@@ -35,6 +35,8 @@ interface CumulativeVWAPProps {
   /** Explicit order window — drives x-axis domain so the chart shifts when times are overridden. */
   orderTime?: Date | null;
   lastFillTime?: Date | null;
+  /** When provided, price axis labels and tooltip values use this formatter (e.g. Treasury 32nds). */
+  priceFormatter?: (v: number) => string;
 }
 
 interface DataPoint {
@@ -123,7 +125,8 @@ const SERIES: Record<string, { label: string; color: string; dash?: string }> = 
   fillPrice:      { label: "Fill Price",         color: "#8b5cf6", dash: "4 2" },
 };
 
-export function CumulativeVWAP({ trades, arrivalPrice, runningMarketVwap, marketVwap, orderTime, lastFillTime }: CumulativeVWAPProps) {
+export function CumulativeVWAP({ trades, arrivalPrice, runningMarketVwap, marketVwap, orderTime, lastFillTime, priceFormatter }: CumulativeVWAPProps) {
+  const fmtPrice = priceFormatter ?? ((v: number) => v.toFixed(4));
   const vwapByTime = new Map((runningMarketVwap ?? []).map((p) => [p.t, p.vwap]));
   const hasMarketVwap = (runningMarketVwap?.length ?? 0) > 0;
   // Anchor at orderTime using arrival price so the market line starts there, not at the first fill.
@@ -200,7 +203,8 @@ export function CumulativeVWAP({ trades, arrivalPrice, runningMarketVwap, market
             tick={{ fontSize: 10, fill: "#94a3b8" }}
             tickLine={false}
             axisLine={false}
-            tickFormatter={(v: number) => v.toFixed(2)}
+            tickFormatter={fmtPrice}
+            {...(priceFormatter && { width: 72 })}
           />
           <Tooltip
             content={({ payload }) => {
@@ -211,17 +215,17 @@ export function CumulativeVWAP({ trades, arrivalPrice, runningMarketVwap, market
                   <p className="text-gray-500 dark:text-gray-400 mb-1 font-mono">{d.timeLabel}</p>
                   {!hidden.has("runningFillAvg") && d.runningFillAvg !== null && (
                     <p className="text-emerald-600 dark:text-emerald-400">
-                      Avg Fill: <span className="font-semibold tabular-nums">{d.runningFillAvg.toFixed(4)}</span>
+                      Avg Fill: <span className="font-semibold tabular-nums">{fmtPrice(d.runningFillAvg)}</span>
                     </p>
                   )}
                   {!hidden.has("marketVwapLine") && d.marketVwapLine !== undefined && (
                     <p className="text-blue-600 dark:text-blue-400">
-                      Mkt VWAP: <span className="font-semibold tabular-nums">{d.marketVwapLine.toFixed(4)}</span>
+                      Mkt VWAP: <span className="font-semibold tabular-nums">{fmtPrice(d.marketVwapLine)}</span>
                     </p>
                   )}
                   {!hidden.has("fillPrice") && d.fillPrice !== null && (
                     <p className="text-violet-600 dark:text-violet-400">
-                      Fill: <span className="font-semibold tabular-nums">{d.fillPrice.toFixed(4)}</span>
+                      Fill: <span className="font-semibold tabular-nums">{fmtPrice(d.fillPrice)}</span>
                     </p>
                   )}
                   <p className="text-gray-400 dark:text-gray-500 mt-0.5">
