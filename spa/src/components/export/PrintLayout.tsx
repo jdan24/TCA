@@ -81,10 +81,10 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
       <img
         src={src}
         alt={alt}
-        className="w-full h-auto print:h-full print:w-full print:object-contain rounded border border-gray-100"
+        className="w-full h-auto print:h-full print:w-full print:object-contain"
       />
     ) : (
-      <div className="aspect-[2/1] print:aspect-auto print:h-full bg-gray-50 rounded border border-gray-100 flex items-center justify-center text-xs text-gray-400">
+      <div className="w-full h-52 print:h-full bg-gray-50 flex items-center justify-center text-xs text-gray-400">
         {alt} unavailable
       </div>
     );
@@ -240,10 +240,12 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
             />
           </div>
 
-          {/* ── TWAP + VWAP side by side ─────────────────────────────────── */}
-          <div className="grid grid-cols-2 gap-4 mt-5 print:mt-3 print:gap-2 print:flex-1 print:min-h-0">
+          {/* ── TWAP then VWAP — full width, stacked ─────────────────────── */}
+          <div className="flex flex-col gap-4 mt-5 print:mt-3 print:gap-3 print:flex-1 print:min-h-0">
             {page1Charts.map(([src, alt], i) => (
-              <ChartCell key={i} src={src} alt={alt} />
+              <div key={i} className="print:flex-1 print:min-h-0">
+                <ChartCell src={src} alt={alt} />
+              </div>
             ))}
           </div>
         </section>
@@ -267,13 +269,15 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
           </p>
 
           <div className={[
-            "grid grid-cols-2 gap-4 print:gap-2",
+            "flex flex-col gap-4 print:gap-3",
             vwapProfile
               ? "print:h-[57%] print:shrink-0"
               : "print:flex-1 print:min-h-0",
           ].join(" ")}>
             {page2Charts.map(([src, alt], i) => (
-              <ChartCell key={i} src={src} alt={alt} />
+              <div key={i} className="print:flex-1 print:min-h-0">
+                <ChartCell src={src} alt={alt} />
+              </div>
             ))}
           </div>
 
