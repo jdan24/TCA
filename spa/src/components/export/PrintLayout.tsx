@@ -81,10 +81,10 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
       <img
         src={src}
         alt={alt}
-        className="w-full h-auto print:h-full print:w-full print:object-contain"
+        className="w-full h-auto"
       />
     ) : (
-      <div className="w-full h-52 print:h-full bg-gray-50 flex items-center justify-center text-xs text-gray-400">
+      <div className="w-full h-52 bg-gray-50 flex items-center justify-center text-xs text-gray-400">
         {alt} unavailable
       </div>
     );
@@ -241,7 +241,7 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
 
           {/* ── Report title — below logo, above separator ────────────────── */}
           {reportTitle.trim() && (
-            <p className="text-base font-semibold text-gray-800 mb-3 print:mb-2 print:shrink-0">
+            <p className="text-[30px] font-semibold text-gray-800 mb-3 print:mb-2 print:shrink-0">
               {reportTitle.trim()}
             </p>
           )}
@@ -260,11 +260,9 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
           </div>
 
           {/* ── TWAP then VWAP — stacked, inside a card matching the summary ─ */}
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 mt-4 flex flex-col gap-4 print:mt-3 print:gap-3 print:flex-1 print:min-h-0">
+          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 mt-4 flex flex-col gap-4 print:mt-3 print:gap-3">
             {page1Charts.map(([src, alt], i) => (
-              <div key={i} className="print:flex-1 print:min-h-0">
-                <ChartCell src={src} alt={alt} />
-              </div>
+              <ChartCell key={i} src={src} alt={alt} />
             ))}
           </div>
         </section>
@@ -287,17 +285,9 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
             {summary.symbol}&nbsp;&nbsp;{summary.side}&nbsp;&middot;&nbsp;Execution Detail
           </p>
 
-          <div className={[
-            "bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5",
-            "flex flex-col gap-4 print:gap-3",
-            vwapProfile
-              ? "print:h-[57%] print:shrink-0"
-              : "print:flex-1 print:min-h-0",
-          ].join(" ")}>
+          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5 flex flex-col gap-4 print:gap-3">
             {page2Charts.map(([src, alt], i) => (
-              <div key={i} className="print:flex-1 print:min-h-0">
-                <ChartCell src={src} alt={alt} />
-              </div>
+              <ChartCell key={i} src={src} alt={alt} />
             ))}
           </div>
 
@@ -305,7 +295,7 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
             <img
               src={vwapProfile}
               alt="VWAP Volume Profile"
-              className="w-full h-auto mt-4 print:mt-2 print:flex-1 print:min-h-0 print:object-contain rounded border border-gray-100"
+              className="w-full h-auto mt-4 print:mt-2"
             />
           )}
         </section>
