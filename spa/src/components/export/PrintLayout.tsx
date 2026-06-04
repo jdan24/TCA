@@ -44,6 +44,19 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
     return () => { document.getElementById("print-layout-page")?.remove(); };
   }, []);
 
+  // Set document.title to the Order ID while the print layout is active.
+  // The browser uses document.title as the PDF filename and Acrobat tab name.
+  // Falls back to "symbol SIDE" when no Order ID is set.
+  useEffect(() => {
+    const effectiveOrderId = brokerOrderId ?? summary.brokerOrderId ?? null;
+    const title = effectiveOrderId
+      ? effectiveOrderId
+      : `${summary.symbol} ${summary.side}`;
+    const previous = document.title;
+    document.title = title;
+    return () => { document.title = previous; };
+  }, [brokerOrderId, summary.brokerOrderId, summary.symbol, summary.side]);
+
   // Close branding popover on outside click.
   useEffect(() => {
     if (!showBranding) return;
