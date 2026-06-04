@@ -9,7 +9,7 @@ export function Header() {
 
   return (
     <>
-      <header className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white dark:bg-gray-900 dark:border-gray-700">
+      <header className="print:hidden flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white dark:bg-gray-900 dark:border-gray-700">
         <div className="flex items-center gap-3">
           <span className="text-xl font-semibold tracking-tight text-gray-900 dark:text-white">
             Futures TCA

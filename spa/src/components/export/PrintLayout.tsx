@@ -66,14 +66,29 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
 
   const hasBranding = !!(logoDataUrl || disclaimerText.trim());
 
-  const chartList: [string | null, string][] = [
-    [charts.twap,          "Cumulative TWAP"],
-    [charts.vwap,          "Cumulative VWAP"],
+  const page1Charts: [string | null, string][] = [
+    [charts.twap,  "Cumulative TWAP"],
+    [charts.vwap,  "Cumulative VWAP"],
+  ];
+  const page2Charts: [string | null, string][] = [
     [charts.timeline,      "Execution Timeline"],
     [charts.participation, "Running Participation"],
   ];
-
   const vwapProfile = charts.vwapProfile ?? null;
+
+  function ChartCell({ src, alt }: { src: string | null; alt: string }) {
+    return src ? (
+      <img
+        src={src}
+        alt={alt}
+        className="w-full h-auto print:h-full print:w-full print:object-contain rounded border border-gray-100"
+      />
+    ) : (
+      <div className="aspect-[2/1] print:aspect-auto print:h-full bg-gray-50 rounded border border-gray-100 flex items-center justify-center text-xs text-gray-400">
+        {alt} unavailable
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white">
@@ -194,32 +209,46 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
       {/* ── Report content ────────────────────────────────────────────────── */}
       <div className="max-w-4xl mx-auto px-6 py-6 print:max-w-none print:mx-0 print:px-0 print:py-0">
 
-        {/* ── PAGE 1: Logo + Parent Order Summary ──────────────────────────── */}
-        <section>
-          {logoDataUrl && (
-            <>
-              <div className="mb-4 text-center print:mb-3">
-                <img
-                  src={logoDataUrl}
-                  alt="Company logo"
-                  className="max-h-16 max-w-full inline-block"
-                />
-              </div>
-              <hr className="mb-5 border-gray-200" />
-            </>
-          )}
+        {/*
+          PAGE 1: Logo → Summary (3-col) → TWAP + VWAP charts
+          On print: flex column filling exactly one A4 page.
+            - Logo + rule + summary card: shrink-0 (take natural height)
+            - Charts row: flex-1, min-h-0 so it fills remaining vertical space
+        */}
+        <section className="print:h-screen print:flex print:flex-col print:overflow-hidden">
 
-          {/* The actual ParentSummaryCard — identical to the live dashboard */}
-          <ParentSummaryCard
-            summary={summary}
-            highlightedBenchmark={null}
-            onOrderTimeChange={() => {}}
-            onLastFillTimeChange={() => {}}
-            {...(resolveSymbol ? { resolveSymbol } : {})}
-          />
+          {/* ── Branding logo — first element on every print ─────────────── */}
+          {logoDataUrl && (
+            <div className="mb-4 text-center print:mb-3 print:shrink-0">
+              <img
+                src={logoDataUrl}
+                alt="Company logo"
+                className="max-h-16 max-w-full inline-block"
+              />
+            </div>
+          )}
+          <hr className="mb-5 border-gray-200 print:mb-3 print:shrink-0" />
+
+          {/* ── Parent Order Summary (3-column, same as live dashboard) ─── */}
+          <div className="print:shrink-0">
+            <ParentSummaryCard
+              summary={summary}
+              highlightedBenchmark={null}
+              onOrderTimeChange={() => {}}
+              onLastFillTimeChange={() => {}}
+              {...(resolveSymbol ? { resolveSymbol } : {})}
+            />
+          </div>
+
+          {/* ── TWAP + VWAP side by side ─────────────────────────────────── */}
+          <div className="grid grid-cols-2 gap-4 mt-5 print:mt-3 print:gap-2 print:flex-1 print:min-h-0">
+            {page1Charts.map(([src, alt], i) => (
+              <ChartCell key={i} src={src} alt={alt} />
+            ))}
+          </div>
         </section>
 
-        {/* ── Page break indicator (screen) + PAGE 2: Charts ──────────────── */}
+        {/* ── Page break indicator (screen only) ───────────────────────────── */}
         <div className="print:hidden my-8 flex items-center gap-3 text-xs text-gray-400 select-none">
           <div className="flex-1 border-t border-dashed border-gray-300" />
           <span>page break</span>
@@ -227,46 +256,27 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol }: PrintLay
         </div>
 
         {/*
-          PAGE 2: Charts
-          On screen: normal flow, charts at natural size.
-          On print: section fills exactly one A4 page using flex column + h-screen.
-            - 4-chart grid uses flex-1 (fills the page) when no VWAP profile,
-              or a fixed ~57% height when the VWAP profile is also shown.
-            - VWAP profile (when present) fills the remaining ~40% below.
-          grid-rows-2 + h-full on each img makes every chart fill its grid cell.
+          PAGE 2: Execution Timeline + Running Participation (+ VWAP profile)
+          On print: flex column filling exactly one A4 page.
+            - Timeline + Participation 2-col grid: flex-1 (fills page) unless VWAP profile present
+            - VWAP profile (if present): ~40% height below the grid
         */}
         <section className="break-before-page print:h-screen print:flex print:flex-col print:overflow-hidden">
           <p className="text-xs text-gray-400 mb-3 print:mb-2 print:shrink-0">
-            {summary.symbol}&nbsp;&nbsp;{summary.side}&nbsp;&middot;&nbsp;Charts
+            {summary.symbol}&nbsp;&nbsp;{summary.side}&nbsp;&middot;&nbsp;Execution Detail
           </p>
 
-          {/* 2×2 grid — fills remaining space (or ~57% when 5th chart present) */}
           <div className={[
-            "grid grid-cols-2 grid-rows-2 gap-4 print:gap-2",
+            "grid grid-cols-2 gap-4 print:gap-2",
             vwapProfile
               ? "print:h-[57%] print:shrink-0"
               : "print:flex-1 print:min-h-0",
           ].join(" ")}>
-            {chartList.map(([src, alt], i) =>
-              src ? (
-                <img
-                  key={i}
-                  src={src}
-                  alt={alt}
-                  className="w-full h-auto print:h-full print:w-full print:object-contain rounded border border-gray-100"
-                />
-              ) : (
-                <div
-                  key={i}
-                  className="aspect-[2/1] print:aspect-auto print:h-full bg-gray-50 rounded border border-gray-100 flex items-center justify-center text-xs text-gray-400"
-                >
-                  {alt} unavailable
-                </div>
-              )
-            )}
+            {page2Charts.map(([src, alt], i) => (
+              <ChartCell key={i} src={src} alt={alt} />
+            ))}
           </div>
 
-          {/* VWAP volume profile — full width, only when captured (VWAP algo) */}
           {vwapProfile && (
             <img
               src={vwapProfile}
