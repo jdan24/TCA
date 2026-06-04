@@ -398,7 +398,6 @@ export function ParentSummaryCard({
           <div>
             <EditableStringRow
               label="Order ID"
-              subLabel="Tag 37"
               value={effectiveBrokerOrderId}
               onChange={onBrokerOrderIdChange ?? (() => {})}
             />
