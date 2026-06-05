@@ -3,7 +3,7 @@
  *
  * Up to 10 sections are independently toggleable via the Sections popover in
  * the sticky toolbar.  The layout renders cleanly via browser Ctrl+P (injected
- * @page rule, A4 portrait, 15 mm / 18 mm margins), following the same approach
+ * @page rule, Letter portrait, 15 mm / 18 mm margins), following the same approach
  * as the single-order PrintLayout.
  *
  * Charts are passed in as captured PNG data-URLs (html-to-image) so they
@@ -186,7 +186,7 @@ export function MultiOrderPrintLayout({
   useEffect(() => {
     const style = document.createElement("style");
     style.id    = "mo-print-layout-page";
-    style.textContent = "@media print { @page { size: A4 portrait; margin: 15mm 18mm; } }";
+    style.textContent = "@media print { @page { size: letter portrait; margin: 15mm 18mm; } }";
     document.head.appendChild(style);
     return () => { document.getElementById("mo-print-layout-page")?.remove(); };
   }, []);
@@ -656,7 +656,7 @@ export function MultiOrderPrintLayout({
           </button>
 
           <span className="text-xs text-gray-400 hidden xl:block">
-            paper: <strong>A4</strong> · orientation: <strong>Portrait</strong>
+            paper: <strong>Letter</strong> · orientation: <strong>Portrait</strong>
           </span>
         </div>
       </div>

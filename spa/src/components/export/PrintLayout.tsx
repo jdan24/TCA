@@ -8,7 +8,7 @@
  * Dashed dividers indicate where Ctrl+P will split pages.
  *
  * On print (Ctrl+P): sticky bar is hidden via print:hidden, break-before-page
- * creates page breaks, and an injected @page rule sets A4 Portrait with
+ * creates page breaks, and an injected @page rule sets Letter Portrait with
  * 15 mm / 18 mm margins.
  */
 
@@ -42,7 +42,7 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
   useEffect(() => {
     const style = document.createElement("style");
     style.id    = "print-layout-page";
-    style.textContent = "@media print { @page { size: A4 portrait; margin: 15mm 18mm; } }";
+    style.textContent = "@media print { @page { size: letter portrait; margin: 15mm 18mm; } }";
     document.head.appendChild(style);
     return () => { document.getElementById("print-layout-page")?.remove(); };
   }, []);
@@ -232,7 +232,7 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
           </button>
 
           <span className="text-xs text-gray-400 hidden xl:block">
-            paper: <strong>A4</strong> · orientation: <strong>Portrait</strong>
+            paper: <strong>Letter</strong> · orientation: <strong>Portrait</strong>
           </span>
         </div>
       </div>

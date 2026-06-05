@@ -4,7 +4,7 @@
  * Single-order: "Print Layout" captures the four live charts via html-to-image,
  * then calls onPrintLayout(charts) so the parent can switch to <PrintLayout>.
  *
- * Multi-order: "PDF" runs the landscape A4 jsPDF export unchanged.
+ * Multi-order: "PDF" runs the landscape Letter jsPDF export unchanged.
  */
 
 import { useState } from "react";
@@ -120,7 +120,7 @@ function doExcelExport(tradeRows: ExportRow[], aggregations?: AggregationSet): v
 // ── Multi-order PDF export ────────────────────────────────────────────────────
 
 function doPdfExport(rows: ExportRow[]): void {
-  const doc   = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  const doc   = new jsPDF({ orientation: "landscape", unit: "pt", format: "letter" });
   const pageW = doc.internal.pageSize.getWidth();
   doc.setFontSize(13); doc.setTextColor(17, 24, 39);
   doc.text("TCA Export", 20, 24);

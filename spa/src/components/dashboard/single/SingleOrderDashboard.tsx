@@ -12,7 +12,6 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { marked } from "marked";
 import type { EnrichProgress } from "@/bloomberg/enrichmentService";
 import type { BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
 import { computeParentOrderSummary } from "@/tca/compute";
@@ -22,6 +21,7 @@ import { ExportBar, type ChartImages } from "@/components/export/ExportBar";
 import { getTreasuryPrecision, decToTreasuryFrac, generateTreasuryYTicks } from "@/tca/treasuryFrac";
 import { PrintLayout } from "@/components/export/PrintLayout";
 import { TradeTable } from "@/components/table/TradeTable";
+import { CommentaryPanel } from "./CommentaryPanel";
 import { ParentSummaryCard } from "./ParentSummaryCard";
 import { ExecutionTimeline } from "./ExecutionTimeline";
 import { CumulativeVWAP } from "./CumulativeVWAP";
@@ -64,10 +64,12 @@ export function SingleOrderDashboard({
   const [printCharts, setPrintCharts]   = useState<ChartImages | null>(null);
   const [printHighlight, setPrintHighlight] = useState<"arrival" | "vwap" | "twap" | null>(null);
 
-  // Commentary state — session-only (clears on file reload)
+  // Commentary state — session-only (clears on file reload). The editor lives in
+  // its own CommentaryPanel component with local state, so typing does not
+  // re-render this dashboard (and its charts) on every keystroke; the value is
+  // synced back here only on debounce / blur / close.
   const [commentary, setCommentary]         = useState<string>("");
   const [showCommentary, setShowCommentary] = useState(false);
-  const [commentaryTab, setCommentaryTab]   = useState<"edit" | "preview">("edit");
   /** Manual override for the broker/exchange order ID (FIX tag 37). */
   const [brokerOrderIdOverride, setBrokerOrderIdOverride] = useState<string | null | undefined>(undefined);
   const symbolMap = useSymbolMap();
@@ -572,85 +574,11 @@ export function SingleOrderDashboard({
 
       {/* ── Commentary panel ────────────────────────────────────────────── */}
       {showCommentary && (
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-          {/* Header row */}
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 dark:border-gray-800">
-            <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-              Commentary
-              <span className="ml-1.5 text-[10px] font-normal text-gray-400">
-                · appears in Print Layout
-              </span>
-            </span>
-            <div className="flex items-center gap-0.5">
-              {/* Edit / Preview tabs */}
-              {(["edit", "preview"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setCommentaryTab(tab)}
-                  className={`px-3 py-1 text-xs rounded-md capitalize transition-colors ${
-                    commentaryTab === tab
-                      ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-medium"
-                      : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-                  }`}
-                >
-                  {tab}
-                </button>
-              ))}
-              {/* Close */}
-              <button
-                type="button"
-                onClick={() => setShowCommentary(false)}
-                title="Close panel"
-                className="ml-2 p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
-              >
-                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          {/* Body */}
-          <div className="p-4">
-            {commentaryTab === "edit" ? (
-              <textarea
-                value={commentary}
-                onChange={(e) => setCommentary(e.target.value)}
-                placeholder={"Add analysis or notes — Markdown or plain text\n\n## Observations\n- Market was volatile during the execution window\n\n**Bold**, *italic*, `code`, > blockquote"}
-                rows={8}
-                className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-600 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono leading-relaxed"
-                spellCheck={false}
-              />
-            ) : (
-              <div className="min-h-[120px]">
-                {commentary.trim() ? (
-                  <div
-                    className="md-body text-sm text-gray-700 dark:text-gray-300"
-                    /* Commentary is authored by the user themselves — no third-party input */
-                    dangerouslySetInnerHTML={{ __html: marked.parse(commentary, { breaks: true }) as string }}
-                  />
-                ) : (
-                  <p className="text-sm text-gray-400 italic">Nothing to preview yet — switch to Edit and start typing.</p>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Footer hint (edit tab only) */}
-          {commentaryTab === "edit" && (
-            <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-              <p className="text-[11px] text-gray-400">
-                Markdown supported ·{" "}
-                <span className="font-mono">**bold**</span> ·{" "}
-                <span className="font-mono">*italic*</span> ·{" "}
-                <span className="font-mono"># Heading</span> ·{" "}
-                <span className="font-mono">- list</span> ·{" "}
-                <span className="font-mono">&gt; blockquote</span>
-              </p>
-            </div>
-          )}
-        </div>
+        <CommentaryPanel
+          initialValue={commentary}
+          onChange={setCommentary}
+          onClose={() => setShowCommentary(false)}
+        />
       )}
 
       {/* ── Stale Bloomberg data indicator ──────────────────────────────── */}
