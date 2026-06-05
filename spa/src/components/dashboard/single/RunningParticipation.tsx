@@ -36,6 +36,33 @@ interface PartPoint {
   cumMktVol: number;
 }
 
+/**
+ * Unified chart row shared by both series so the tooltip's active payload tracks
+ * the mouse. Participation rows also carry the market `price` at their time, so
+ * hovering the participation line shows participation + market last + time
+ * together. Market-tick rows carry only `price`.
+ */
+interface ChartRow {
+  t: number;
+  price?: number;
+  pct?: number;
+  cumOurQty?: number;
+  cumMktVol?: number;
+}
+
+/** Last market price at or before time `t` (step/last semantics). */
+function priceAtTime(sortedTicks: Array<{ t: number; price: number }>, t: number): number | undefined {
+  if (sortedTicks.length === 0) return undefined;
+  let lo = 0, hi = sortedTicks.length - 1;
+  let ans: number | undefined;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (sortedTicks[mid]!.t <= t) { ans = sortedTicks[mid]!.price; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  return ans ?? sortedTicks[0]!.price;
+}
+
 const SERIES: Record<string, { label: string; color: string }> = {
   pct:   { label: "Participation %",    color: "#f97316" },
   price: { label: "Market Last (BBG)",  color: "#94a3b8" },
@@ -123,6 +150,19 @@ export function RunningParticipation({ trades, marketVolTicks, marketTicks, orde
   const rightPad = tSpan * 0.02 || 30_000;
   const xDomain: [number, number] = [tMin - leftPad, tMax + rightPad];
 
+  // Single, time-sorted data array shared by both series. Participation rows
+  // carry the interpolated market last so the tooltip can show price + time too.
+  const sortedTicks = [...(marketTicks ?? [])].sort((a, b) => a.t - b.t);
+  const chartRows: ChartRow[] = [
+    ...sortedTicks.map((mt): ChartRow => ({ t: mt.t, price: mt.price })),
+    ...partData.map((d): ChartRow => {
+      const price = priceAtTime(sortedTicks, d.t);
+      return price !== undefined
+        ? { t: d.t, pct: d.pct, cumOurQty: d.cumOurQty, cumMktVol: d.cumMktVol, price }
+        : { t: d.t, pct: d.pct, cumOurQty: d.cumOurQty, cumMktVol: d.cumMktVol };
+    }),
+  ].sort((a, b) => a.t - b.t);
+
   return (
     <ChartCard
       id="so-chart-participation"
@@ -134,8 +174,8 @@ export function RunningParticipation({ trades, marketVolTicks, marketTicks, orde
       }
     >
       <ResponsiveContainer width="100%" height={260}>
-        {/* chart data = market price ticks (for the price Line); part line uses own data prop */}
-        <ComposedChart data={marketTicks ?? []} margin={{ top: 8, right: 56, bottom: 8, left: 8 }}>
+        {/* Both series read from one unified, time-sorted array (chartRows). */}
+        <ComposedChart data={chartRows} margin={{ top: 8, right: 56, bottom: 8, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
 
           <XAxis
@@ -175,7 +215,7 @@ export function RunningParticipation({ trades, marketVolTicks, marketTicks, orde
             />
           )}
 
-          {/* Market last price line — uses chart-level data */}
+          {/* Market last price line */}
           {hasPrice && (
             <Line
               yAxisId="price"
@@ -183,20 +223,22 @@ export function RunningParticipation({ trades, marketVolTicks, marketTicks, orde
               stroke="#cbd5e1" strokeWidth={1.5}
               dot={false} activeDot={false}
               isAnimationActive={false}
+              connectNulls
               hide={hidden.has("price")}
               name="price"
             />
           )}
 
-          {/* Participation % line — own data, step-after */}
+          {/* Participation % line — step-after */}
           <Line
             yAxisId="pct"
-            data={partData} dataKey="pct"
+            dataKey="pct"
             stroke="#f97316" strokeWidth={2}
             type="stepAfter"
             dot={{ r: 3.5, fill: "#f97316", stroke: "white", strokeWidth: 1.5 }}
             activeDot={{ r: 6, fill: "#f97316", stroke: "white", strokeWidth: 2 }}
             isAnimationActive={false}
+            connectNulls
             hide={hidden.has("pct")}
             name="pct"
           />
@@ -224,41 +266,34 @@ export function RunningParticipation({ trades, marketVolTicks, marketTicks, orde
           <Tooltip
             cursor={{ strokeDasharray: "3 3", stroke: "#94a3b8" }}
             content={({ payload }) => {
-              if (!payload || payload.length === 0) return null;
+              // Both series share one data array — read the single active row.
+              const d = payload?.[0]?.payload as ChartRow | undefined;
+              if (!d) return null;
 
-              // Prefer participation entry (has cumOurQty)
-              const partEntry = payload.find(
-                (p) => (p.payload as Record<string, unknown>)?.cumOurQty !== undefined,
-              );
-              const priceEntry = payload.find((p) => p.dataKey === "price");
-
-              if (!partEntry && !priceEntry) return null;
+              const showPct = d.pct !== undefined && !hidden.has("pct");
+              const showPx  = d.price !== undefined && !hidden.has("price");
+              if (!showPct && !showPx) return null;
 
               return (
                 <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs space-y-0.5">
-                  {partEntry && (() => {
-                    const d = partEntry.payload as PartPoint;
-                    return (
-                      <>
-                        <p className="text-gray-500 dark:text-gray-400 font-mono mb-1">{fmtUtc(d.t)}</p>
-                        <p className="text-orange-600 dark:text-orange-400">
-                          Part: <span className="font-semibold tabular-nums">{d.pct.toFixed(3)}%</span>
-                        </p>
-                        <p className="text-gray-600 dark:text-gray-300">
-                          Our qty: <span className="tabular-nums">{d.cumOurQty.toLocaleString()}</span>
-                        </p>
-                        <p className="text-gray-600 dark:text-gray-300">
-                          Mkt vol: <span className="tabular-nums">{d.cumMktVol.toLocaleString()}</span>
-                        </p>
-                      </>
-                    );
-                  })()}
-                  {priceEntry && !hidden.has("price") && (
+                  <p className="text-gray-500 dark:text-gray-400 font-mono mb-1">{fmtUtc(d.t)}</p>
+                  {showPct && (
+                    <>
+                      <p className="text-orange-600 dark:text-orange-400">
+                        Part: <span className="font-semibold tabular-nums">{d.pct!.toFixed(3)}%</span>
+                      </p>
+                      <p className="text-gray-600 dark:text-gray-300">
+                        Our qty: <span className="tabular-nums">{(d.cumOurQty ?? 0).toLocaleString()}</span>
+                      </p>
+                      <p className="text-gray-600 dark:text-gray-300">
+                        Mkt vol: <span className="tabular-nums">{(d.cumMktVol ?? 0).toLocaleString()}</span>
+                      </p>
+                    </>
+                  )}
+                  {showPx && (
                     <p className="text-gray-500 dark:text-gray-400">
-                      Last:{" "}
-                      <span className="font-semibold tabular-nums">
-                        {(priceEntry.value as number).toFixed(4)}
-                      </span>
+                      Market Last:{" "}
+                      <span className="font-semibold tabular-nums">{d.price!.toFixed(4)}</span>
                     </p>
                   )}
                 </div>

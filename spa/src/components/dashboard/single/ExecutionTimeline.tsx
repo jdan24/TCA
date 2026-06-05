@@ -41,6 +41,20 @@ interface FillPoint {
   label: string;
 }
 
+/**
+ * Unified chart row. Market-tick rows carry `price`; fill rows carry
+ * `fillPrice`/`qty`/`label`. Both series read from one sorted array so the
+ * tooltip's active payload tracks the mouse (Recharts cannot reliably build a
+ * shared tooltip across two separate `data` arrays).
+ */
+interface ChartRow {
+  t: number;
+  price?: number;
+  fillPrice?: number;
+  qty?: number;
+  label?: string;
+}
+
 function fmtTime(ms: number): string {
   const d = new Date(ms);
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -122,6 +136,12 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime
   const rightPad = tSpan * 0.02 || 30_000;
   const xDomain: [number, number] = [tMin - leftPad, tMax + rightPad];
 
+  // Single, time-sorted data array shared by both series (see ChartRow).
+  const chartRows: ChartRow[] = [
+    ...(marketTicks ?? []).map((mt): ChartRow => ({ t: mt.t, price: mt.price })),
+    ...fillPoints.map((fp): ChartRow => ({ t: fp.t, fillPrice: fp.fillPrice, qty: fp.qty, label: fp.label })),
+  ].sort((a, b) => a.t - b.t);
+
   const subtitle = hasMarket
     ? "Fill prices vs market last (BBG)"
     : `Fill price vs time — ${side} · fetch Bloomberg to add market line`;
@@ -143,7 +163,7 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime
   return (
     <ChartCard id="so-chart-timeline" title="Execution Timeline" subtitle={subtitle}>
       <ResponsiveContainer width="100%" height={260}>
-        <ComposedChart data={marketTicks ?? []} margin={{ top: 8, right: 20, bottom: 8, left: 8 }}>
+        <ComposedChart data={chartRows} margin={{ top: 8, right: 20, bottom: 8, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
           <XAxis
             dataKey="t" type="number" domain={xDomain}
@@ -170,17 +190,19 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime
             <Line
               dataKey="price" stroke="#cbd5e1" strokeWidth={1.5}
               dot={false} activeDot={false} isAnimationActive={false}
+              connectNulls
               hide={hidden.has("price")}
               name="price"
             />
           )}
 
           <Line
-            data={fillPoints} dataKey="fillPrice"
+            dataKey="fillPrice"
             stroke="transparent" strokeWidth={0}
             dot={renderFillDot}
             activeDot={{ r: 9, fill: fillColor, stroke: "white", strokeWidth: 2 }}
             isAnimationActive={false}
+            connectNulls={false}
             hide={hidden.has("fillPrice")}
             name="fillPrice"
           />
@@ -208,12 +230,13 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime
           <Tooltip
             cursor={{ strokeDasharray: "3 3", stroke: "#94a3b8" }}
             content={({ payload }) => {
-              if (!payload || payload.length === 0) return null;
-              const fillEntry = payload.find(
-                (p) => (p.payload as Record<string, unknown>)?.label !== undefined,
-              );
-              if (fillEntry) {
-                const d = fillEntry.payload as FillPoint;
+              // Both series share one data array, so every payload entry points at
+              // the same active row — read it once.
+              const d = payload?.[0]?.payload as ChartRow | undefined;
+              if (!d) return null;
+
+              // Fill row (hovering a fill dot).
+              if (d.fillPrice !== undefined && d.label !== undefined) {
                 return (
                   <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
                     <p className="font-mono text-gray-400 dark:text-gray-500 mb-1">{d.label}</p>
@@ -221,21 +244,24 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime
                       Fill: <span className="font-semibold tabular-nums">{fmtPrice(d.fillPrice)}</span>
                     </p>
                     <p className="text-gray-800 dark:text-gray-200">
-                      Qty: <span className="font-semibold tabular-nums">{d.qty.toLocaleString()}</span>
+                      Qty: <span className="font-semibold tabular-nums">{(d.qty ?? 0).toLocaleString()}</span>
                     </p>
                     <p className="text-gray-500 dark:text-gray-400 font-mono mt-0.5">{fmtTime(d.t)}</p>
                   </div>
                 );
               }
-              const mkt = payload[0]?.payload as { t: number; price: number } | undefined;
-              if (!mkt?.price) return null;
-              return (
-                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
-                  <p className="text-gray-400 dark:text-gray-500 mb-0.5">Market Last</p>
-                  <p className="text-gray-800 dark:text-gray-200 font-semibold tabular-nums">{fmtPrice(mkt.price as number)}</p>
-                  <p className="text-gray-500 dark:text-gray-400 font-mono">{fmtTime(mkt.t as number)}</p>
-                </div>
-              );
+
+              // Market-tick row.
+              if (d.price !== undefined) {
+                return (
+                  <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
+                    <p className="text-gray-400 dark:text-gray-500 mb-0.5">Market Last</p>
+                    <p className="text-gray-800 dark:text-gray-200 font-semibold tabular-nums">{fmtPrice(d.price)}</p>
+                    <p className="text-gray-500 dark:text-gray-400 font-mono">{fmtTime(d.t)}</p>
+                  </div>
+                );
+              }
+              return null;
             }}
           />
         </ComposedChart>
