@@ -5,11 +5,19 @@
  * service to translate RIC codes to Bloomberg "ticker yellowKey" format
  * before making API calls.
  *
+ * The mappings live in a single module-level store shared by every
+ * useSymbolMap() caller (via useSyncExternalStore). This matters because the
+ * mapping modal and App's Bloomberg fetch are different component instances:
+ * with per-instance useState, a change made in the modal was invisible to the
+ * fetch, so the API kept resolving the original (unmapped) symbol. The shared
+ * store guarantees every consumer — including the resolver used at fetch time —
+ * sees the latest mappings.
+ *
  * Storage key: "tca_symbol_map_v1"
  * Format:      JSON array of SymbolMapping objects
  */
 
-import { useState, useCallback } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import type { SymbolMapping } from "@/types";
 
 const STORAGE_KEY = "tca_symbol_map_v1";
@@ -25,12 +33,45 @@ function load(): SymbolMapping[] {
   }
 }
 
-function save(mappings: SymbolMapping[]): void {
+// ── Shared module-level store ─────────────────────────────────────────────────
+
+let store: SymbolMapping[] = load();
+const listeners = new Set<() => void>();
+
+function emit(): void {
+  for (const l of listeners) l();
+}
+
+/** Write the new mappings to localStorage and notify all subscribers. */
+function persist(next: SymbolMapping[]): void {
+  store = next;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(mappings));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   } catch {
     // localStorage may be full or unavailable (private browsing); ignore
   }
+  emit();
+}
+
+function subscribe(cb: () => void): () => void {
+  listeners.add(cb);
+  return () => {
+    listeners.delete(cb);
+  };
+}
+
+function getSnapshot(): SymbolMapping[] {
+  return store;
+}
+
+// Keep multiple browser tabs/windows in sync.
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key === STORAGE_KEY) {
+      store = load();
+      emit();
+    }
+  });
 }
 
 export interface UseSymbolMapReturn {
@@ -50,33 +91,21 @@ export interface UseSymbolMapReturn {
 }
 
 export function useSymbolMap(): UseSymbolMapReturn {
-  const [mappings, setMappings] = useState<SymbolMapping[]>(load);
+  const mappings = useSyncExternalStore(subscribe, getSnapshot);
 
-  const persist = useCallback((next: SymbolMapping[]) => {
-    save(next);
-    setMappings(next);
+  // All mutators read from the module-level `store` (always current), so they
+  // are stable across renders and never operate on a stale snapshot.
+  const addMapping = useCallback((m: SymbolMapping) => {
+    persist([...store.filter((x) => x.ric !== m.ric), m]);
   }, []);
 
-  const addMapping = useCallback(
-    (m: SymbolMapping) => {
-      persist([...mappings.filter((x) => x.ric !== m.ric), m]);
-    },
-    [mappings, persist],
-  );
+  const updateMapping = useCallback((ric: string, patch: Partial<SymbolMapping>) => {
+    persist(store.map((m) => (m.ric === ric ? { ...m, ...patch } : m)));
+  }, []);
 
-  const updateMapping = useCallback(
-    (ric: string, patch: Partial<SymbolMapping>) => {
-      persist(mappings.map((m) => (m.ric === ric ? { ...m, ...patch } : m)));
-    },
-    [mappings, persist],
-  );
-
-  const deleteMapping = useCallback(
-    (ric: string) => {
-      persist(mappings.filter((m) => m.ric !== ric));
-    },
-    [mappings, persist],
-  );
+  const deleteMapping = useCallback((ric: string) => {
+    persist(store.filter((m) => m.ric !== ric));
+  }, []);
 
   const importMappings = useCallback(
     (incoming: SymbolMapping[], strategy: "replace" | "merge"): number => {
@@ -90,19 +119,21 @@ export function useSymbolMap(): UseSymbolMapReturn {
       } else {
         // Additive: start from existing, then overlay imported rows (CSV wins).
         const merged = new Map<string, SymbolMapping>();
-        for (const m of mappings) merged.set(m.ric, m);
+        for (const m of store) merged.set(m.ric, m);
         for (const [ric, m] of incomingByRic) merged.set(ric, m);
         next = [...merged.values()];
       }
       persist(next);
       return next.length;
     },
-    [mappings, persist],
+    [],
   );
 
+  // Reads `store` directly so it is always current; `mappings` is in the dep
+  // list so memoised consumers re-run when the mappings change.
   const resolve = useCallback(
     (ric: string): string => {
-      const m = mappings.find((x) => x.ric === ric);
+      const m = store.find((x) => x.ric === ric);
       if (!m) return ric;
       const ticker = m.bbgTicker.trim();
       const key = m.bbgYellowKey.trim();
