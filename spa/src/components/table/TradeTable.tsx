@@ -637,6 +637,12 @@ interface TradeTableProps {
   resolveSymbol?: (ric: string) => string;
   /** When true, shows an Excel export button in the toolbar. */
   showExcelExport?: boolean;
+  /**
+   * When provided, a trash icon appears on each row.  Clicking it prompts an
+   * inline confirmation; confirming calls this callback with the order ID so
+   * the parent can remove all fills for that order from its state.
+   */
+  onDeleteOrder?: (orderId: string) => void;
 }
 
 const PAGE_SIZES = [10, 25, 50] as const;
@@ -655,7 +661,7 @@ const METRIC_COLUMN_IDS = new Set([
   "arrivalPrice", "algo",
 ]);
 
-export function TradeTable({ trades, results, title = "Trade Detail", hideMetrics = false, resolveSymbol, showExcelExport = false }: TradeTableProps) {
+export function TradeTable({ trades, results, title = "Trade Detail", hideMetrics = false, resolveSymbol, showExcelExport = false, onDeleteOrder }: TradeTableProps) {
   const aggregationFilter = useTCAStore((s) => s.aggregationFilter);
   const setAggregationFilter = useTCAStore((s) => s.setAggregationFilter);
   const rawTrades   = useTCAStore((s) => s.rawTrades);
@@ -729,7 +735,30 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
     // New column order:
     //   Order Time · Symbol · Side · Qty · Fill Price · Arrival Price
     //   · Algo · [benchmarks + metrics]
-    //   · First Fill · Last Fill · Order ID
+    //   · First Fill · Last Fill · Order ID · [delete — only in multi-order mode]
+    // Trash-icon column — only rendered when the parent supplies onDeleteOrder.
+    // enableHiding: false keeps it out of the Columns visibility toggle.
+    const deleteCol = onDeleteOrder
+      ? [col.display({
+          id: "_delete",
+          header: "",
+          enableHiding: false,
+          enableSorting: false,
+          size: 36,
+          cell: ({ row }) => (
+            <button
+              type="button"
+              title="Remove this order"
+              onClick={() => setPendingDeleteId(row.original.orderId)}
+              className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-all focus:opacity-100"
+              aria-label="Delete order"
+            >
+              <TrashIcon />
+            </button>
+          ),
+        })]
+      : [];
+
     return [
       editOrderTime,
       symbolCol,
@@ -739,8 +768,9 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
       FIRST_FILL_COL,
       editLastFill,
       PRE_TIME_COLS_NO_SYMBOL[0]!,         // Order ID — last
+      ...deleteCol,
     ];
-  }, [handleTimeEdit, handleAlgoEdit, resolveSymbol]);
+  }, [handleTimeEdit, handleAlgoEdit, resolveSymbol, onDeleteOrder]);
 
   // Pre-filter rows by aggregation selection
   const filteredIds = useMemo(
@@ -753,6 +783,9 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
     () => (filteredIds ? allData.filter((r) => filteredIds.has(r.orderId)) : allData),
     [allData, filteredIds],
   );
+
+  /** orderId of the row currently showing the inline delete confirmation. */
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const [sorting, setSorting] = useState<SortingState>([
     { id: "orderTime", desc: true },
@@ -949,24 +982,64 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
           </thead>
 
           <tbody>
-            {table.getRowModel().rows.map((row, i) => (
-              <tr
-                key={row.id}
-                className={[
-                  "border-b border-gray-50 dark:border-gray-800/50 transition-colors",
-                  i % 2 === 0
-                    ? "bg-white dark:bg-gray-900"
-                    : "bg-gray-50/40 dark:bg-gray-800/20",
-                  "hover:bg-blue-50/50 dark:hover:bg-blue-900/10",
-                ].join(" ")}
-              >
-                {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id} className="px-3 py-2 whitespace-nowrap">
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {table.getRowModel().rows.map((row, i) => {
+              const isPending = pendingDeleteId === row.original.orderId;
+              return (
+                <tr
+                  key={row.id}
+                  className={[
+                    "group border-b border-gray-50 dark:border-gray-800/50 transition-colors",
+                    isPending
+                      ? "bg-red-50 dark:bg-red-900/10"
+                      : i % 2 === 0
+                        ? "bg-white dark:bg-gray-900"
+                        : "bg-gray-50/40 dark:bg-gray-800/20",
+                    !isPending && "hover:bg-blue-50/50 dark:hover:bg-blue-900/10",
+                  ].filter(Boolean).join(" ")}
+                >
+                  {isPending ? (
+                    /* ── Inline delete confirmation ─────────────────────────── */
+                    <td colSpan={row.getVisibleCells().length} className="px-4 py-2.5">
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="text-xs text-red-600 dark:text-red-400 font-medium">
+                          Remove all fills for order{" "}
+                          <span className="font-mono">{row.original.orderId}</span>?
+                        </span>
+                        <span className="text-xs text-gray-400 dark:text-gray-500 hidden sm:inline">
+                          All metrics and charts will update.
+                        </span>
+                        <div className="flex items-center gap-2 ml-auto">
+                          <button
+                            type="button"
+                            onClick={() => setPendingDeleteId(null)}
+                            className="px-3 py-1 text-xs rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onDeleteOrder!(row.original.orderId);
+                              setPendingDeleteId(null);
+                            }}
+                            className="px-3 py-1 text-xs rounded-lg bg-red-500 hover:bg-red-600 text-white font-medium transition-colors"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+                  ) : (
+                    /* ── Normal row ─────────────────────────────────────────── */
+                    row.getVisibleCells().map((cell) => (
+                      <td key={cell.id} className="px-3 py-2 whitespace-nowrap">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </td>
+                    ))
+                  )}
+                </tr>
+              );
+            })}
 
             {table.getRowModel().rows.length === 0 && (
               <tr>
@@ -1025,5 +1098,14 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
         </div>
       </div>
     </div>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
   );
 }

@@ -55,8 +55,20 @@ export function Dashboard({
   // ── Dataset filter (local view state; resets when Dashboard unmounts) ────────
   const [filter, setFilter] = useState<DataFilter>(EMPTY_FILTER);
 
+  // ── Manually deleted order IDs (session-only) ────────────────────────────────
+  const [deletedOrderIds, setDeletedOrderIds] = useState<Set<string>>(new Set());
+
+  function handleDeleteOrder(orderId: string) {
+    setDeletedOrderIds((prev) => {
+      const next = new Set(prev);
+      next.add(orderId);
+      return next;
+    });
+  }
+
   const filteredTrades = useMemo(() => {
     return trades.filter((t) => {
+      if (deletedOrderIds.has(t.orderId)) return false;
       if (filter.symbol && t.symbol !== filter.symbol) return false;
       if (filter.accountId && t.accountId !== filter.accountId) return false;
       if (filter.accountDescription && t.accountDescription !== filter.accountDescription)
@@ -67,7 +79,7 @@ export function Dashboard({
       if (filter.dateTo && d > filter.dateTo) return false;
       return true;
     });
-  }, [trades, filter]);
+  }, [trades, filter, deletedOrderIds]);
 
   const filteredResultSet = useMemo(
     () => new Set(filteredTrades.map((t) => t.orderId)),
@@ -104,7 +116,7 @@ export function Dashboard({
         <div className="flex items-center gap-2 text-sm">
           <span className="font-semibold text-gray-900 dark:text-white">
             {filteredTrades.length.toLocaleString()}
-            {isFiltered && (
+            {(isFiltered || deletedOrderIds.size > 0) && (
               <span className="font-normal text-gray-400 dark:text-gray-500">
                 {" "}of {trades.length.toLocaleString()}
               </span>
@@ -114,6 +126,19 @@ export function Dashboard({
           {enrichedCount > 0 && (
             <span className="text-gray-400 dark:text-gray-500">
               · {enrichedCount} enriched with Bloomberg
+            </span>
+          )}
+          {deletedOrderIds.size > 0 && (
+            <span className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500">
+              · {deletedOrderIds.size} order{deletedOrderIds.size !== 1 ? "s" : ""} removed
+              <button
+                type="button"
+                onClick={() => setDeletedOrderIds(new Set())}
+                className="text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 transition-colors underline-offset-2 hover:underline"
+                title="Restore all removed orders"
+              >
+                Restore all
+              </button>
             </span>
           )}
         </div>
@@ -176,7 +201,12 @@ export function Dashboard({
       <SummaryCards results={filteredResults} trades={filteredTrades} />
 
       {/* ── Order detail table (full width) ──────────────────────────────── */}
-      <TradeTable trades={filteredTrades} results={filteredResults} title="Order Detail" />
+      <TradeTable
+        trades={filteredTrades}
+        results={filteredResults}
+        title="Order Detail"
+        onDeleteOrder={handleDeleteOrder}
+      />
 
       {/* ── Scatter charts (2-col) ───────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
