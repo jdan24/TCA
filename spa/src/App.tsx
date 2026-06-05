@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { enrichAllTrades, enrichSingleOrder, type EnrichProgress } from "@/bloomberg/enrichmentService";
 import { Header } from "@/components/layout/Header";
+import { SymbolRefreshBanner } from "@/components/layout/SymbolRefreshBanner";
 import { FileDropZone } from "@/components/upload/FileDropZone";
 import { ImportWizardMulti } from "@/components/upload/ImportWizardMulti";
 import { ModeSelector } from "@/components/upload/ModeSelector";
@@ -21,6 +22,8 @@ function App() {
   const setResults = useTCAStore((s) => s.setResults);
   const setAllEnrichment        = useTCAStore((s) => s.setAllEnrichment);
   const setSingleOrderFetchWindow = useTCAStore((s) => s.setSingleOrderFetchWindow);
+  const symbolMapDirty = useTCAStore((s) => s.symbolMapDirty);
+  const setSymbolMapDirty = useTCAStore((s) => s.setSymbolMapDirty);
   const reset = useTCAStore((s) => s.reset);
 
   const symbolMap = useSymbolMap();
@@ -63,6 +66,8 @@ function App() {
         ?? new Date(Math.max(...rawTrades.map((t) => t.lastFillTime.getTime())));
       setSingleOrderFetchWindow({ start: fetchStart, end: fetchEnd });
     }
+    // Data now reflects the current mappings — clear the refresh prompt.
+    setSymbolMapDirty(false);
     setEnrichProgress(null);
   }
 
@@ -80,6 +85,17 @@ function App() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
       <Header />
+
+      {/* ── Refresh prompt after symbol mappings change ───────────────────── */}
+      {symbolMapDirty && rawTrades.length > 0 && wizardTrades === null && (
+        <SymbolRefreshBanner
+          onRefresh={() => { void handleFetchBloomberg(); }}
+          onDismiss={() => setSymbolMapDirty(false)}
+          disabled={!bloombergConnected || enrichProgress !== null}
+          busy={enrichProgress !== null}
+          notConnected={!bloombergConnected}
+        />
+      )}
 
       {/* ── Import wizard (multi-order mode only) ─────────────────────────── */}
       {wizardTrades !== null ? (

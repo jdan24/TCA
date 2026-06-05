@@ -38,6 +38,13 @@ export interface UseSymbolMapReturn {
   addMapping: (m: SymbolMapping) => void;
   updateMapping: (ric: string, patch: Partial<SymbolMapping>) => void;
   deleteMapping: (ric: string) => void;
+  /**
+   * Bulk-import mappings from a CSV.
+   *  - "replace": discard the current table and keep only the imported rows.
+   *  - "merge":   keep existing rows; imported rows win on RIC conflicts (additive).
+   * Returns the resulting row count.
+   */
+  importMappings: (incoming: SymbolMapping[], strategy: "replace" | "merge") => number;
   /** Translate a RIC to "bbgTicker bbgYellowKey", or return the raw value if unmapped. */
   resolve: (ric: string) => string;
 }
@@ -71,6 +78,28 @@ export function useSymbolMap(): UseSymbolMapReturn {
     [mappings, persist],
   );
 
+  const importMappings = useCallback(
+    (incoming: SymbolMapping[], strategy: "replace" | "merge"): number => {
+      // Dedupe the incoming rows by RIC (last occurrence wins).
+      const incomingByRic = new Map<string, SymbolMapping>();
+      for (const m of incoming) incomingByRic.set(m.ric, m);
+
+      let next: SymbolMapping[];
+      if (strategy === "replace") {
+        next = [...incomingByRic.values()];
+      } else {
+        // Additive: start from existing, then overlay imported rows (CSV wins).
+        const merged = new Map<string, SymbolMapping>();
+        for (const m of mappings) merged.set(m.ric, m);
+        for (const [ric, m] of incomingByRic) merged.set(ric, m);
+        next = [...merged.values()];
+      }
+      persist(next);
+      return next.length;
+    },
+    [mappings, persist],
+  );
+
   const resolve = useCallback(
     (ric: string): string => {
       const m = mappings.find((x) => x.ric === ric);
@@ -82,5 +111,5 @@ export function useSymbolMap(): UseSymbolMapReturn {
     [mappings],
   );
 
-  return { mappings, addMapping, updateMapping, deleteMapping, resolve };
+  return { mappings, addMapping, updateMapping, deleteMapping, importMappings, resolve };
 }

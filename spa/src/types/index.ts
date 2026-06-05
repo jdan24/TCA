@@ -222,6 +222,9 @@ export interface TCAStore {
   /** Multiplier applied to every fill price from the file before comparing with Bloomberg prices.
    *  null = 1 (no scaling). Use 0.01 if file prices are 100× Bloomberg, 100 for the reverse. */
   singleOrderPriceScale: number | null;
+  /** True when symbol mappings changed since the last Bloomberg fetch — drives the
+   *  "refresh data to pick up new mappings" banner on the dashboard. */
+  symbolMapDirty: boolean;
   setMode: (m: TCAMode) => void;
   setRawTrades: (trades: TradeRecord[]) => void;
   setResults: (results: TCAResult[]) => void;
@@ -236,6 +239,7 @@ export interface TCAStore {
   setSingleOrderFetchWindow: (v: { start: Date; end: Date } | null) => void;
   setSingleOrderBbgSymbol: (v: string | null) => void;
   setSingleOrderPriceScale: (v: number | null) => void;
+  setSymbolMapDirty: (v: boolean) => void;
   reset: () => void;
 }
 

@@ -21,6 +21,7 @@ const initialState = {
   singleOrderFetchWindow:  null as { start: Date; end: Date } | null,
   singleOrderBbgSymbol: null as string | null,
   singleOrderPriceScale: null as number | null,
+  symbolMapDirty: false,
 };
 
 export const useTCAStore = create<TCAStore>((set) => ({
@@ -39,5 +40,6 @@ export const useTCAStore = create<TCAStore>((set) => ({
   setSingleOrderFetchWindow:  (v) => set({ singleOrderFetchWindow: v }),
   setSingleOrderBbgSymbol: (v) => set({ singleOrderBbgSymbol: v }),
   setSingleOrderPriceScale: (v) => set({ singleOrderPriceScale: v }),
+  setSymbolMapDirty: (v) => set({ symbolMapDirty: v }),
   reset: () => set(initialState),
 }));
