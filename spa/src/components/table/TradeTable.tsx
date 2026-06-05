@@ -556,7 +556,7 @@ const POST_TIME_COLS = [
     enableGlobalFilter: false,
   }),
   col.accessor("vol_during_order_bps", {
-    header: "1σ Vol (bps)",
+    header: () => <>1<span className="normal-case">σ</span> Vol (bps)</>,
     cell: (i) => <BpsCell value={i.getValue()} neutral />,
     sortingFn: nullableSort,
     enableGlobalFilter: false,
@@ -605,7 +605,7 @@ const POST_TIME_COLS = [
     enableGlobalFilter: false,
   }),
   col.accessor("vol_during_order_price", {
-    header: "1σ Vol (price)",
+    header: () => <>1<span className="normal-case">σ</span> Vol (price)</>,
     cell: (i) => {
       const v = i.getValue();
       return v !== null ? (
