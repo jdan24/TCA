@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { marked } from "marked";
 import type { ParentOrderSummary } from "@/types";
 import { useCorporateTemplate } from "@/hooks/useCorporateTemplate";
 import { ParentSummaryCard } from "@/components/dashboard/single/ParentSummaryCard";
@@ -27,9 +28,11 @@ interface PrintLayoutProps {
   highlightedBenchmark?: "arrival" | "vwap" | "twap" | null;
   /** Manual Order ID override carried from the live dashboard into the print view. */
   brokerOrderId?: string | null | undefined;
+  /** Optional analyst commentary (Markdown). When present, charts are pushed to their own page. */
+  commentary?: string;
 }
 
-export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlightedBenchmark = null, brokerOrderId }: PrintLayoutProps) {
+export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlightedBenchmark = null, brokerOrderId, commentary }: PrintLayoutProps) {
   const { logoDataUrl, disclaimerText, reportTitle, setLogo, setDisclaimer, setTitle } = useCorporateTemplate();
   const [showBranding, setShowBranding] = useState(false);
   const brandingRef  = useRef<HTMLDivElement>(null);
@@ -278,15 +281,55 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
             />
           </div>
 
-          {/* ── TWAP then VWAP — each chart in its own avoid-break wrapper ─ */}
-          <div className="mt-4 print:mt-3 flex flex-col gap-4 print:gap-3">
-            {page1Charts.map(([src, alt], i) => (
-              <div key={i} className="break-inside-avoid bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-                <ChartCell src={src} alt={alt} />
-              </div>
-            ))}
-          </div>
+          {/* ── Commentary — after summary, before charts ─────────────────── */}
+          {commentary?.trim() && (
+            <div className="mt-4 print:mt-3 break-inside-avoid rounded-xl border border-gray-200 p-5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-3">
+                Commentary
+              </p>
+              {/* Commentary is analyst-authored — dangerouslySetInnerHTML is safe here */}
+              <div
+                className="md-body text-sm text-gray-700"
+                dangerouslySetInnerHTML={{ __html: marked.parse(commentary, { breaks: true }) as string }}
+              />
+            </div>
+          )}
+
+          {/* ── TWAP + VWAP: same page as summary when no commentary; ────── */}
+          {/* forced to new page when commentary is present.               */}
+          {!commentary?.trim() && (
+            <div className="mt-4 print:mt-3 flex flex-col gap-4 print:gap-3">
+              {page1Charts.map(([src, alt], i) => (
+                <div key={i} className="break-inside-avoid bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                  <ChartCell src={src} alt={alt} />
+                </div>
+              ))}
+            </div>
+          )}
         </section>
+
+        {/* ── When commentary is present: TWAP + VWAP on their own page ────── */}
+        {commentary?.trim() && (
+          <>
+            <div className="print:hidden my-8 flex items-center gap-3 text-xs text-gray-400 select-none">
+              <div className="flex-1 border-t border-dashed border-gray-300" />
+              <span>page break</span>
+              <div className="flex-1 border-t border-dashed border-gray-300" />
+            </div>
+            <section className="break-before-page">
+              <p className="text-xs text-gray-400 mb-3 print:mb-2">
+                {summary.symbol}&nbsp;&nbsp;{summary.side}&nbsp;&middot;&nbsp;Price Benchmarks
+              </p>
+              <div className="flex flex-col gap-4 print:gap-3">
+                {page1Charts.map(([src, alt], i) => (
+                  <div key={i} className="break-inside-avoid bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+                    <ChartCell src={src} alt={alt} />
+                  </div>
+                ))}
+              </div>
+            </section>
+          </>
+        )}
 
         {/* ── Page break indicator (screen only) ───────────────────────────── */}
         <div className="print:hidden my-8 flex items-center gap-3 text-xs text-gray-400 select-none">
@@ -296,9 +339,10 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
         </div>
 
         {/*
-          PAGE 2: Execution Timeline + Running Participation (+ VWAP profile)
+          PAGE 2 (or 3 when commentary present):
+          Execution Timeline + Running Participation (+ VWAP profile).
           break-before-page forces a new page here regardless of where
-          the page 1 content ended.  Each chart card has break-inside-avoid
+          the previous content ended.  Each chart card has break-inside-avoid
           so it is never split at the paper edge.
         */}
         <section className="break-before-page">

@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { marked } from "marked";
 import type { EnrichProgress } from "@/bloomberg/enrichmentService";
 import type { BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
 import { computeParentOrderSummary } from "@/tca/compute";
@@ -62,6 +63,11 @@ export function SingleOrderDashboard({
   const [selectedAlgo, setSelectedAlgo] = useState<AlgoOption | null>(null);
   const [printCharts, setPrintCharts]   = useState<ChartImages | null>(null);
   const [printHighlight, setPrintHighlight] = useState<"arrival" | "vwap" | "twap" | null>(null);
+
+  // Commentary state — session-only (clears on file reload)
+  const [commentary, setCommentary]         = useState<string>("");
+  const [showCommentary, setShowCommentary] = useState(false);
+  const [commentaryTab, setCommentaryTab]   = useState<"edit" | "preview">("edit");
   /** Manual override for the broker/exchange order ID (FIX tag 37). */
   const [brokerOrderIdOverride, setBrokerOrderIdOverride] = useState<string | null | undefined>(undefined);
   const symbolMap = useSymbolMap();
@@ -252,6 +258,7 @@ export function SingleOrderDashboard({
         charts={printCharts}
         highlightedBenchmark={printHighlight}
         brokerOrderId={brokerOrderIdOverride}
+        {...(commentary.trim() ? { commentary } : {})}
         onBack={() => setPrintCharts(null)}
         resolveSymbol={resolveSymbol}
       />
@@ -310,6 +317,25 @@ export function SingleOrderDashboard({
                   }}
                   hideExcel
                 />
+
+          {/* Commentary toggle button */}
+          <button
+            type="button"
+            onClick={() => setShowCommentary((v) => !v)}
+            title={showCommentary ? "Hide commentary" : "Add commentary to print layout"}
+            className={`relative flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+              showCommentary
+                ? "border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
+                : "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+            }`}
+          >
+            <CommentaryIcon />
+            Commentary
+            {/* Dot indicator when there's content but the panel is closed */}
+            {!showCommentary && commentary.trim() && (
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-500 border border-white dark:border-gray-900" />
+            )}
+          </button>
 
           <button
             type="button"
@@ -544,6 +570,89 @@ export function SingleOrderDashboard({
         />
       )}
 
+      {/* ── Commentary panel ────────────────────────────────────────────── */}
+      {showCommentary && (
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+          {/* Header row */}
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 dark:border-gray-800">
+            <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+              Commentary
+              <span className="ml-1.5 text-[10px] font-normal text-gray-400">
+                · appears in Print Layout
+              </span>
+            </span>
+            <div className="flex items-center gap-0.5">
+              {/* Edit / Preview tabs */}
+              {(["edit", "preview"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setCommentaryTab(tab)}
+                  className={`px-3 py-1 text-xs rounded-md capitalize transition-colors ${
+                    commentaryTab === tab
+                      ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-medium"
+                      : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+              {/* Close */}
+              <button
+                type="button"
+                onClick={() => setShowCommentary(false)}
+                title="Close panel"
+                className="ml-2 p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Body */}
+          <div className="p-4">
+            {commentaryTab === "edit" ? (
+              <textarea
+                value={commentary}
+                onChange={(e) => setCommentary(e.target.value)}
+                placeholder={"Add analysis or notes — Markdown or plain text\n\n## Observations\n- Market was volatile during the execution window\n\n**Bold**, *italic*, `code`, > blockquote"}
+                rows={8}
+                className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-600 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono leading-relaxed"
+                spellCheck={false}
+              />
+            ) : (
+              <div className="min-h-[120px]">
+                {commentary.trim() ? (
+                  <div
+                    className="md-body text-sm text-gray-700 dark:text-gray-300"
+                    /* Commentary is authored by the user themselves — no third-party input */
+                    dangerouslySetInnerHTML={{ __html: marked.parse(commentary, { breaks: true }) as string }}
+                  />
+                ) : (
+                  <p className="text-sm text-gray-400 italic">Nothing to preview yet — switch to Edit and start typing.</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Footer hint (edit tab only) */}
+          {commentaryTab === "edit" && (
+            <div className="px-4 py-2 border-t border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+              <p className="text-[11px] text-gray-400">
+                Markdown supported ·{" "}
+                <span className="font-mono">**bold**</span> ·{" "}
+                <span className="font-mono">*italic*</span> ·{" "}
+                <span className="font-mono"># Heading</span> ·{" "}
+                <span className="font-mono">- list</span> ·{" "}
+                <span className="font-mono">&gt; blockquote</span>
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Stale Bloomberg data indicator ──────────────────────────────── */}
       {bbgStale && enrichedCount > 0 && !isFetching && (
         <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20 text-xs">
@@ -620,5 +729,14 @@ export function SingleOrderDashboard({
       {/* ── Fill detail table ────────────────────────────────────────────── */}
       <TradeTable trades={scaledTrades} results={results} title="Fill Detail" hideMetrics showExcelExport resolveSymbol={resolveSymbol} />
     </div>
+  );
+}
+
+function CommentaryIcon() {
+  return (
+    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+    </svg>
   );
 }
