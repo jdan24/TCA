@@ -12,11 +12,12 @@
  */
 
 import { useMemo, useState } from "react";
+import { toPng } from "html-to-image";
 import type { EnrichProgress } from "@/bloomberg/enrichmentService";
 import type { AggregationSet, DataFilter, TCAResult, TradeRecord } from "@/types";
 import { EMPTY_FILTER } from "@/types";
 import { buildAggregations } from "@/tca/aggregate";
-import { MultiOrderPrintLayout } from "@/components/export/MultiOrderPrintLayout";
+import { MultiOrderPrintLayout, type MOChartImages } from "@/components/export/MultiOrderPrintLayout";
 import { TradeTable } from "@/components/table/TradeTable";
 import { AggregationSection } from "./AggregationSection";
 import { FilterBar } from "./FilterBar";
@@ -45,7 +46,30 @@ export function Dashboard({
   onFetchBloomberg,
   onReset,
 }: DashboardProps) {
-  const [showPrintLayout, setShowPrintLayout] = useState(false);
+  const [showPrintLayout, setShowPrintLayout]     = useState(false);
+  const [capturingPrint, setCapturingPrint]       = useState(false);
+  const [printCharts,    setPrintCharts]           = useState<MOChartImages | null>(null);
+
+  async function handlePrintLayout() {
+    setCapturingPrint(true);
+    try {
+      const capture = async (id: string): Promise<string | null> => {
+        const el = document.getElementById(id);
+        if (!el) return null;
+        return toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 }).catch(() => null);
+      };
+      const [slippage, vwapDev, reversion, spread] = await Promise.all([
+        capture("mo-chart-slippage"),
+        capture("mo-chart-vwap-dev"),
+        capture("mo-chart-reversion"),
+        capture("mo-chart-spread"),
+      ]);
+      setPrintCharts({ slippage, vwapDev, reversion, spread });
+      setShowPrintLayout(true);
+    } finally {
+      setCapturingPrint(false);
+    }
+  }
   const isFetching = enrichProgress !== null;
   const pct =
     isFetching && enrichProgress.total > 0
@@ -98,12 +122,14 @@ export function Dashboard({
 
   const isFiltered = filteredTrades.length !== trades.length;
 
-  if (showPrintLayout) {
+  if (showPrintLayout && printCharts) {
     return (
       <MultiOrderPrintLayout
         trades={filteredTrades}
         results={filteredResults}
-        onBack={() => setShowPrintLayout(false)}
+        aggregations={aggregations}
+        charts={printCharts}
+        onBack={() => { setShowPrintLayout(false); setPrintCharts(null); }}
       />
     );
   }
@@ -173,15 +199,23 @@ export function Dashboard({
 
           <button
             type="button"
-            onClick={() => setShowPrintLayout(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-            title="Open print layout"
+            disabled={capturingPrint}
+            onClick={() => { void handlePrintLayout(); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-wait transition-colors"
+            title="Capture charts and open print layout"
           >
-            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
-              <path strokeLinecap="round" strokeLinejoin="round"
-                d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-            </svg>
-            Print Layout
+            {capturingPrint ? (
+              <svg className="h-3.5 w-3.5 animate-spin text-current" fill="none" viewBox="0 0 24 24" aria-hidden>
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            ) : (
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round"
+                  d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+              </svg>
+            )}
+            {capturingPrint ? "Preparing…" : "Print Layout"}
           </button>
 
           <button
@@ -210,14 +244,14 @@ export function Dashboard({
 
       {/* ── Scatter charts (2-col) ───────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <SlippageChart trades={filteredTrades} results={filteredResults} />
-        <VWAPDeviation trades={filteredTrades} results={filteredResults} />
+        <div id="mo-chart-slippage"><SlippageChart trades={filteredTrades} results={filteredResults} /></div>
+        <div id="mo-chart-vwap-dev"><VWAPDeviation trades={filteredTrades} results={filteredResults} /></div>
       </div>
 
       {/* ── Line + scatter (2-col) ───────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ReversionChart trades={filteredTrades} results={filteredResults} />
-        <SpreadScatter results={filteredResults} />
+        <div id="mo-chart-reversion"><ReversionChart trades={filteredTrades} results={filteredResults} /></div>
+        <div id="mo-chart-spread"><SpreadScatter results={filteredResults} /></div>
       </div>
 
       {/* ── Aggregation tables ───────────────────────────────────────────── */}
