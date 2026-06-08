@@ -17,8 +17,12 @@ import type { IntradayBar } from "@/types";
 
 const BRIDGE_BASE = "http://localhost:8000";
 
-/** Matches the bridge's _drain timeout (15 s). Add a small buffer. */
+/** Default fetch timeout — matches the bridge's _drain timeout (15 s) plus a small buffer. */
 const TIMEOUT_MS = 17_000;
+
+/** Extended timeout for bid-ask-ticks: bridge may take up to 45 s for tick data
+ *  plus additional time for the bar-based fallback on long windows. */
+const BID_ASK_TIMEOUT_MS = 90_000;
 
 // ── Response shapes (mirror the Python bridge) ────────────────────────────────
 
@@ -163,6 +167,7 @@ export async function fetchBidAskTicks(
     "/bid-ask-ticks",
     { security, start, end },
     [],
+    BID_ASK_TIMEOUT_MS,
   );
 }
 

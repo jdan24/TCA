@@ -661,28 +661,27 @@ def bid_ask_ticks(security: str, start: str, end: str):
     end_dt   = parse_dt(end)
     window_minutes = (end_dt - start_dt).total_seconds() / 60
 
-    # Always attempt real ticks with a 60-second timeout.
-    tick_pairs: list[dict[str, Any]] = []
-    tick_error = False
-    try:
-        raw = _get_intraday_ticks(ticker, start_dt, end_dt, ["BID", "ASK"], timeout_ms=60_000)
-        tick_pairs = _reconstruct_bid_ask_pairs(raw)
-    except HTTPException:
-        tick_error = True
-
-    if tick_pairs:
-        return tick_pairs
-
-    # Fall back to bar-based estimation when ticks timed out or when the
-    # window is long enough that the tick set would be unreliably large.
-    if tick_error or window_minutes > 90:
+    # For windows ≤ 60 min, try real BID/ASK ticks with a 45-second timeout.
+    # Longer windows produce too many ticks to transfer reliably; skip straight
+    # to bar-based estimation so the response stays fast.
+    if window_minutes <= 60:
         try:
-            bars = _get_intraday_bars(ticker, start_dt, end_dt, 1)
-            estimated = _estimate_spread_from_bars(bars)
-            if estimated:
-                return estimated
-        except Exception:
-            pass
+            raw = _get_intraday_ticks(ticker, start_dt, end_dt, ["BID", "ASK"], timeout_ms=45_000)
+            tick_pairs = _reconstruct_bid_ask_pairs(raw)
+            if tick_pairs:
+                return tick_pairs
+        except HTTPException:
+            pass  # Fall through to bar estimation
+
+    # Bar-based spread estimation — used for long windows and as fallback when
+    # ticks time out.  Returns the same {time, bid, ask} shape as real ticks.
+    try:
+        bars = _get_intraday_bars(ticker, start_dt, end_dt, 1)
+        estimated = _estimate_spread_from_bars(bars)
+        if estimated:
+            return estimated
+    except Exception:
+        pass
 
     # Nothing worked — return empty so the SPA falls back to N/A gracefully.
     return []
