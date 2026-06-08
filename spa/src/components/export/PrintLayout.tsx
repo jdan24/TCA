@@ -15,7 +15,7 @@
 import { useEffect, useRef, useState } from "react";
 import { marked } from "marked";
 import type { ParentOrderSummary } from "@/types";
-import { useCorporateTemplate } from "@/hooks/useCorporateTemplate";
+import { useCorporateTemplate, type BridgeStatus } from "@/hooks/useCorporateTemplate";
 import { ParentSummaryCard } from "@/components/dashboard/single/ParentSummaryCard";
 import type { ChartImages } from "@/components/export/ExportBar";
 
@@ -33,10 +33,13 @@ interface PrintLayoutProps {
 }
 
 export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlightedBenchmark = null, brokerOrderId, commentary }: PrintLayoutProps) {
-  const { logoDataUrl, disclaimerText, reportTitle, setLogo, setDisclaimer, setTitle } = useCorporateTemplate();
+  const {
+    logoDataUrl, disclaimerText, reportTitle, bridgeStatus,
+    contactName, contactEmail, contactPhone,
+    setContactName, setContactEmail, setContactPhone,
+  } = useCorporateTemplate();
   const [showBranding, setShowBranding] = useState(false);
-  const brandingRef  = useRef<HTMLDivElement>(null);
-  const logoInputRef = useRef<HTMLInputElement>(null);
+  const brandingRef = useRef<HTMLDivElement>(null);
 
   // Inject @page rule — Tailwind can't express this, so we add it to <head>.
   useEffect(() => {
@@ -72,19 +75,7 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
     return () => document.removeEventListener("mousedown", handler);
   }, [showBranding]);
 
-  function handleLogoFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = "";
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const r = ev.target?.result;
-      if (typeof r === "string") setLogo(r);
-    };
-    reader.readAsDataURL(file);
-  }
-
-  const hasBranding = !!(logoDataUrl || disclaimerText.trim() || reportTitle.trim());
+  const hasBranding = !!(contactName.trim() || contactEmail.trim() || contactPhone.trim());
 
   const page1Charts: [string | null, string][] = [
     [charts.twap,  "Cumulative TWAP"],
@@ -156,68 +147,47 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
             </button>
 
             {showBranding && (
-              <div className="absolute right-0 top-9 z-30 w-80 bg-white rounded-xl shadow-xl border border-gray-200 p-4">
-                <p className="text-xs font-semibold text-gray-700 mb-3">Corporate Branding</p>
+              <div className="absolute right-0 top-9 z-30 w-72 bg-white rounded-xl shadow-xl border border-gray-200 p-4">
+                <p className="text-xs font-semibold text-gray-700 mb-3">Contact Info</p>
 
-                <div className="mb-3">
-                  <p className="text-xs text-gray-500 mb-1.5">Logo</p>
-                  <input
-                    ref={logoInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleLogoFile}
-                  />
-                  {logoDataUrl ? (
-                    <div className="flex items-center gap-2">
-                      <img
-                        src={logoDataUrl}
-                        alt="Logo preview"
-                        className="h-8 w-auto max-w-[140px] object-contain rounded border border-gray-200 bg-white p-0.5"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setLogo(null)}
-                        className="text-xs text-gray-400 hover:text-red-500 transition-colors"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => logoInputRef.current?.click()}
-                      className="text-xs px-3 py-1.5 rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-gray-400 hover:text-gray-600 transition-colors w-full text-left"
-                    >
-                      Upload PNG / JPG / SVG…
-                    </button>
-                  )}
-                </div>
-
-                <div className="mb-3">
-                  <p className="text-xs text-gray-500 mb-1.5">Report Title</p>
+                <div className="mb-2.5">
+                  <p className="text-xs text-gray-500 mb-1">Name</p>
                   <input
                     type="text"
-                    value={reportTitle}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="Wells Fargo Futures TCA Report"
+                    value={contactName}
+                    onChange={(e) => setContactName(e.target.value)}
+                    placeholder="Jon Thorne"
                     className="w-full text-xs rounded-lg border border-gray-300 bg-white text-gray-900 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400"
                   />
                 </div>
 
-                <div>
-                  <p className="text-xs text-gray-500 mb-1.5">
-                    Disclaimer <span className="text-gray-400">(follows content, can span pages)</span>
-                  </p>
-                  <textarea
-                    value={disclaimerText}
-                    onChange={(e) => setDisclaimer(e.target.value)}
-                    placeholder="Paste disclaimer text here…"
-                    rows={4}
-                    className="w-full text-xs rounded-lg border border-gray-300 bg-white text-gray-900 px-2.5 py-1.5 resize-y focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400"
+                <div className="mb-2.5">
+                  <p className="text-xs text-gray-500 mb-1">Email</p>
+                  <input
+                    type="email"
+                    value={contactEmail}
+                    onChange={(e) => setContactEmail(e.target.value)}
+                    placeholder="name@company.com"
+                    className="w-full text-xs rounded-lg border border-gray-300 bg-white text-gray-900 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400"
                   />
                 </div>
-                <p className="text-xs text-gray-400 mt-2">Saved automatically to this browser.</p>
+
+                <div className="mb-3">
+                  <p className="text-xs text-gray-500 mb-1">Phone</p>
+                  <input
+                    type="tel"
+                    value={contactPhone}
+                    onChange={(e) => setContactPhone(e.target.value)}
+                    placeholder="555-555-5555"
+                    className="w-full text-xs rounded-lg border border-gray-300 bg-white text-gray-900 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400"
+                  />
+                </div>
+
+                <div className="border-t border-gray-100 pt-2.5">
+                  <BridgeStatusLine status={bridgeStatus} logoDataUrl={logoDataUrl} />
+                </div>
+
+                <p className="text-xs text-gray-400 mt-2">Contact info saved to this browser.</p>
               </div>
             )}
           </div>
@@ -251,7 +221,7 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
 
           {/* ── Branding logo — full width, first element on print ───────── */}
           {logoDataUrl && (
-            <div className="mb-2 print:mb-2">
+            <div className="mb-1 print:mb-1">
               <img
                 src={logoDataUrl}
                 alt="Company logo"
@@ -260,7 +230,16 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
             </div>
           )}
 
-          {/* ── Report title — below logo, above separator ────────────────── */}
+          {/* ── Contact info — left-aligned below logo ────────────────────── */}
+          {(contactName.trim() || contactEmail.trim() || contactPhone.trim()) && (
+            <div className="mb-2 print:mb-2 text-xs text-gray-700 leading-snug">
+              {contactName.trim()  && <p>{contactName.trim()}</p>}
+              {contactEmail.trim() && <p>{contactEmail.trim()}</p>}
+              {contactPhone.trim() && <p>{contactPhone.trim()}</p>}
+            </div>
+          )}
+
+          {/* ── Report title — below contact, above separator ─────────────── */}
           {reportTitle.trim() && (
             <p className="text-[30px] font-semibold text-gray-800 mb-3 print:mb-2">
               {reportTitle.trim()}
@@ -551,6 +530,39 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
 
         <div className="print:hidden h-16" />
       </div>
+    </div>
+  );
+}
+
+function BridgeStatusLine({ status, logoDataUrl }: { status: BridgeStatus; logoDataUrl: string | null }) {
+  if (status === "loaded") {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-emerald-600">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+        {logoDataUrl ? "Logo & disclaimer loaded" : "Connected — no branding.zip"}
+      </div>
+    );
+  }
+  if (status === "offline") {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-amber-600">
+        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+        Bridge offline — using cached branding
+      </div>
+    );
+  }
+  if (status === "no-branding") {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-gray-400">
+        <span className="w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0" />
+        No branding configured
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-gray-400">
+      <span className="w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0" />
+      Branding loaded from bridge on startup
     </div>
   );
 }

@@ -19,8 +19,11 @@ replace `create_session()` / `session.stop()` with a module-level singleton.
 
 from __future__ import annotations
 
+import base64
+import pathlib
 import re
 import time
+import zipfile
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -641,6 +644,47 @@ def trade_ticks(security: str, start: str, end: str):
     _require_blpapi()
     ticker = resolve_ticker(security)
     return _get_trade_ticks(ticker, parse_dt(start), parse_dt(end))
+
+
+# ── Branding endpoints ────────────────────────────────────────────────────────
+# Reads controlled branding assets from branding.zip (same directory as this
+# file). Privileged users update the zip; regular users get the assets
+# automatically on the next bridge restart.
+
+_BRANDING_ZIP = pathlib.Path(__file__).parent / "branding.zip"
+
+
+def _read_branding_file(filename: str) -> bytes:
+    """Read a file from branding.zip; raise HTTPException if missing."""
+    if not _BRANDING_ZIP.exists():
+        raise HTTPException(status_code=404, detail="branding.zip not found")
+    try:
+        with zipfile.ZipFile(_BRANDING_ZIP) as zf:
+            return zf.read(filename)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"{filename} not found in branding.zip")
+
+
+@app.get("/branding/logo")
+def branding_logo():
+    """Return the company logo as a base64 data-URL (PNG expected)."""
+    data = _read_branding_file("logo.png")
+    data_url = "data:image/png;base64," + base64.b64encode(data).decode()
+    return {"dataUrl": data_url}
+
+
+@app.get("/branding/disclaimer")
+def branding_disclaimer():
+    """Return the legal disclaimer text from disclaimer.txt."""
+    data = _read_branding_file("disclaimer.txt")
+    return {"text": data.decode("utf-8")}
+
+
+@app.get("/branding/title")
+def branding_title():
+    """Return the report title from title.txt."""
+    data = _read_branding_file("title.txt")
+    return {"text": data.decode("utf-8").strip()}
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

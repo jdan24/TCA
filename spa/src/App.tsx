@@ -8,6 +8,7 @@ import { ModeSelector } from "@/components/upload/ModeSelector";
 import { Dashboard } from "@/components/dashboard/Dashboard";
 import { SingleOrderDashboard } from "@/components/dashboard/single/SingleOrderDashboard";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
+import { useCorporateTemplate } from "@/hooks/useCorporateTemplate";
 import { useTCAStore } from "@/store/useTCAStore";
 import { computeAll } from "@/tca/compute";
 import type { TradeRecord } from "@/types";
@@ -27,6 +28,11 @@ function App() {
   const reset = useTCAStore((s) => s.reset);
 
   const symbolMap = useSymbolMap();
+  const { fetchBranding } = useCorporateTemplate();
+
+  // Fetch controlled branding assets from bridge on startup; caches in localStorage.
+  useEffect(() => { void fetchBranding(); }, [fetchBranding]);
+
   const singleOrderTimeOverride = useTCAStore((s) => s.singleOrderTimeOverride);
   const singleOrderBbgSymbol    = useTCAStore((s) => s.singleOrderBbgSymbol);
   const [enrichProgress, setEnrichProgress] = useState<EnrichProgress | null>(null);
