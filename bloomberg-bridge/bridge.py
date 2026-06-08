@@ -282,7 +282,7 @@ def _drain(session, timeout_ms: int = 15_000) -> list:
 
     raise HTTPException(
         status_code=504,
-        detail="Bloomberg request timed out after 15 seconds",
+        detail=f"Bloomberg request timed out after {timeout_ms // 1_000} seconds",
     )
 
 
@@ -396,6 +396,7 @@ def _get_intraday_ticks(
     start: datetime,
     end: datetime,
     event_types: list[str],
+    timeout_ms: int = 15_000,
 ) -> list[dict[str, Any]]:
     """IntradayTickRequest for specific event types."""
     session = _create_session()
@@ -411,7 +412,7 @@ def _get_intraday_ticks(
         session.sendRequest(req)
 
         raw_ticks = []
-        for msg in _drain(session):
+        for msg in _drain(session, timeout_ms=timeout_ms):
             if not msg.hasElement("tickData"):
                 continue
             tick_array = msg.getElement("tickData").getElement("tickData")
@@ -609,6 +610,31 @@ def reference(security: str, fields: str = "HIST_VOL_30D,VOLUME_AVG_30D,FUT_CONT
     return _get_reference_data(ticker, field_list)
 
 
+def _estimate_spread_from_bars(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Construct synthetic bid/ask pairs from 1-minute OHLC bars.
+
+    Used as a fallback when tick-level data times out (e.g. orders > 90 min).
+    Spread is estimated as 25 % of the bar's high-low range, centred on the
+    bar's close price.  This is a rough proxy — sufficient for TWAS context
+    but not a substitute for real tick data on short orders.
+    """
+    pairs = []
+    for bar in bars:
+        try:
+            bar_range = float(bar["high"]) - float(bar["low"])
+            half_spread = bar_range * 0.25
+            mid = float(bar["close"])
+            pairs.append({
+                "time": bar["time"],
+                "bid": round(mid - half_spread, 6),
+                "ask": round(mid + half_spread, 6),
+            })
+        except Exception:
+            pass
+    return pairs
+
+
 @app.get("/bid-ask-ticks")
 def bid_ask_ticks(security: str, start: str, end: str):
     """
@@ -617,6 +643,13 @@ def bid_ask_ticks(security: str, start: str, end: str):
     Returns a chronological list of paired {time, bid, ask} quotes.
     Each entry reflects the prevailing best bid and ask after a quote update.
 
+    For orders ≤ 90 minutes: fetches real BID/ASK ticks with a 60-second
+    timeout (up from the default 15 s used by other endpoints).
+    For orders > 90 minutes, or when ticks time out: falls back to synthetic
+    bid/ask pairs estimated from 1-minute OHLC bars (25 % of the bar range
+    centred on close).  The bar-based estimate is labelled in the response so
+    the SPA can show an appropriate caveat in the TWAS tooltip.
+
     Query params:
       security  bare ticker, e.g. 'ESH4'
       start     ISO-8601 or FIX datetime
@@ -624,8 +657,35 @@ def bid_ask_ticks(security: str, start: str, end: str):
     """
     _require_blpapi()
     ticker = resolve_ticker(security)
-    raw = _get_intraday_ticks(ticker, parse_dt(start), parse_dt(end), ["BID", "ASK"])
-    return _reconstruct_bid_ask_pairs(raw)
+    start_dt = parse_dt(start)
+    end_dt   = parse_dt(end)
+    window_minutes = (end_dt - start_dt).total_seconds() / 60
+
+    # Always attempt real ticks with a 60-second timeout.
+    tick_pairs: list[dict[str, Any]] = []
+    tick_error = False
+    try:
+        raw = _get_intraday_ticks(ticker, start_dt, end_dt, ["BID", "ASK"], timeout_ms=60_000)
+        tick_pairs = _reconstruct_bid_ask_pairs(raw)
+    except HTTPException:
+        tick_error = True
+
+    if tick_pairs:
+        return tick_pairs
+
+    # Fall back to bar-based estimation when ticks timed out or when the
+    # window is long enough that the tick set would be unreliably large.
+    if tick_error or window_minutes > 90:
+        try:
+            bars = _get_intraday_bars(ticker, start_dt, end_dt, 1)
+            estimated = _estimate_spread_from_bars(bars)
+            if estimated:
+                return estimated
+        except Exception:
+            pass
+
+    # Nothing worked — return empty so the SPA falls back to N/A gracefully.
+    return []
 
 
 @app.get("/trade-ticks")
