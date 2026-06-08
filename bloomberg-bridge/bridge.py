@@ -687,6 +687,13 @@ def branding_title():
     return {"text": data.decode("utf-8").strip()}
 
 
+@app.get("/branding/sym-mapping")
+def branding_sym_mapping():
+    """Return sym_mapping.csv as raw text for the SPA to parse and merge."""
+    data = _read_branding_file("sym_mapping.csv")
+    return {"csv": data.decode("utf-8")}
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

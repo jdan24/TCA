@@ -8,9 +8,10 @@ import { ModeSelector } from "@/components/upload/ModeSelector";
 import { Dashboard } from "@/components/dashboard/Dashboard";
 import { SingleOrderDashboard } from "@/components/dashboard/single/SingleOrderDashboard";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
-import { useCorporateTemplate } from "@/hooks/useCorporateTemplate";
+import { CorporateTemplateProvider } from "@/hooks/useCorporateTemplate";
 import { useTCAStore } from "@/store/useTCAStore";
 import { computeAll } from "@/tca/compute";
+import { parseSymbolMapCsvText } from "@/parsers/symbolMapCsv";
 import type { TradeRecord } from "@/types";
 
 function App() {
@@ -28,10 +29,24 @@ function App() {
   const reset = useTCAStore((s) => s.reset);
 
   const symbolMap = useSymbolMap();
-  const { fetchBranding } = useCorporateTemplate();
 
-  // Fetch controlled branding assets from bridge on startup; caches in localStorage.
-  useEffect(() => { void fetchBranding(); }, [fetchBranding]);
+  // Fetch the privileged sym_mapping.csv from bridge on startup.
+  // Uses "base" strategy so existing user mappings always win on conflict.
+  useEffect(() => {
+    async function loadBaseSymbolMap() {
+      try {
+        const res = await fetch("http://localhost:8000/branding/sym-mapping");
+        if (!res.ok) return;
+        const { csv } = await res.json() as { csv: string };
+        const { mappings } = await parseSymbolMapCsvText(csv);
+        if (mappings.length > 0) symbolMap.importMappings(mappings, "base");
+      } catch {
+        // Bridge offline or zip missing sym_mapping.csv — silent no-op
+      }
+    }
+    void loadBaseSymbolMap();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const singleOrderTimeOverride = useTCAStore((s) => s.singleOrderTimeOverride);
   const singleOrderBbgSymbol    = useTCAStore((s) => s.singleOrderBbgSymbol);
@@ -89,6 +104,7 @@ function App() {
   }
 
   return (
+    <CorporateTemplateProvider>
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col">
       <Header />
 
@@ -150,6 +166,7 @@ function App() {
         </main>
       )}
     </div>
+    </CorporateTemplateProvider>
   );
 }
 

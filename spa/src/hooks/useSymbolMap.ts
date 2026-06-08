@@ -80,12 +80,13 @@ export interface UseSymbolMapReturn {
   updateMapping: (ric: string, patch: Partial<SymbolMapping>) => void;
   deleteMapping: (ric: string) => void;
   /**
-   * Bulk-import mappings from a CSV.
+   * Bulk-import mappings.
    *  - "replace": discard the current table and keep only the imported rows.
-   *  - "merge":   keep existing rows; imported rows win on RIC conflicts (additive).
+   *  - "merge":   keep existing rows; imported rows win on RIC conflicts.
+   *  - "base":    like merge but existing user mappings win — incoming only fills gaps.
    * Returns the resulting row count.
    */
-  importMappings: (incoming: SymbolMapping[], strategy: "replace" | "merge") => number;
+  importMappings: (incoming: SymbolMapping[], strategy: "replace" | "merge" | "base") => number;
   /** Translate a RIC to "bbgTicker bbgYellowKey", or return the raw value if unmapped. */
   resolve: (ric: string) => string;
 }
@@ -108,7 +109,7 @@ export function useSymbolMap(): UseSymbolMapReturn {
   }, []);
 
   const importMappings = useCallback(
-    (incoming: SymbolMapping[], strategy: "replace" | "merge"): number => {
+    (incoming: SymbolMapping[], strategy: "replace" | "merge" | "base"): number => {
       // Dedupe the incoming rows by RIC (last occurrence wins).
       const incomingByRic = new Map<string, SymbolMapping>();
       for (const m of incoming) incomingByRic.set(m.ric, m);
@@ -116,11 +117,19 @@ export function useSymbolMap(): UseSymbolMapReturn {
       let next: SymbolMapping[];
       if (strategy === "replace") {
         next = [...incomingByRic.values()];
-      } else {
-        // Additive: start from existing, then overlay imported rows (CSV wins).
+      } else if (strategy === "merge") {
+        // Additive: start from existing, then overlay imported rows (incoming wins).
         const merged = new Map<string, SymbolMapping>();
         for (const m of store) merged.set(m.ric, m);
         for (const [ric, m] of incomingByRic) merged.set(ric, m);
+        next = [...merged.values()];
+      } else {
+        // "base": incoming only fills gaps — existing user mappings always win.
+        const merged = new Map<string, SymbolMapping>();
+        for (const m of store) merged.set(m.ric, m);
+        for (const [ric, m] of incomingByRic) {
+          if (!merged.has(ric)) merged.set(ric, m);
+        }
         next = [...merged.values()];
       }
       persist(next);

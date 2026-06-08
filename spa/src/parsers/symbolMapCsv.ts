@@ -51,9 +51,9 @@ export interface SymbolMapCsvResult {
   skipped: number;
 }
 
-export function parseSymbolMapCsv(file: File): Promise<SymbolMapCsvResult> {
+function _parsePapa(input: File | string): Promise<SymbolMapCsvResult> {
   return new Promise((resolve, reject) => {
-    Papa.parse<Record<string, string>>(file, {
+    Papa.parse<Record<string, string>>(input, {
       header: true,
       skipEmptyLines: true,
       transformHeader: (h) => h.trim(),
@@ -101,4 +101,13 @@ export function parseSymbolMapCsv(file: File): Promise<SymbolMapCsvResult> {
       },
     });
   });
+}
+
+export function parseSymbolMapCsv(file: File): Promise<SymbolMapCsvResult> {
+  return _parsePapa(file);
+}
+
+/** Parse CSV supplied as a raw string (e.g. fetched from bridge.py). */
+export function parseSymbolMapCsvText(text: string): Promise<SymbolMapCsvResult> {
+  return _parsePapa(text);
 }
