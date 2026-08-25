@@ -9,7 +9,7 @@
 
 import { useState } from "react";
 import type { ParentOrderSummary } from "@/types";
-import { fmtTtf } from "@/components/dashboard/dashboardUtils";
+import { fmtTtf, fmtUsd } from "@/components/dashboard/dashboardUtils";
 
 // ── UTC helpers ───────────────────────────────────────────────────────────────
 
@@ -283,13 +283,17 @@ interface BenchmarkRowProps {
   benchmarkValue: string;
   slippageLabel: string;
   slippageBps: number | null;
+  /** Same slippage in cash terms; null when no point value is known. */
+  slippageUsd?: number | null;
+  /** Currency of slippageUsd — the contract's own, no FX conversion. */
+  currency?: string;
   missing?: boolean;
   highlighted: boolean;
 }
 
 function BenchmarkRow({
   benchmarkLabel, benchmarkValue,
-  slippageLabel, slippageBps,
+  slippageLabel, slippageBps, slippageUsd, currency,
   missing, highlighted,
 }: BenchmarkRowProps) {
   const favorable = slippageBps !== null && slippageBps <= 0;
@@ -325,6 +329,16 @@ function BenchmarkRow({
           <p className={`text-sm font-semibold tabular-nums ${bpsClass}`}>
             {bpsText}
           </p>
+          {/* Cash figure. Hidden entirely when no point value is known, rather
+              than showing a second N/A next to the bps one. */}
+          {!missing && slippageUsd !== null && slippageUsd !== undefined && (
+            <p
+              className={`text-[11px] font-medium tabular-nums ${bpsClass}`}
+              title="Point value x quantity x price difference. No FX conversion."
+            >
+              {fmtUsd(slippageUsd, currency)}
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -477,6 +491,8 @@ export function ParentSummaryCard({
               slippageLabel="IS (bps)"
               slippageBps={summary.IS_bps}
               missing={noBloomberg}
+              slippageUsd={summary.IS_usd}
+              currency={summary.currency}
               highlighted={highlightedBenchmark === "arrival"}
             />
             <BenchmarkRow
@@ -485,6 +501,8 @@ export function ParentSummaryCard({
               slippageLabel="TWAP Slippage (bps)"
               slippageBps={twapSlippage}
               missing={summary.marketTwap === null}
+              slippageUsd={summary.TWAP_dev_usd}
+              currency={summary.currency}
               highlighted={highlightedBenchmark === "twap"}
             />
             <BenchmarkRow
@@ -493,6 +511,8 @@ export function ParentSummaryCard({
               slippageLabel="VWAP Slippage (bps)"
               slippageBps={vwapSlippage}
               missing={summary.marketVwap === null}
+              slippageUsd={summary.VWAP_dev_usd}
+              currency={summary.currency}
               highlighted={highlightedBenchmark === "vwap"}
             />
           </div>

@@ -15,6 +15,7 @@ import type { BidAskSource, BidAskTick, BloombergEnrichment, ParentOrderSummary,
 import { computeMarketImpact } from "./marketImpact";
 import { computeReversion } from "./reversion";
 import { computeSlippage } from "./slippage";
+import { dollarSlippage } from "./dollars";
 import { computeTWAS, MIN_ABS_MID } from "./spread";
 import { computeTimeToFill } from "./timing";
 import { computeOrderVol } from "./volatility";
@@ -23,7 +24,14 @@ import { sideSign } from "./tcaUtils";
 
 export function computeAll(
   trades: TradeRecord[],
-  enrichment: Record<string, BloombergEnrichment>
+  enrichment: Record<string, BloombergEnrichment>,
+  /**
+   * Cash value of a 1.00 price move for one contract of the given RIC.
+   * Callers layer the manual symbol-map override over the Bloomberg-derived
+   * value; see pointValueResolver() in tca/pointValue.ts. Omitted means no
+   * cash figures are produced (they come back null, never zero).
+   */
+  pointValueFor: (ric: string) => number | null = () => null,
 ): TCAResult[] {
   return trades.map((trade) => {
     // enrichment is keyed by orderId; undefined when Bloomberg bridge is offline
@@ -53,6 +61,13 @@ export function computeAll(
 
     const twas = computeTWAS(trade, e?.bidAskTicks ?? []);
 
+    // Cash slippage vs each benchmark, from prices rather than from bps.
+    const marketVWAP_price = (e && e.vwap !== 0 ? e.vwap : null) ?? trade.fileVwap ?? null;
+    const arrival = trade.arrivalPrice ?? e?.arrivalPrice ?? null;
+    const pv = pointValueFor(trade.symbol);
+    const usd = (benchmark: number | null) =>
+      dollarSlippage(trade.avgFillPrice, benchmark, trade.side, trade.orderQty, pv);
+
     return {
       orderId: trade.orderId,
       IS_bps: computeSlippage(trade, e?.arrivalPrice ?? null),
@@ -61,13 +76,17 @@ export function computeAll(
       timeToFill_ms: computeTimeToFill(trade),
       reversion_30s_bps: rev.reversion_30s_bps,
       reversion_1m_bps: rev.reversion_1m_bps,
+      IS_usd:       usd(arrival),
+      VWAP_dev_usd: usd(marketVWAP_price),
+      TWAP_dev_usd: usd(marketTWAPFinal),
       TWAS_bps: twas.bps,
       TWAS_price: twas.price,
       vol_during_order_price: vol.price,
       vol_during_order_bps: vol.bps,
       TWAP_dev_bps: computeTWAPDeviation(trade, marketTWAPFinal),
       // Market VWAP price: Bloomberg scalar, then file VWAP as offline fallback
-      marketVWAP_price: (e && e.vwap !== 0 ? e.vwap : null) ?? trade.fileVwap ?? null,
+      marketVWAP_price,
+      marketTWAP_price: marketTWAPFinal,
     };
   });
 }
@@ -83,6 +102,8 @@ export function computeParentOrderSummary(
   enrichment: Record<string, BloombergEnrichment>,
   /** Optional manual override for the order window — affects all metric computations. */
   timeOverride?: { start: Date; end: Date },
+  /** See computeAll. Omitted means the cash figures come back null. */
+  pointValueFor: (ric: string) => number | null = () => null,
 ): ParentOrderSummary | null {
   if (trades.length === 0) return null;
 
@@ -408,6 +429,13 @@ export function computeParentOrderSummary(
     }
   }
 
+  // ── Cash slippage vs each benchmark ──────────────────────────────────────
+  // Quantity-weighted at the parent level: fillVwap already aggregates the
+  // fills, so one multiplication by totalQty is the whole order's cost.
+  const pointValue = pointValueFor(firstTrade.symbol);
+  const usd = (benchmark: number | null) =>
+    dollarSlippage(fillVwap, benchmark, side, totalQty, pointValue);
+
   return {
     symbol: firstTrade.symbol,
     side,
@@ -430,6 +458,11 @@ export function computeParentOrderSummary(
     TWAS_bps,
     TWAS_price,
     bidAskSource,
+    IS_usd:       usd(arrivalPrice),
+    VWAP_dev_usd: usd(marketVwap),
+    TWAP_dev_usd: usd(marketTwap),
+    pointValue,
+    currency: firstTrade.currency,
     reversion1m_price,
   };
 }

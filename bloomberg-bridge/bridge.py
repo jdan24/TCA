@@ -20,6 +20,8 @@ replace `create_session()` / `session.stop()` with a module-level singleton.
 from __future__ import annotations
 
 import base64
+import logging
+import logging.handlers
 import math
 import pathlib
 import re
@@ -38,6 +40,48 @@ try:
 except ImportError:
     blpapi = None  # type: ignore[assignment]
     BLPAPI_AVAILABLE = False
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+# Everything printed to the console is also written to bridge.log next to this
+# file.  The launcher used to redirect the process's stdout to that file, which
+# left the console window blank; letting the bridge own its logging means the
+# heartbeat and per-request lines stay visible AND a crash after the window is
+# closed is still diagnosable.
+
+LOG_PATH = pathlib.Path(__file__).parent / "bridge.log"
+
+log = logging.getLogger("bridge")
+
+
+def _configure_logging() -> None:
+    """Attach a console and a rotating-file handler to the bridge + uvicorn logs."""
+    fmt = logging.Formatter(
+        "%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+
+    handlers: list[logging.Handler] = [console]
+    try:
+        # 1 MB x 3 so an all-day session cannot fill the disk
+        rotating = logging.handlers.RotatingFileHandler(
+            LOG_PATH, maxBytes=1_000_000, backupCount=3, encoding="utf-8",
+        )
+        rotating.setFormatter(fmt)
+        handlers.append(rotating)
+    except OSError:
+        # Read-only folder or a locked file: console-only is still useful
+        pass
+
+    for name in ("bridge", "uvicorn", "uvicorn.access", "uvicorn.error"):
+        logger = logging.getLogger(name)
+        logger.setLevel(logging.INFO)
+        logger.handlers = list(handlers)
+        # uvicorn installs its own handlers; don't also bubble up to the root
+        logger.propagate = False
+
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Bloomberg TCA Bridge", version="1.0.0")
@@ -351,7 +395,7 @@ def _get_reference_data(ticker: str, fields: list[str]) -> dict[str, Any]:
                 # Security-level error (bad ticker, etc.) — skip
                 if sec.hasElement("securityError"):
                     err_msg = sec.getElement("securityError").getElementAsString("message")
-                    print(f"[WARN] Bloomberg security error for {ticker}: {err_msg}")
+                    log.warning("Bloomberg security error for %s: %s", ticker, err_msg)
                     continue
 
                 # Valid field values live in fieldData
@@ -374,7 +418,7 @@ def _get_reference_data(ticker: str, fields: list[str]) -> dict[str, Any]:
                         exc = exc_arr.getValueAsElement(k)
                         try:
                             fid = exc.getElement("fieldId").getValueAsString()
-                            print(f"[INFO] Field not available for {ticker}: {fid} (handled by fallback)")
+                            log.info("Field not available for %s: %s (handled by fallback)", ticker, fid)
                         except Exception:
                             pass
 
@@ -894,4 +938,20 @@ def branding_sym_mapping():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+
+    _configure_logging()
+
+    log.info("Bloomberg TCA Bridge starting on http://127.0.0.1:8000")
+    if BLPAPI_AVAILABLE:
+        log.info("Bloomberg SDK (blpapi) loaded - market data available")
+    else:
+        log.warning(
+            "Bloomberg SDK (blpapi) NOT installed - the app will run, "
+            "but every market-data request will fail"
+        )
+    log.info("Logging to %s", LOG_PATH)
+    log.info("Leave this window open. Press Ctrl+C to stop.")
+
+    # log_config=None keeps the handlers installed above; uvicorn would
+    # otherwise replace them and the file handler would stop receiving lines.
+    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info", log_config=None)

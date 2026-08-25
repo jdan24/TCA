@@ -13,8 +13,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { EnrichProgress } from "@/bloomberg/enrichmentService";
-import type { BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
+import type { BenchmarkKind, BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
 import { computeParentOrderSummary } from "@/tca/compute";
+import { buildPointValueResolver } from "@/tca/pointValue";
+import { resolveBenchmark } from "@/hooks/useAlgoMap";
 import { useTCAStore } from "@/store/useTCAStore";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { ExportBar, type ChartImages } from "@/components/export/ExportBar";
@@ -32,11 +34,16 @@ import { VwapVolumeProfile, parseVolumeCurveCsv } from "./VwapVolumeProfile";
 const ALGO_OPTIONS = ["TWAP", "VWAP", "POV", "Pegger", "Sniper", "ArtemIS", "Apollo"] as const;
 type AlgoOption = typeof ALGO_OPTIONS[number];
 
-/** Which benchmark card to highlight given the selected algo. */
-function highlightedBenchmark(algo: AlgoOption | null): "arrival" | "vwap" | "twap" {
-  if (algo === "TWAP") return "twap";
-  if (algo === "VWAP") return "vwap";
-  return "arrival";
+/**
+ * Which benchmark card to highlight given the selected algo.
+ *
+ * Delegates to the shared algo → benchmark table so the highlight here and the
+ * Total Cost tile on the multi-order dashboard can never disagree. The table is
+ * seeded with ALGO_OPTIONS, so the built-in behaviour is unchanged: TWAP → twap,
+ * VWAP → vwap, everything else → arrival.
+ */
+function highlightedBenchmark(algo: AlgoOption | null): BenchmarkKind {
+  return resolveBenchmark(algo);
 }
 
 interface SingleOrderDashboardProps {
@@ -204,9 +211,18 @@ export function SingleOrderDashboard({
     return trades.map((t) => ({ ...t, avgFillPrice: t.avgFillPrice * scale }));
   }, [trades, scale]);
 
+  // Manual point-value overrides live in the symbol map, so cash figures must
+  // recompute when it changes as well as on data changes.
+  const pointValueFor = useMemo(
+    () => buildPointValueResolver(symbolMap.mappings, scaledTrades, enrichment),
+    [symbolMap.mappings, scaledTrades, enrichment],
+  );
+
   const summary = useMemo(
-    () => computeParentOrderSummary(scaledTrades, enrichment, singleOrderTimeOverride ?? undefined),
-    [scaledTrades, enrichment, singleOrderTimeOverride],
+    () => computeParentOrderSummary(
+      scaledTrades, enrichment, singleOrderTimeOverride ?? undefined, pointValueFor,
+    ),
+    [scaledTrades, enrichment, singleOrderTimeOverride, pointValueFor],
   );
 
   // Single pass over the first enriched trade's tradeTicks for [orderTime, lastFillTime].

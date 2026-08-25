@@ -54,11 +54,13 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
     bbgTicker: string;
     bbgYellowKey: string;
     priceMultiplier: string;
+    pointValue: string;
   }>({
     ric: "",
     bbgTicker: "",
     bbgYellowKey: "Index",
     priceMultiplier: "",
+    pointValue: "",
   });
 
   function handleClose() {
@@ -71,11 +73,12 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
   function handleExport() {
     if (mappings.length === 0) return;
     const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    const header = ["Symbol", "Bloomberg Ticker", "Yellow Key", "Price Multiplier"];
+    const header = ["Symbol", "Bloomberg Ticker", "Yellow Key", "Price Multiplier", "Point Value"];
     const lines = [header.join(",")];
     for (const m of mappings) {
       const mult = m.priceMultiplier !== undefined && m.priceMultiplier !== 1 ? String(m.priceMultiplier) : "";
-      lines.push([esc(m.ric), esc(m.bbgTicker), esc(m.bbgYellowKey), mult].join(","));
+      const pv   = m.pointValue !== undefined ? String(m.pointValue) : "";
+      lines.push([esc(m.ric), esc(m.bbgTicker), esc(m.bbgYellowKey), mult, pv].join(","));
     }
     const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -94,14 +97,20 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
     if (!ric || !ticker) return;
     const mult = parseFloat(newRow.priceMultiplier);
     const isValidMult = !isNaN(mult) && mult > 0 && mult !== 1;
-    // Build the mapping object without priceMultiplier when it's not needed —
-    // exactOptionalPropertyTypes prohibits passing `priceMultiplier: undefined`.
-    const newMapping: SymbolMapping = isValidMult
-      ? { ric, bbgTicker: ticker, bbgYellowKey: newRow.bbgYellowKey, priceMultiplier: mult }
-      : { ric, bbgTicker: ticker, bbgYellowKey: newRow.bbgYellowKey };
+    const pv = parseFloat(newRow.pointValue);
+    const isValidPv = !isNaN(pv) && pv > 0;
+    // Spread the optional fields in conditionally — exactOptionalPropertyTypes
+    // prohibits passing them as explicit `undefined`.
+    const newMapping: SymbolMapping = {
+      ric,
+      bbgTicker: ticker,
+      bbgYellowKey: newRow.bbgYellowKey,
+      ...(isValidMult ? { priceMultiplier: mult } : {}),
+      ...(isValidPv ? { pointValue: pv } : {}),
+    };
     addMapping(newMapping);
     setDirty(true);
-    setNewRow({ ric: "", bbgTicker: "", bbgYellowKey: "Index", priceMultiplier: "" });
+    setNewRow({ ric: "", bbgTicker: "", bbgYellowKey: "Index", priceMultiplier: "", pointValue: "" });
   }
 
   function handleUpdate(ric: string, patch: Partial<SymbolMapping>) {
@@ -331,6 +340,12 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
                 <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Bloomberg Ticker</th>
                 <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Yellow Key</th>
                 <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Price Multiplier</th>
+                <th
+                  className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide"
+                  title="Cash value of a 1.00 price move for one contract (1000 for a 3Y/10Y note, 50 for ES). Overrides Bloomberg's FUT_CONT_SIZE. Leave blank to use Bloomberg."
+                >
+                  Point Value
+                </th>
                 <th className="px-4 py-2.5 w-10" />
               </tr>
             </thead>
@@ -341,9 +356,18 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
                   mapping={m}
                   onUpdate={(patch) => handleUpdate(m.ric, patch)}
                   onDelete={() => handleDelete(m.ric)}
-                  onClearMultiplier={() => {
-                    // Replace with a fresh mapping that has no priceMultiplier field.
-                    addMapping({ ric: m.ric, bbgTicker: m.bbgTicker, bbgYellowKey: m.bbgYellowKey });
+                  onClearField={(field) => {
+                    // addMapping replaces the whole object, so rebuild it without
+                    // the cleared field but keeping the other optional one.
+                    addMapping({
+                      ric: m.ric,
+                      bbgTicker: m.bbgTicker,
+                      bbgYellowKey: m.bbgYellowKey,
+                      ...(field !== "priceMultiplier" && m.priceMultiplier !== undefined
+                        ? { priceMultiplier: m.priceMultiplier } : {}),
+                      ...(field !== "pointValue" && m.pointValue !== undefined
+                        ? { pointValue: m.pointValue } : {}),
+                    });
                     setDirty(true);
                   }}
                 />
@@ -351,7 +375,7 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
 
               {mappings.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-xs text-gray-400 dark:text-gray-600 italic">
+                  <td colSpan={6} className="px-4 py-8 text-center text-xs text-gray-400 dark:text-gray-600 italic">
                     No mappings yet — add one below
                   </td>
                 </tr>
@@ -396,6 +420,17 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
                     className="w-20 px-2 py-1 text-xs font-mono rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
                 </td>
+                <td className="px-4 py-2.5">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={newRow.pointValue}
+                    onChange={(e) => setNewRow((p) => ({ ...p, pointValue: e.target.value }))}
+                    onKeyDown={handleKeyDown}
+                    placeholder="auto"
+                    className="w-24 px-2 py-1 text-xs font-mono rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </td>
                 <td className="px-4 py-2.5 text-center">
                   <button
                     type="button"
@@ -435,19 +470,30 @@ interface MappingRowProps {
   mapping: SymbolMapping;
   onUpdate: (patch: Partial<SymbolMapping>) => void;
   onDelete: () => void;
-  /** Called when the user blanks out the multiplier — replaces the mapping without the field. */
-  onClearMultiplier: () => void;
+  /**
+   * Called when the user blanks out an optional field. The parent replaces the
+   * whole mapping without that field, preserving the other optional one.
+   */
+  onClearField: (field: "priceMultiplier" | "pointValue") => void;
 }
 
-function MappingRow({ mapping, onUpdate, onDelete, onClearMultiplier }: MappingRowProps) {
+function MappingRow({ mapping, onUpdate, onDelete, onClearField }: MappingRowProps) {
   const [multStr, setMultStr] = useState(
     mapping.priceMultiplier !== undefined && mapping.priceMultiplier !== 1
       ? String(mapping.priceMultiplier)
       : "",
   );
+  const [pvStr, setPvStr] = useState(
+    mapping.pointValue !== undefined ? String(mapping.pointValue) : "",
+  );
+
   const isActive = (() => {
     const n = parseFloat(multStr);
     return !isNaN(n) && n > 0 && n !== 1;
+  })();
+  const pvActive = (() => {
+    const n = parseFloat(pvStr);
+    return !isNaN(n) && n > 0;
   })();
 
   function commitMultiplier(s: string) {
@@ -455,9 +501,19 @@ function MappingRow({ mapping, onUpdate, onDelete, onClearMultiplier }: MappingR
     if (!s.trim() || isNaN(n) || n <= 0 || n === 1) {
       // Can't patch with `priceMultiplier: undefined` (exactOptionalPropertyTypes).
       // Delegate to parent which replaces the entire mapping object without the field.
-      onClearMultiplier();
+      onClearField("priceMultiplier");
     } else {
       onUpdate({ priceMultiplier: n });
+    }
+  }
+
+  function commitPointValue(s: string) {
+    const n = parseFloat(s);
+    // Blank means "fall back to Bloomberg's FUT_CONT_SIZE", not "zero".
+    if (!s.trim() || isNaN(n) || n <= 0) {
+      onClearField("pointValue");
+    } else {
+      onUpdate({ pointValue: n });
     }
   }
 
@@ -505,6 +561,23 @@ function MappingRow({ mapping, onUpdate, onDelete, onClearMultiplier }: MappingR
             ×{parseFloat(multStr).toFixed(4)}
           </span>
         )}
+      </td>
+      <td className="px-4 py-2">
+        <input
+          type="text"
+          inputMode="decimal"
+          value={pvStr}
+          placeholder="auto"
+          title="Cash value of a 1.00 price move for one contract. Blank uses Bloomberg's FUT_CONT_SIZE."
+          onChange={(e) => setPvStr(e.target.value)}
+          onBlur={(e) => commitPointValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") commitPointValue(pvStr); }}
+          className={`w-24 px-2 py-1 text-xs font-mono rounded border bg-transparent focus:bg-white dark:focus:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+            pvActive
+              ? "border-amber-400 dark:border-amber-500"
+              : "border-gray-200 dark:border-gray-600"
+          }`}
+        />
       </td>
       <td className="px-4 py-2 text-center">
         <button

@@ -43,6 +43,10 @@ export interface TCAResult {
   IS_bps: number | null;
   VWAP_dev_bps: number | null;
   MI_bps: number | null;
+  /** Slippage in cash terms. null when no point value is known for the symbol. */
+  IS_usd: number | null;
+  VWAP_dev_usd: number | null;
+  TWAP_dev_usd: number | null;
   timeToFill_ms: number;
   reversion_30s_bps: number | null;
   reversion_1m_bps: number | null;
@@ -53,6 +57,7 @@ export interface TCAResult {
   vol_during_order_bps: number | null;   // same expressed in bps
   TWAP_dev_bps: number | null;           // slippage vs market TWAP during [orderTime, lastFillTime]
   marketVWAP_price: number | null;       // raw market VWAP price during [orderTime, lastFillTime]
+  marketTWAP_price: number | null;       // raw market TWAP price during [orderTime, lastFillTime]
 }
 
 // ── Bloomberg enrichment payload (one per orderId) ───────────────────────────
@@ -78,6 +83,9 @@ export interface BloombergEnrichment {
   dailyVol: number;
   reversion30s: number; // last-traded price at lastFillTime + 30 s (from trade ticks)
   reversion1m: number;  // bar close at lastFillTime + 1 min
+  /** Cash value of a 1.00 price move for one contract, from FUT_CONT_SIZE.
+   *  null when Bloomberg does not supply it for this security. */
+  pointValue: number | null;
   bidAskTicks: BidAskTick[];
   /** Where bidAskTicks came from: real Bloomberg quotes, or spreads estimated
    *  from 1-minute bar ranges. null when there are no ticks at all. */
@@ -117,6 +125,14 @@ export interface ParentOrderSummary {
   TWAS_price: number | null;
   /** Provenance of the quotes behind TWAS: real ticks vs bar-range estimate. */
   bidAskSource: BidAskSource;
+  /** Slippage in cash terms vs each benchmark. null when no point value is known. */
+  IS_usd: number | null;
+  VWAP_dev_usd: number | null;
+  TWAP_dev_usd: number | null;
+  /** The point value used for the figures above, for display/diagnosis. */
+  pointValue: number | null;
+  /** Currency of the cash figures, from the trade records (no FX conversion). */
+  currency: string;
   /** Raw market price 1 minute after the parent order's last fill (from Bloomberg). */
   reversion1m_price: number | null;
 }
@@ -179,6 +195,20 @@ export interface SymbolMapping {
   /** Multiplier applied to file fill prices before comparing with Bloomberg prices.
    *  Omitted / undefined means 1 (no scaling). */
   priceMultiplier?: number;
+  /** Cash value of a 1.00 price move for one contract, in the contract's own
+   *  currency — 1000 for a 3Y/10Y note, 50 for ES. Overrides the value derived
+   *  from Bloomberg's FUT_CONT_SIZE. Omitted means "use Bloomberg". */
+  pointValue?: number;
+}
+
+// ── Algo → benchmark mapping ──────────────────────────────────────────────────
+/** Which benchmark an order should be measured against. */
+export type BenchmarkKind = "arrival" | "vwap" | "twap";
+
+export interface AlgoMapping {
+  /** Algo name as it appears in the file, e.g. "VWAP 10%". Matched case-insensitively. */
+  algo: string;
+  benchmark: BenchmarkKind;
 }
 
 // ── Column-mapping types ──────────────────────────────────────────────────────

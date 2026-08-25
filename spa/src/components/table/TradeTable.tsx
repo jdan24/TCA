@@ -28,6 +28,8 @@ import {
 } from "@tanstack/react-table";
 import type { BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
 import { useTCAStore } from "@/store/useTCAStore";
+import { resolveBenchmark } from "@/hooks/useAlgoMap";
+import { fmtUsd } from "@/components/dashboard/dashboardUtils";
 
 // ── Merged row type ───────────────────────────────────────────────────────────
 
@@ -44,8 +46,12 @@ interface TableRow {
   algo: string | null;
   timeToFill_ms: number;
   IS_bps: number | null;
+  IS_usd: number | null;
   VWAP_dev_bps: number | null;
+  VWAP_dev_usd: number | null;
+  TWAP_dev_usd: number | null;
   MI_bps: number | null;
+  currency: string;
   reversion_30s_bps: number | null;
   reversion_1m_bps: number | null;
   TWAS_bps: number | null;
@@ -75,7 +81,11 @@ function mergeRows(trades: TradeRecord[], results: TCAResult[], enrichment: Reco
       algo: t.algo,
       timeToFill_ms: r?.timeToFill_ms ?? 0,
       IS_bps: r?.IS_bps ?? null,
+      IS_usd: r?.IS_usd ?? null,
       VWAP_dev_bps: r?.VWAP_dev_bps ?? null,
+      VWAP_dev_usd: r?.VWAP_dev_usd ?? null,
+      TWAP_dev_usd: r?.TWAP_dev_usd ?? null,
+      currency: t.currency,
       MI_bps: r?.MI_bps ?? null,
       reversion_30s_bps: r?.reversion_30s_bps ?? null,
       reversion_1m_bps: r?.reversion_1m_bps ?? null,
@@ -104,7 +114,10 @@ const COLUMN_LABELS: Record<string, string> = {
   algo: "Algo",
   timeToFill_ms: "TTF",
   IS_bps: "IS",
+  IS_usd: "IS ($)",
   VWAP_dev_bps: "vs Mkt VWAP",
+  VWAP_dev_usd: "vs Mkt VWAP ($)",
+  TWAP_dev_usd: "vs Mkt TWAP ($)",
   marketVWAP_price: "Mkt VWAP",
   TWAP_dev_bps: "vs Mkt TWAP",
   MI_bps: "Mkt Impact",
@@ -288,9 +301,12 @@ const CSV_COLUMNS: Array<{
   { header: "Algo",               value: (r) => r.algo },
   { header: "TTF",                value: (r) => fmtTtf(r.timeToFill_ms) },
   { header: "IS (bps)",           value: (r) => r.IS_bps },
+  { header: "IS ($)",             value: (r) => r.IS_usd },
   { header: "vs Mkt VWAP (bps)", value: (r) => r.VWAP_dev_bps },
+  { header: "vs Mkt VWAP ($)",   value: (r) => r.VWAP_dev_usd },
   { header: "Mkt VWAP",           value: (r) => r.marketVWAP_price },
   { header: "vs Mkt TWAP (bps)", value: (r) => r.TWAP_dev_bps },
+  { header: "vs Mkt TWAP ($)",   value: (r) => r.TWAP_dev_usd },
   { header: "Mkt Impact (bps)",   value: (r) => r.MI_bps },
   { header: "Rev +30s (bps)",     value: (r) => r.reversion_30s_bps },
   { header: "Rev +1m (bps)",      value: (r) => r.reversion_1m_bps },
@@ -317,7 +333,10 @@ const XLSX_COL_DEFS: Record<string, XlsxColDef> = {
   algo:                   { header: "Algo",               value: (r) => r.algo },
   timeToFill_ms:          { header: "TTF",                value: (r) => fmtTtf(r.timeToFill_ms) },
   IS_bps:                 { header: "IS (bps)",           value: (r) => r.IS_bps },
+  IS_usd:                 { header: "IS ($)",            value: (r) => r.IS_usd },
   VWAP_dev_bps:           { header: "vs Mkt VWAP (bps)", value: (r) => r.VWAP_dev_bps },
+  VWAP_dev_usd:           { header: "vs Mkt VWAP ($)",   value: (r) => r.VWAP_dev_usd },
+  TWAP_dev_usd:           { header: "vs Mkt TWAP ($)",   value: (r) => r.TWAP_dev_usd },
   marketVWAP_price:       { header: "Mkt VWAP",          value: (r) => r.marketVWAP_price },
   TWAP_dev_bps:           { header: "vs Mkt TWAP (bps)", value: (r) => r.TWAP_dev_bps },
   MI_bps:                 { header: "Mkt Impact (bps)",  value: (r) => r.MI_bps },
@@ -397,6 +416,21 @@ function BpsCell({
   return (
     <span className={`tabular-nums text-xs font-medium ${cls} ${ringCls}`}>
       {sign}{value.toFixed(1)}
+    </span>
+  );
+}
+
+/** Cash slippage cell — same red/green cost convention as BpsCell. */
+function UsdCell({ value, currency }: { value: number | null; currency: string }) {
+  if (value === null) {
+    return <span className="text-gray-300 dark:text-gray-600 text-xs select-none">N/A</span>;
+  }
+  const cls = value < 0
+    ? "text-green-600 dark:text-green-400"
+    : "text-red-500 dark:text-red-400";
+  return (
+    <span className={`tabular-nums text-xs font-medium ${cls}`}>
+      {fmtUsd(value, currency)}
     </span>
   );
 }
@@ -538,30 +572,56 @@ const TWAS_BPS_COL = col.accessor("TWAS_bps", {
 // Note: algo column is built inside the component so it can capture the edit callback.
 const POST_TIME_COLS = [
   // ── Primary benchmarks (blue ring on the relevant one per row) ────────────
+  // Which one is "relevant" comes from the shared algo → benchmark table, so
+  // the ring, the single-order highlight and the Total Cost tile all agree.
   col.accessor("IS_bps", {
     header: "IS",
-    cell: (i) => {
-      const a = (i.row.original.algo ?? "").toLowerCase();
-      return <BpsCell value={i.getValue()} highlighted={a !== "vwap" && a !== "twap"} />;
-    },
+    cell: (i) => (
+      <BpsCell
+        value={i.getValue()}
+        highlighted={resolveBenchmark(i.row.original.algo) === "arrival"}
+      />
+    ),
+    sortingFn: nullableSort,
+    enableGlobalFilter: false,
+  }),
+  col.accessor("IS_usd", {
+    header: "IS ($)",
+    cell: (i) => <UsdCell value={i.getValue()} currency={i.row.original.currency} />,
     sortingFn: nullableSort,
     enableGlobalFilter: false,
   }),
   col.accessor("VWAP_dev_bps", {
     header: "vs Mkt VWAP",
-    cell: (i) => {
-      const a = (i.row.original.algo ?? "").toLowerCase();
-      return <BpsCell value={i.getValue()} highlighted={a === "vwap"} />;
-    },
+    cell: (i) => (
+      <BpsCell
+        value={i.getValue()}
+        highlighted={resolveBenchmark(i.row.original.algo) === "vwap"}
+      />
+    ),
+    sortingFn: nullableSort,
+    enableGlobalFilter: false,
+  }),
+  col.accessor("VWAP_dev_usd", {
+    header: "vs Mkt VWAP ($)",
+    cell: (i) => <UsdCell value={i.getValue()} currency={i.row.original.currency} />,
     sortingFn: nullableSort,
     enableGlobalFilter: false,
   }),
   col.accessor("TWAP_dev_bps", {
     header: "vs Mkt TWAP",
-    cell: (i) => {
-      const a = (i.row.original.algo ?? "").toLowerCase();
-      return <BpsCell value={i.getValue()} highlighted={a === "twap"} />;
-    },
+    cell: (i) => (
+      <BpsCell
+        value={i.getValue()}
+        highlighted={resolveBenchmark(i.row.original.algo) === "twap"}
+      />
+    ),
+    sortingFn: nullableSort,
+    enableGlobalFilter: false,
+  }),
+  col.accessor("TWAP_dev_usd", {
+    header: "vs Mkt TWAP ($)",
+    cell: (i) => <UsdCell value={i.getValue()} currency={i.row.original.currency} />,
     sortingFn: nullableSort,
     enableGlobalFilter: false,
   }),
@@ -676,8 +736,8 @@ const DEFAULT_VISIBILITY: VisibilityState = {
 //   - metric columns requiring Bloomberg enrichment
 //   - arrivalPrice and algo (not needed in single-order fill detail)
 const METRIC_COLUMN_IDS = new Set([
-  "timeToFill_ms", "IS_bps", "VWAP_dev_bps", "marketVWAP_price",
-  "TWAP_dev_bps", "MI_bps", "reversion_30s_bps", "reversion_1m_bps",
+  "timeToFill_ms", "IS_bps", "VWAP_dev_bps", "VWAP_dev_usd", "marketVWAP_price",
+  "TWAP_dev_bps", "TWAP_dev_usd", "MI_bps", "reversion_30s_bps", "reversion_1m_bps",
   "TWAS_bps", "TWAS_price", "vol_during_order_price", "vol_during_order_bps",
   "arrivalPrice", "algo",
 ]);

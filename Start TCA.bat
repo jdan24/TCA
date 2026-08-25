@@ -138,14 +138,18 @@ if errorlevel 1 (
 )
 
 rem ---------------------------------------------------------------------------
-rem Start the bridge. Output goes to bridge.log so a crash leaves a trace --
-rem the old pythonw launch left nothing at all to look at. /d sets the working
-rem directory so the command needs no nested quoting; bridge.py resolves
-rem branding.zip from __file__, so its own location is what matters, not cwd.
+rem Start the bridge in its own visible window so the uvicorn log is on screen:
+rem the /health heartbeat plus a line per Bloomberg endpoint hit. bridge.py also
+rem writes bridge.log itself, so output is no longer redirected away from the
+rem console. The trailing pause keeps the window up if the bridge exits, so a
+rem traceback stays readable instead of the window vanishing.
+rem
+rem /d sets the working directory so the command needs no nested quoting;
+rem bridge.py resolves branding.zip and bridge.log from __file__, so its own
+rem location is what matters, not cwd.
 rem ---------------------------------------------------------------------------
 echo  Starting Bloomberg Bridge...
-if exist "%LOG%" del "%LOG%" >nul 2>&1
-start "Bloomberg Bridge" /min /d "%ROOT%bloomberg-bridge" cmd /c "%PY% bridge.py > bridge.log 2>&1"
+start "Bloomberg Bridge" /d "%ROOT%bloomberg-bridge" cmd /c "%PY% bridge.py & echo. & echo [bridge stopped] & pause"
 
 rem Poll until it answers, rather than assuming a fixed 3-second startup.
 set "TRIES=0"
@@ -165,6 +169,7 @@ goto :open_app
 :bridge_failed
 echo.
 echo  ERROR: the bridge did not answer on %HEALTH%
+echo  Check the "Bloomberg Bridge" window for the reason.
 if exist "%LOG%" (
     echo.
     echo  ---- last lines of bloomberg-bridge\bridge.log ----

@@ -146,7 +146,8 @@ export function FAQModal({ onClose }: FAQModalProps) {
             <Entry name="Reference Data" tag="ReferenceDataRequest">
               <Row label="HIST_VOL_30D" value="30-day historical annualised volatility (%)" />
               <Row label="VOLUME_AVG_30D" value="30-day average daily volume (contracts)" />
-              <p>Fetched once per unique symbol. Used for Market Impact estimation.</p>
+              <Row label="FUT_CONT_SIZE" value="Contract notional — converted to a cash point value (see Slippage in Cash Terms)" />
+              <p>Fetched once per unique symbol. Used for Market Impact estimation and for the cash slippage figures.</p>
             </Entry>
 
             <Entry name="FIX File Symbol Resolution" tag="tag 48 / tag 55">
@@ -168,6 +169,27 @@ export function FAQModal({ onClose }: FAQModalProps) {
               <Row label="Favorable" value={<Pill color="green">negative</Pill>} />
               <Row label="Adverse" value={<Pill color="red">positive</Pill>} />
               <p>Measures the total slippage cost of the order versus the price at decision time. A BUY that fills above arrival, or a SELL that fills below arrival, incurs a positive (adverse) IS. On the Single Order Parent Summary, IS is computed at the parent order level using the qty-weighted average fill price (fillVWAP) versus the arrival price.</p>
+            </Entry>
+
+            <Entry name="Slippage in Cash Terms" tag="$ · IS / VWAP / TWAP">
+              <Formula>$ = (fillPrice − benchmarkPrice) × sideSign × quantity × pointValue</Formula>
+              <Row label="pointValue" value="Cash value of a 1.00 price move for one contract — 1000 for a 3Y/10Y note, 50 for ES" />
+              <Row label="Source (1st)" value="Manual per-symbol override in the Symbols table — leave blank to use Bloomberg" />
+              <Row label="Source (2nd)" value="Bloomberg FUT_CONT_SIZE, converted as below" />
+              <Row label="Treasury conversion" value="Treasury futures quote as a percent of par, so their point value is FUT_CONT_SIZE ÷ 100: ZN's 100,000 face becomes $1,000 per point. Contracts quoted in currency-per-unit (ES 50, CL 1,000, 6E 125,000) are used as-is." />
+              <Row label="No point value" value={<Pill color="gray">N/A</Pill>} />
+              <p>Shown beside the bps figure on each benchmark in the Parent Order Summary, and as its own column in the order and fill tables. Positive is a cost, matching the bps convention.</p>
+              <p>When neither a manual override nor a Bloomberg value is available the figure is N/A. It is never defaulted to a multiplier of 1 — for a futures contract that would understate the cost by three orders of magnitude while looking authoritative.</p>
+              <p><strong>No FX conversion.</strong> The point value is in the contract's own currency, so a EUR-denominated contract produces a figure in EUR. The Total Cost tile refuses to sum across currencies and shows N/A instead.</p>
+            </Entry>
+
+            <Entry name="Total Cost" tag="$ · algo-aware">
+              <Formula>Total = Σ orders( cash slippage vs that order's algo benchmark )</Formula>
+              <Row label="Benchmark per order" value="From the Algo Benchmarks table (the Algos button in the header)" />
+              <Row label="Unmapped algo" value="Falls back to Arrival (IS), as does a blank algo" />
+              <Row label="Matching" value="Case-insensitive but otherwise exact — 'VWAP 10%' needs its own row, separate from 'VWAP'" />
+              <p>A report mixing VWAP, TWAP and arrival-price algos sums each order against the benchmark it was actually trying to beat, rather than forcing one benchmark on all of them. The table is seeded with the built-in algo list (TWAP → Market TWAP, VWAP → Market VWAP, POV / Pegger / Sniper / ArtemIS / Apollo → Arrival), so it is correct before you open it.</p>
+              <p>The same table drives which benchmark is ring-highlighted per row in the order table and which card is highlighted in the Single Order summary.</p>
             </Entry>
 
             <Entry name="VWAP Deviation" tag="bps">
@@ -233,6 +255,13 @@ export function FAQModal({ onClose }: FAQModalProps) {
               <Row label="≈ prefix" value="The spread was estimated from 1-minute bar ranges because Bloomberg quote ticks were unavailable for the window — a rough proxy, not a measurement." />
               <p>A liquidity environment proxy: how wide the market spread was, on average, while the order was executing. Comparing TWAS to IS helps distinguish execution skill from market conditions — high IS in a wide-spread environment is less concerning than high IS with a tight spread.</p>
               <p>On instruments whose price sits near zero — futures calendar spreads especially — read the price width first: a spread quoted 0-03¾ / 0-03⅞ is one eighth of a 32nd wide, which is a large number in bps only because the mid is small.</p>
+            </Entry>
+
+            <Entry name="Spread vs Slippage chart — the dashed line" tag="IS = TWAS">
+              <Formula>dashed line: IS = TWAS</Formula>
+              <Row label="Below the line" value={<Pill color="green">beat the spread</Pill>} />
+              <Row label="Above the line" value={<Pill color="red">paid more than the quoted width</Pill>} />
+              <p>The line is the <strong>full</strong> quoted spread, so it is a generous bar. IS is measured against the arrival mid, and simply crossing to the far touch costs half the spread — such an execution lands around y = x/2, comfortably below the line. A point above the line paid more than the entire quoted width.</p>
             </Entry>
 
             <Entry name="Trend Cost" tag="bps · IS decomposition">

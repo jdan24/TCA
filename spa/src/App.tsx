@@ -11,6 +11,7 @@ import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { CorporateTemplateProvider } from "@/hooks/useCorporateTemplate";
 import { useTCAStore } from "@/store/useTCAStore";
 import { computeAll } from "@/tca/compute";
+import { buildPointValueResolver } from "@/tca/pointValue";
 import { parseSymbolMapCsvText } from "@/parsers/symbolMapCsv";
 import type { TradeRecord } from "@/types";
 
@@ -56,12 +57,15 @@ function App() {
   // null = wizard not shown; non-null = wizard shown with these trades.
   const [wizardTrades, setWizardTrades] = useState<TradeRecord[] | null>(null);
 
-  // Re-run TCA metrics whenever trades or Bloomberg enrichment changes
+  // Re-run TCA metrics whenever trades, Bloomberg enrichment, or the symbol
+  // mappings change — the mappings carry the manual point-value overrides that
+  // the cash slippage figures depend on.
   useEffect(() => {
     if (rawTrades.length > 0) {
-      setResults(computeAll(rawTrades, enrichment));
+      const pointValueFor = buildPointValueResolver(symbolMap.mappings, rawTrades, enrichment);
+      setResults(computeAll(rawTrades, enrichment, pointValueFor));
     }
-  }, [rawTrades, enrichment, setResults]);
+  }, [rawTrades, enrichment, symbolMap.mappings, setResults]);
 
   async function handleFetchBloomberg() {
     if (rawTrades.length === 0 || !bloombergConnected || enrichProgress !== null) return;

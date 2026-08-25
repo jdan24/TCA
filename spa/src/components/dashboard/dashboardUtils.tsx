@@ -31,6 +31,39 @@ export function fmtBps(v: number | null | undefined, decimals = 1): string {
   return `${sign}${v.toFixed(decimals)} bps`;
 }
 
+/**
+ * Format a nullable cash amount, e.g. "+$1,240" / "-$310" / "N/A".
+ *
+ * Sign is explicit so a cost reads differently from a saving at a glance,
+ * matching the bps convention: positive is a cost.
+ *
+ * `currency` is the contract's own currency — there is no FX conversion, so a
+ * EUR contract is labelled EUR rather than silently reported as dollars.
+ */
+export function fmtUsd(
+  v: number | null | undefined,
+  currency = "USD",
+  decimals = 0,
+): string {
+  if (v === null || v === undefined || !isFinite(v)) return "N/A";
+  let body: string;
+  try {
+    body = Math.abs(v).toLocaleString(undefined, {
+      style: "currency",
+      currency,
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+  } catch {
+    // Unknown / non-ISO currency code from the file — fall back to a plain number
+    body = `${Math.abs(v).toLocaleString(undefined, {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    })} ${currency}`;
+  }
+  return `${v > 0 ? "+" : v < 0 ? "-" : ""}${body}`;
+}
+
 /** Format time-to-fill milliseconds as a human-readable string. */
 export function fmtTtf(ms: number): string {
   if (ms < 1_000) return `${ms}ms`;

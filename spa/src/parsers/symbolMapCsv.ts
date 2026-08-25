@@ -9,10 +9,12 @@
  *   bbgTicker      | "Bloomberg Ticker"
  *   bbgYellowKey   | "Yellow Key"
  *   priceMultiplier| "Price Multiplier"
+ *   pointValue     | "Point Value"
  *
  * Rows missing a RIC or Bloomberg ticker are skipped. An unknown / blank yellow
  * key falls back to "Index". priceMultiplier is only kept when it is a valid
- * number > 0 and ≠ 1 (matching the table's own normalisation).
+ * number > 0 and ≠ 1 (matching the table's own normalisation). pointValue is
+ * kept for any number > 0 — there is no no-op default for it.
  */
 
 import Papa from "papaparse";
@@ -29,6 +31,9 @@ const RIC_KEYS = new Set(["ric", "symbol", "ricsymbol", "ric/symbol"].map(canon)
 const TICKER_KEYS = new Set(["bbgticker", "bloombergticker", "ticker"].map(canon));
 const YELLOWKEY_KEYS = new Set(["bbgyellowkey", "yellowkey"].map(canon));
 const MULT_KEYS = new Set(["pricemultiplier", "multiplier"].map(canon));
+const POINTVALUE_KEYS = new Set(
+  ["pointvalue", "pointvalueusd", "pointvalue$", "dollarpervpoint", "usdperpoint", "tickvalue"].map(canon),
+);
 
 /** Pull the first value from a row whose canonicalised header is in `keys`. */
 function pick(row: Record<string, string>, keys: Set<string>): string | undefined {
@@ -78,17 +83,25 @@ function _parsePapa(input: File | string): Promise<SymbolMapCsvResult> {
           const mult = parseFloat(multRaw);
           const keepMult = multRaw !== "" && !isNaN(mult) && mult > 0 && mult !== 1;
 
-          mappings.push(
-            keepMult
-              ? { ric, bbgTicker: ticker, bbgYellowKey, priceMultiplier: mult }
-              : { ric, bbgTicker: ticker, bbgYellowKey },
-          );
+          // Point value: any positive number is meaningful (unlike the price
+          // multiplier, where 1 is the no-op default and not worth storing).
+          const pvRaw = (pick(row, POINTVALUE_KEYS) ?? "").trim();
+          const pv = parseFloat(pvRaw);
+          const keepPv = pvRaw !== "" && !isNaN(pv) && pv > 0;
+
+          mappings.push({
+            ric,
+            bbgTicker: ticker,
+            bbgYellowKey,
+            ...(keepMult ? { priceMultiplier: mult } : {}),
+            ...(keepPv ? { pointValue: pv } : {}),
+          });
         }
 
         if (mappings.length === 0) {
           reject(
             new Error(
-              "No valid mappings found. Expected columns: Symbol, Bloomberg Ticker, Yellow Key, Price Multiplier.",
+              "No valid mappings found. Expected columns: Symbol, Bloomberg Ticker, Yellow Key, Price Multiplier, Point Value.",
             ),
           );
           return;

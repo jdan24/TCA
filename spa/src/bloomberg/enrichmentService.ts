@@ -32,6 +32,8 @@
  */
 
 import type { BidAskTick, BloombergEnrichment, IntradayBar, TradeTick, TradeRecord } from "@/types";
+import { pointValueFromContractSize } from "@/tca/dollars";
+import { getTreasuryPrecision } from "@/tca/treasuryFrac";
 import {
   fetchArrivalPrice,
   fetchBidAskTicks,
@@ -311,6 +313,13 @@ async function enrichOneTrade(
   }));
   const bidAskSource = rawTickData.source;
 
+  // Cash value of a 1.00 price move. Treasury futures quote as a percent of
+  // par, so their FUT_CONT_SIZE needs dividing by 100; see dollars.ts.
+  const pointValue = pointValueFromContractSize(
+    refData["FUT_CONT_SIZE"],
+    getTreasuryPrecision(bbgSymbol) !== null,
+  );
+
   // ── Trade ticks (Date-typed for short-order VWAP) ─────────────────────────
   const tradeTicks: TradeTick[] = rawTradeTicks.map((t) => ({
     time: new Date(t.time),
@@ -326,6 +335,7 @@ async function enrichOneTrade(
     // Fall back to avgFillPrice → 0 bps reversion (conservative "no data")
     reversion30s: rev30sPrice ?? avgFillPrice,
     reversion1m:  rev1mPrice  ?? avgFillPrice,
+    pointValue,
     bidAskTicks,
     bidAskSource,
     tradeTicks,
@@ -382,6 +392,7 @@ export async function enrichAllTrades(
         "CLOSE_TO_CLOSE_HIST_VOL_30D", // close-to-close 30D, common for rates/FI futures
         "VOLUME_AVG_30D",
         "VOLUME_AVG_20D",
+        "FUT_CONT_SIZE",          // contract notional -> cash point value
       ]);
     }),
   );
@@ -458,6 +469,7 @@ export async function enrichSingleOrder(
   const refData = await fetchReference(bbgSymbol, [
     "HIST_VOL_30D", "VOLATILITY_30D", "RETURN_VOL_30D_MID",
     "CLOSE_TO_CLOSE_HIST_VOL_30D", "VOLUME_AVG_30D", "VOLUME_AVG_20D",
+    "FUT_CONT_SIZE",
   ]);
 
   // ── Bars + ticks + snapshot (parallel, one call each) ─────────────────────
@@ -546,6 +558,13 @@ export async function enrichSingleOrder(
   }));
   const bidAskSource = rawTickData.source;
 
+  // Cash value of a 1.00 price move. Treasury futures quote as a percent of
+  // par, so their FUT_CONT_SIZE needs dividing by 100; see dollars.ts.
+  const pointValue = pointValueFromContractSize(
+    refData["FUT_CONT_SIZE"],
+    getTreasuryPrecision(bbgSymbol) !== null,
+  );
+
   // ── Trade ticks (Date-typed for short-order VWAP) ─────────────────────────
   const tradeTicks: TradeTick[] = rawTradeTicks.map((t) => ({
     time: new Date(t.time),
@@ -561,6 +580,7 @@ export async function enrichSingleOrder(
     dailyVol,
     reversion30s: rev30sPrice ?? fillVwap,
     reversion1m:  rev1mPrice  ?? fillVwap,
+    pointValue,
     bidAskTicks,
     bidAskSource,
     tradeTicks,

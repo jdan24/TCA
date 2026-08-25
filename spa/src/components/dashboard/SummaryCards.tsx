@@ -1,15 +1,22 @@
 /**
  * KPI summary tiles row.
  *
- * Shows five portfolio-level metrics:
- *   Avg IS (bps) · Avg VWAP Dev · Avg TWAS · Avg Time-to-Fill · Avg Market Impact
+ * Shows portfolio-level metrics:
+ *   Avg IS (bps) · Avg VWAP Dev · Avg TWAS · Total Cost ($) ·
+ *   Avg Time-to-Fill · # Orders · Total Contracts
  *
  * Metrics that require Bloomberg enrichment display "N/A" when unavailable.
  * Color coding: favorable values (negative IS/VWAP) → green; adverse → red.
+ *
+ * Total Cost is benchmark-aware: each order contributes its cash slippage
+ * against the benchmark its algo maps to, so a mixed report of VWAP, TWAP and
+ * arrival-price algos sums each order against the thing it was actually
+ * trying to beat. See the Algo Benchmarks table in Settings.
  */
 
 import type { TCAResult, TradeRecord } from "@/types";
-import { fmtBps, fmtTtf, safeAvg } from "./dashboardUtils";
+import { resolveBenchmark } from "@/hooks/useAlgoMap";
+import { fmtBps, fmtTtf, fmtUsd, safeAvg } from "./dashboardUtils";
 
 interface SummaryCardsProps {
   results: TCAResult[];
@@ -70,6 +77,42 @@ export function SummaryCards({ results, trades }: SummaryCardsProps) {
 
   const avgTtf = safeAvg(results.map((r) => r.timeToFill_ms));
 
+  // ── Total cost, each order against its own algo's benchmark ───────────────
+  const totalCost = (() => {
+    const resultById = new Map(results.map((r) => [r.orderId, r]));
+    const currencies = new Set<string>();
+    let sum = 0;
+    let priced = 0;
+
+    for (const trade of trades) {
+      const r = resultById.get(trade.orderId);
+      if (!r) continue;
+      const benchmark = resolveBenchmark(trade.algo);
+      const usd =
+        benchmark === "vwap" ? r.VWAP_dev_usd :
+        benchmark === "twap" ? r.TWAP_dev_usd :
+        r.IS_usd;
+      if (usd === null) continue;
+      sum += usd;
+      priced += 1;
+      currencies.add(trade.currency);
+    }
+
+    if (priced === 0) {
+      return { value: null, sub: "needs point value", currency: "USD" };
+    }
+    // No FX conversion anywhere in the app, so a total across currencies would
+    // be meaningless. Report the gap instead of a wrong number.
+    if (currencies.size > 1) {
+      return { value: null, sub: "mixed currencies", currency: "USD" };
+    }
+    return {
+      value: sum,
+      sub: subOf(priced),
+      currency: [...currencies][0] ?? "USD",
+    };
+  })();
+
   const uniqueOrderCount = new Set(results.map((r) => r.orderId)).size;
 
   const totalQty = trades.reduce((s, t) => s + t.orderQty, 0);
@@ -79,7 +122,7 @@ export function SummaryCards({ results, trades }: SummaryCardsProps) {
   }
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-3">
       <KpiCard
         label="Avg IS"
         value={fmtBps(avgIS)}
@@ -97,6 +140,12 @@ export function SummaryCards({ results, trades }: SummaryCardsProps) {
         value={fmtBps(avgTwas)}
         sub={subOf(twasCount)}
         sentiment="neutral"
+      />
+      <KpiCard
+        label="Total Cost"
+        value={fmtUsd(totalCost.value, totalCost.currency)}
+        sub={totalCost.sub}
+        sentiment={totalCost.value === null ? "neutral" : totalCost.value <= 0 ? "good" : "bad"}
       />
       <KpiCard
         label="Avg Time-to-Fill"
