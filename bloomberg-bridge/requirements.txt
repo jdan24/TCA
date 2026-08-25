@@ -1,11 +1,13 @@
-# Option A — FastAPI (bridge.py)
-# Use if available in your corporate PyPI mirror
+# Bloomberg TCA Bridge dependencies
+#
+#   pip install -r requirements.txt
+#
+# On a corporate network you may need your firm's package index:
+#   pip install -r requirements.txt --index-url https://your.mirror/simple
+
 fastapi
 uvicorn[standard]
 
-# Option B — Flask (bridge_flask.py)
-# Widely available; use when FastAPI is not in the registry
-flask
-
-# Bloomberg Python SDK (required by both)
+# Bloomberg Python SDK. Optional: without it the bridge still starts and the
+# app runs, but no market data is available.
 blpapi

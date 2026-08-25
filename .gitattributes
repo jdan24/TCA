@@ -1,6 +1,11 @@
 # Normalize line endings to LF in the repo, check out as-is on all platforms
 * text=auto eol=lf
 
+# Windows batch files must check out with CRLF. cmd.exe mis-parses LF-only
+# scripts around goto labels and parenthesised if blocks, which silently skipped
+# the bridge launch in "Start TCA.bat" while still opening the app.
+*.bat text eol=crlf
+
 # Binary files — no line-ending conversion
 *.png binary
 *.jpg binary

@@ -8,6 +8,9 @@ dist/
 __pycache__/
 *.pyc
 *.pyo
+
+# Bridge stdout/stderr captured by "Start TCA.bat"
+bloomberg-bridge/bridge.log
 .DS_Store
 Thumbs.db
 spa/sample-data/
