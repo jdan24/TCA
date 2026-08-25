@@ -57,6 +57,8 @@ interface ParentSummaryCardProps {
   onOrderTimeChange: (d: Date) => void;
   onLastFillTimeChange: (d: Date) => void;
   resolveSymbol?: (ric: string) => string;
+  /** Decimal → display string (e.g. 32nds for Treasury futures). Defaults to fmtPrice. */
+  priceFormatter?: (v: number) => string;
   /** Manual override for the broker/exchange order ID (FIX tag 37). undefined = use summary value. */
   brokerOrderId?: string | null | undefined;
   onBrokerOrderIdChange?: (id: string | null) => void;
@@ -72,9 +74,9 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+function DetailRow({ label, value, mono = false, title }: { label: string; value: string; mono?: boolean; title?: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-2 py-1.5 border-b border-gray-100 dark:border-gray-800 last:border-0">
+    <div className="flex items-baseline justify-between gap-2 py-1.5 border-b border-gray-100 dark:border-gray-800 last:border-0" title={title}>
       <span className="text-[11px] text-gray-500 dark:text-gray-400 shrink-0">{label}</span>
       <span className={`text-xs font-semibold text-gray-900 dark:text-white tabular-nums text-right ${mono ? "font-mono" : ""}`}>
         {value}
@@ -88,11 +90,16 @@ function BpsRow({
   value,
   invert = false,
   neutral = false,
+  approx = false,
+  title,
 }: {
   label: string;
   value: number | null;
   invert?: boolean;
   neutral?: boolean;
+  /** Prefix the value with ≈ — it is an estimate, not a measurement. */
+  approx?: boolean;
+  title?: string;
 }) {
   let displayStr: string;
   let colorClass: string;
@@ -102,7 +109,7 @@ function BpsRow({
     colorClass = "text-gray-400 dark:text-gray-600";
   } else {
     const sign = value > 0 ? "+" : "";
-    displayStr = `${sign}${value.toFixed(1)} bps`;
+    displayStr = `${approx ? "≈" : ""}${sign}${value.toFixed(1)} bps`;
     if (neutral) {
       colorClass = "text-gray-700 dark:text-gray-300";
     } else {
@@ -112,7 +119,7 @@ function BpsRow({
   }
 
   return (
-    <div className="flex items-baseline justify-between gap-2 py-1.5 border-b border-gray-100 dark:border-gray-800 last:border-0">
+    <div className="flex items-baseline justify-between gap-2 py-1.5 border-b border-gray-100 dark:border-gray-800 last:border-0" title={title}>
       <span className="text-[11px] text-gray-500 dark:text-gray-400 shrink-0">{label}</span>
       <span className={`text-xs font-semibold tabular-nums text-right ${colorClass}`}>
         {displayStr}
@@ -332,6 +339,7 @@ export function ParentSummaryCard({
   onOrderTimeChange,
   onLastFillTimeChange,
   resolveSymbol,
+  priceFormatter,
   brokerOrderId: brokerOrderIdProp,
   onBrokerOrderIdChange,
 }: ParentSummaryCardProps) {
@@ -352,6 +360,13 @@ export function ParentSummaryCard({
       : null;
 
   const noBloomberg = summary.arrivalPrice === null;
+
+  // TWAS provenance: "bars" means the bridge could not get real quotes and fell
+  // back to estimating the spread from 1-minute bar ranges.
+  const twasEstimated = summary.bidAskSource === "bars";
+  const twasTitle = twasEstimated
+    ? "Estimated from 1-minute bar ranges — Bloomberg quote ticks unavailable for this window."
+    : undefined;
 
   // Trend Cost = IS − MI − TWAS/2  (IS decomposition: residual after impact and spread)
   const trendCost_bps: number | null =
@@ -432,7 +447,22 @@ export function ParentSummaryCard({
             } />
             <BpsRow label="Impact (bps)"       value={summary.MI_bps} neutral />
             <BpsRow label="Reversion 1m (bps)" value={reversion1m_bps} invert />
-            <BpsRow label="TWAS (bps)"         value={summary.TWAS_bps} neutral />
+            <BpsRow
+              label="TWAS (bps)"
+              value={summary.TWAS_bps}
+              neutral
+              approx={twasEstimated}
+              {...(twasTitle !== undefined ? { title: twasTitle } : {})}
+            />
+            <DetailRow
+              label="TWAS (price)"
+              value={
+                summary.TWAS_price !== null
+                  ? `${twasEstimated ? "≈" : ""}${(priceFormatter ?? fmtPrice)(summary.TWAS_price)}`
+                  : "N/A (needs BBG)"
+              }
+              {...(twasTitle !== undefined ? { title: twasTitle } : {})}
+            />
             <BpsRow label="Trend Cost (bps)"   value={trendCost_bps} />
           </div>
         </div>

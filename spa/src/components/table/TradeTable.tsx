@@ -49,6 +49,7 @@ interface TableRow {
   reversion_30s_bps: number | null;
   reversion_1m_bps: number | null;
   TWAS_bps: number | null;
+  TWAS_price: number | null;
   vol_during_order_price: number | null;
   vol_during_order_bps: number | null;
   TWAP_dev_bps: number | null;
@@ -79,6 +80,7 @@ function mergeRows(trades: TradeRecord[], results: TCAResult[], enrichment: Reco
       reversion_30s_bps: r?.reversion_30s_bps ?? null,
       reversion_1m_bps: r?.reversion_1m_bps ?? null,
       TWAS_bps: r?.TWAS_bps ?? null,
+      TWAS_price: r?.TWAS_price ?? null,
       vol_during_order_price: r?.vol_during_order_price ?? null,
       vol_during_order_bps: r?.vol_during_order_bps ?? null,
       TWAP_dev_bps: r?.TWAP_dev_bps ?? null,
@@ -109,6 +111,7 @@ const COLUMN_LABELS: Record<string, string> = {
   reversion_30s_bps: "Rev +30s",
   reversion_1m_bps: "Rev +1m",
   TWAS_bps: "TWAS",
+  TWAS_price: "TWAS (price)",
   vol_during_order_price: "1σ Vol (price)",
   vol_during_order_bps: "1σ Vol (bps)",
 };
@@ -292,6 +295,7 @@ const CSV_COLUMNS: Array<{
   { header: "Rev +30s (bps)",     value: (r) => r.reversion_30s_bps },
   { header: "Rev +1m (bps)",      value: (r) => r.reversion_1m_bps },
   { header: "TWAS (bps)",         value: (r) => r.TWAS_bps },
+  { header: "TWAS (price)",       value: (r) => r.TWAS_price },
   { header: "1σ Vol (price)",      value: (r) => r.vol_during_order_price },
   { header: "1σ Vol (bps)",        value: (r) => r.vol_during_order_bps },
 ];
@@ -320,6 +324,7 @@ const XLSX_COL_DEFS: Record<string, XlsxColDef> = {
   reversion_30s_bps:      { header: "Rev +30s (bps)",    value: (r) => r.reversion_30s_bps },
   reversion_1m_bps:       { header: "Rev +1m (bps)",     value: (r) => r.reversion_1m_bps },
   TWAS_bps:               { header: "TWAS (bps)",        value: (r) => r.TWAS_bps },
+  TWAS_price:             { header: "TWAS (price)",      value: (r) => r.TWAS_price },
   vol_during_order_price: { header: "1σ Vol (price)",     value: (r) => r.vol_during_order_price },
   vol_during_order_bps:   { header: "1σ Vol (bps)",       value: (r) => r.vol_during_order_bps },
 };
@@ -517,6 +522,18 @@ const FIRST_FILL_COL = col.accessor("firstFillTime", {
 });
 
 // Metric columns — ordered: primary benchmarks (with algo-driven highlight ring),
+/**
+ * Held as a named column so the component can splice the TWAS (price) column in
+ * directly after it — the price column's cell needs a per-row formatter from
+ * props, so it cannot live in this module-level array.
+ */
+const TWAS_BPS_COL = col.accessor("TWAS_bps", {
+  header: "TWAS",
+  cell: (i) => <BpsCell value={i.getValue()} neutral />,
+  sortingFn: nullableSort,
+  enableGlobalFilter: false,
+});
+
 // TWAS + Vol(bps), then secondary metrics.
 // Note: algo column is built inside the component so it can capture the edit callback.
 const POST_TIME_COLS = [
@@ -549,12 +566,7 @@ const POST_TIME_COLS = [
     enableGlobalFilter: false,
   }),
   // ── Priority secondary ───────────────────────────────────────────────────
-  col.accessor("TWAS_bps", {
-    header: "TWAS",
-    cell: (i) => <BpsCell value={i.getValue()} neutral />,
-    sortingFn: nullableSort,
-    enableGlobalFilter: false,
-  }),
+  TWAS_BPS_COL,
   col.accessor("vol_during_order_bps", {
     header: () => <>1<span className="normal-case">σ</span> Vol (bps)</>,
     cell: (i) => <BpsCell value={i.getValue()} neutral />,
@@ -635,6 +647,15 @@ interface TradeTableProps {
   hideMetrics?: boolean;
   /** Optional symbol resolver — translates raw RIC to BBG ticker + yellow key. */
   resolveSymbol?: (ric: string) => string;
+  /**
+   * Per-symbol price formatter for the TWAS (price) column, e.g. 32nds for
+   * Treasury futures.  The table is multi-symbol, so precision has to be
+   * resolved per row; return null to fall back to 4 decimal places.
+   *
+   * Deliberately separate from resolveSymbol: passing that in also changes what
+   * the Symbol column displays.
+   */
+  priceFormatterForSymbol?: (ric: string) => ((v: number) => string) | null;
   /** When true, shows an Excel export button in the toolbar. */
   showExcelExport?: boolean;
   /**
@@ -657,11 +678,11 @@ const DEFAULT_VISIBILITY: VisibilityState = {
 const METRIC_COLUMN_IDS = new Set([
   "timeToFill_ms", "IS_bps", "VWAP_dev_bps", "marketVWAP_price",
   "TWAP_dev_bps", "MI_bps", "reversion_30s_bps", "reversion_1m_bps",
-  "TWAS_bps", "vol_during_order_price", "vol_during_order_bps",
+  "TWAS_bps", "TWAS_price", "vol_during_order_price", "vol_during_order_bps",
   "arrivalPrice", "algo",
 ]);
 
-export function TradeTable({ trades, results, title = "Trade Detail", hideMetrics = false, resolveSymbol, showExcelExport = false, onDeleteOrder }: TradeTableProps) {
+export function TradeTable({ trades, results, title = "Trade Detail", hideMetrics = false, resolveSymbol, priceFormatterForSymbol, showExcelExport = false, onDeleteOrder }: TradeTableProps) {
   const aggregationFilter = useTCAStore((s) => s.aggregationFilter);
   const setAggregationFilter = useTCAStore((s) => s.setAggregationFilter);
   const rawTrades   = useTCAStore((s) => s.rawTrades);
@@ -759,18 +780,37 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
         })]
       : [];
 
+    const twasPriceCol = col.accessor("TWAS_price", {
+      header: "TWAS (price)",
+      cell: (i) => {
+        const v = i.getValue();
+        if (v === null) {
+          return <span className="text-gray-300 dark:text-gray-600 text-xs select-none">N/A</span>;
+        }
+        const fmt = priceFormatterForSymbol?.(i.row.original.symbol);
+        return (
+          <span className="tabular-nums text-xs text-gray-700 dark:text-gray-300">
+            {fmt ? fmt(v) : v.toFixed(4)}
+          </span>
+        );
+      },
+      sortingFn: nullableSort,
+      enableGlobalFilter: false,
+    });
+
     return [
       editOrderTime,
       symbolCol,
       ...PRE_TIME_COLS_NO_SYMBOL.slice(1), // side, qty, fillPrice, arrivalPrice
       algoCol,
-      ...POST_TIME_COLS,                   // IS, vs VWAP, vs TWAP, TWAS, Vol(bps), then rest
+      // IS, vs VWAP, vs TWAP, TWAS, TWAS (price), Vol(bps), then rest
+      ...POST_TIME_COLS.flatMap((c) => (c === TWAS_BPS_COL ? [c, twasPriceCol] : [c])),
       FIRST_FILL_COL,
       editLastFill,
       PRE_TIME_COLS_NO_SYMBOL[0]!,         // Order ID — last
       ...deleteCol,
     ];
-  }, [handleTimeEdit, handleAlgoEdit, resolveSymbol, onDeleteOrder]);
+  }, [handleTimeEdit, handleAlgoEdit, resolveSymbol, priceFormatterForSymbol, onDeleteOrder]);
 
   // Pre-filter rows by aggregation selection
   const filteredIds = useMemo(

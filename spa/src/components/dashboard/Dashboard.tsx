@@ -17,6 +17,8 @@ import type { EnrichProgress } from "@/bloomberg/enrichmentService";
 import type { AggregationSet, DataFilter, TCAResult, TradeRecord } from "@/types";
 import { EMPTY_FILTER } from "@/types";
 import { buildAggregations } from "@/tca/aggregate";
+import { decToTreasuryFrac, getTreasuryPrecision } from "@/tca/treasuryFrac";
+import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { MultiOrderPrintLayout, type MOChartImages } from "@/components/export/MultiOrderPrintLayout";
 import { TradeTable } from "@/components/table/TradeTable";
 import { AggregationSection } from "./AggregationSection";
@@ -46,6 +48,20 @@ export function Dashboard({
   onFetchBloomberg,
   onReset,
 }: DashboardProps) {
+  // Per-row price formatter for the table's TWAS (price) column: Treasury
+  // futures show 32nds, everything else falls back to plain decimals.
+  const { resolve: resolveSymbol } = useSymbolMap();
+  const priceFormatterForSymbol = useMemo(
+    // Depend on `resolve` itself, not the hook's return object — that object is
+    // a fresh literal every render and would defeat the memo, re-creating the
+    // table's column definitions on each pass.
+    () => (ric: string) => {
+      const precision = getTreasuryPrecision(resolveSymbol(ric));
+      return precision ? (v: number) => decToTreasuryFrac(v, precision) : null;
+    },
+    [resolveSymbol],
+  );
+
   const [showPrintLayout, setShowPrintLayout]     = useState(false);
   const [capturingPrint, setCapturingPrint]       = useState(false);
   const [printCharts,    setPrintCharts]           = useState<MOChartImages | null>(null);
@@ -239,6 +255,7 @@ export function Dashboard({
         trades={filteredTrades}
         results={filteredResults}
         title="Order Detail"
+        priceFormatterForSymbol={priceFormatterForSymbol}
         onDeleteOrder={handleDeleteOrder}
       />
 

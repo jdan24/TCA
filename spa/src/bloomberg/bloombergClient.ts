@@ -10,10 +10,10 @@
  *   GET /snapshot          → { arrivalPrice: number }
  *   GET /intraday-bars     → IntradayBar[]
  *   GET /reference         → Record<string, unknown>
- *   GET /bid-ask-ticks     → BridgeTick[]
+ *   GET /bid-ask-ticks     → { source, pairs: BridgeTick[] }
  */
 
-import type { IntradayBar } from "@/types";
+import type { BidAskSource, IntradayBar } from "@/types";
 
 const BRIDGE_BASE = "http://localhost:8000";
 
@@ -151,8 +151,22 @@ export async function fetchReference(
   );
 }
 
+/** Raw /bid-ask-ticks payload — object shape, or a bare array from an older bridge. */
+type BidAskTicksPayload = BridgeTick[] | { source?: string; pairs?: BridgeTick[] };
+
+/** Bid/ask pairs plus where they came from. */
+export interface BidAskTicksResult {
+  ticks: BridgeTick[];
+  source: BidAskSource;
+}
+
 /**
  * GET /bid-ask-ticks — chronological bid/ask pairs over [start, end].
+ *
+ * The bridge reports whether the pairs are real Bloomberg quotes ("ticks") or
+ * spreads estimated from 1-minute bar ranges ("bars"), so the UI can caveat the
+ * estimate. A bare array from a pre-provenance bridge is still accepted and
+ * treated as real ticks.
  *
  * @param security  Bare ticker, e.g. "ESH4"
  * @param start     ISO-8601 UTC string
@@ -162,13 +176,22 @@ export async function fetchBidAskTicks(
   security: string,
   start: string,
   end: string,
-): Promise<BridgeTick[]> {
-  return bridgeGet<BridgeTick[]>(
+): Promise<BidAskTicksResult> {
+  const payload = await bridgeGet<BidAskTicksPayload>(
     "/bid-ask-ticks",
     { security, start, end },
     [],
     BID_ASK_TIMEOUT_MS,
   );
+
+  if (Array.isArray(payload)) {
+    return { ticks: payload, source: payload.length > 0 ? "ticks" : null };
+  }
+
+  const ticks = Array.isArray(payload.pairs) ? payload.pairs : [];
+  const source: BidAskSource =
+    payload.source === "ticks" || payload.source === "bars" ? payload.source : null;
+  return { ticks, source: ticks.length > 0 ? source : null };
 }
 
 /**

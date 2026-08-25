@@ -131,6 +131,9 @@ export function FAQModal({ onClose }: FAQModalProps) {
             <Entry name="Bid/Ask Ticks" tag="IntradayTickRequest · BID/ASK">
               <Row label="Window" value="orderTime − 2 min → lastFillTime + 30 s" />
               <Row label="Fields per tick" value="time, bid, ask" />
+              <Row label="Long orders" value="The window is fetched in 45-minute chunks so orders of any length still get real quotes" />
+              <Row label="Repeated quotes" value="A pair is emitted only when the bid or ask actually changes — repeats are absorbed into the preceding quote's duration" />
+              <Row label="Fallback" value="If no quote ticks are available at all, the spread is estimated from 1-minute bar ranges (floored at one tick) and flagged with ≈ wherever TWAS is shown" />
               <p>Used for TWAS (Time-Weighted Average Spread) and for the arrival price snapshot. Not used for VWAP or TWAP price benchmarks.</p>
             </Entry>
 
@@ -219,13 +222,17 @@ export function FAQModal({ onClose }: FAQModalProps) {
               <p>The one-standard-deviation price range of the market during the execution window. High vol during a low-IS order indicates good execution in a turbulent environment.</p>
             </Entry>
 
-            <Entry name="TWAS — Time-Weighted Average Spread" tag="bps">
+            <Entry name="TWAS — Time-Weighted Average Spread" tag="bps · price">
               <Formula>TWAS = Σ( spreadᵢ_bps × Δtᵢ ) / totalDuration</Formula>
-              <Formula>spreadᵢ_bps = (askᵢ − bidᵢ) / midᵢ × 10,000</Formula>
+              <Formula>spreadᵢ_bps = (askᵢ − bidᵢ) / |midᵢ| × 10,000</Formula>
               <Row label="Δtᵢ" value="Time tick i was valid (until next tick, or lastFillTime for the final tick)" />
               <Row label="Source (per fill)" value="Bloomberg bid/ask ticks filtered to [orderTime, lastFillTime] for that fill" />
-              <Row label="Source (Parent Order Summary)" value="Single TWAS computed over the full parent order window [orderTime, lastFillTime] — not an average of per-fill values" />
+              <Row label="Source (Parent Order Summary)" value="Single TWAS computed over the full parent order window [orderTime, lastFillTime] — not an average of per-fill values. The quote in force at orderTime is carried forward, since a quote that never changes produces no tick inside the window." />
+              <Row label="TWAS (price)" value="The same time-weighted average as a raw price width (ask − bid), shown next to the bps figure and as its own column in multi-order mode. Treasury futures render it in 32nds." />
+              <Row label="Near-zero mid" value="bps is shown as N/A when |mid| is below 1e-6 — a calendar spread can trade through zero, where (ask − bid) / mid explodes. The price width stays meaningful there." />
+              <Row label="≈ prefix" value="The spread was estimated from 1-minute bar ranges because Bloomberg quote ticks were unavailable for the window — a rough proxy, not a measurement." />
               <p>A liquidity environment proxy: how wide the market spread was, on average, while the order was executing. Comparing TWAS to IS helps distinguish execution skill from market conditions — high IS in a wide-spread environment is less concerning than high IS with a tight spread.</p>
+              <p>On instruments whose price sits near zero — futures calendar spreads especially — read the price width first: a spread quoted 0-03¾ / 0-03⅞ is one eighth of a 32nd wide, which is a large number in bps only because the mid is small.</p>
             </Entry>
 
             <Entry name="Trend Cost" tag="bps · IS decomposition">

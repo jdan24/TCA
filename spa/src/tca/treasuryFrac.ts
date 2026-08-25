@@ -13,12 +13,20 @@
  *   whole32   → US, WN          "115-16"   (1/32nd minimum tick)
  *   half32    → TY, UXY         "115-165"  (1/64th minimum tick; '5' = ½ of 1/32)
  *   quarter32 → FV, TU, 3Y      "115-162"  (1/128th minimum tick; '2/5/7' = ¼/½/¾ of 1/32)
+ *   eighth32  → calendar spreads "0-03 ¾"  (1/256th; sub-32nd shown as a fraction)
  *
  * Detection uses the Bloomberg ticker prefix + " Comdty" yellow key.
  * The Comdty requirement avoids false matches (e.g. "USD Curncy" vs "US…").
+ *
+ * Calendar spreads (e.g. "3YU63YZ6 Comdty") get their own precision: they trade
+ * in finer increments than the outright — a 3-year spread quoted 0-03¾ / 0-03⅞
+ * moves in eighths of a 32nd, which quarter32 cannot represent at all (it rounds
+ * 3⅞ to 0-04).  eighth32 is used for every Treasury spread regardless of the
+ * contract's own spread tick, since it represents coarser grids exactly too
+ * (a half-32nd renders as "½", a quarter as "¼").
  */
 
-export type TreasuryPrecision = "whole32" | "half32" | "quarter32";
+export type TreasuryPrecision = "whole32" | "half32" | "quarter32" | "eighth32";
 
 // Longer prefixes (UXY) must be listed before shorter ones that share a prefix.
 const PATTERNS: Array<{ re: RegExp; precision: TreasuryPrecision }> = [
@@ -32,6 +40,12 @@ const PATTERNS: Array<{ re: RegExp; precision: TreasuryPrecision }> = [
 ];
 
 /**
+ * A two-legged calendar spread ticker: the same root and a month/year code
+ * twice over, e.g. "3YU63YZ6" or "TUM6TUU6".
+ */
+const SPREAD_RE = /^([A-Z0-9]+?)[FGHJKMNQUVXZ]\d{1,2}\1[FGHJKMNQUVXZ]\d{1,2}$/;
+
+/**
  * Returns the fractional-price precision for the given Bloomberg symbol,
  * or null if the symbol is not a recognised US Treasury future.
  */
@@ -39,7 +53,9 @@ export function getTreasuryPrecision(bbgSymbol: string): TreasuryPrecision | nul
   const sym = bbgSymbol.trim().replace(/\s+/g, " ").toUpperCase();
   if (!sym.endsWith(" COMDTY")) return null;
   for (const { re, precision } of PATTERNS) {
-    if (re.test(sym)) return precision;
+    if (!re.test(sym)) continue;
+    // A calendar spread on a Treasury root prices in eighths of a 32nd.
+    return SPREAD_RE.test(sym.slice(0, -" COMDTY".length)) ? "eighth32" : precision;
   }
   return null;
 }
@@ -60,9 +76,10 @@ export function generateTreasuryYTicks(
   targetTicks = 5,
 ): number[] {
   const minTick =
-    precision === "whole32"   ? 1 / 32
-    : precision === "half32"  ? 1 / 64
-    : /* quarter32 */           1 / 128;
+    precision === "whole32"     ? 1 / 32
+    : precision === "half32"    ? 1 / 64
+    : precision === "quarter32" ? 1 / 128
+    : /* eighth32 */              1 / 256;
 
   const range = yMax - yMin;
 
@@ -102,9 +119,12 @@ export function generateTreasuryYTicks(
  * whole32:   "115-16"   (trailing digit omitted — whole 32nds only)
  * half32:    "115-165"  (trailing '0' or '5')
  * quarter32: "115-162"  (trailing '0', '2', '5', or '7')
+ * eighth32:  "0-03 ¾"   (sub-32nd as a reduced fraction; spreads only)
  */
 export function decToTreasuryFrac(decimal: number, precision: TreasuryPrecision): string {
   if (!isFinite(decimal) || isNaN(decimal)) return "—";
+
+  if (precision === "eighth32") return eighth32ToFrac(decimal);
 
   const handle   = Math.floor(decimal);
   const fracPart = decimal - handle;
@@ -130,4 +150,29 @@ export function decToTreasuryFrac(decimal: number, precision: TreasuryPrecision)
   const SUB = ["0", "2", "5", "7"] as const;
   const sub  = SUB[quarterTick]!;
   return `${handle}-${String(whole32).padStart(2, "0")}${sub}`;
+}
+
+/** Sub-32nd eighths, reduced: 2/8 shows as ¼, 4/8 as ½, 6/8 as ¾. */
+const EIGHTHS = ["", "⅛", "¼", "⅜", "½", "⅝", "¾", "⅞"] as const;
+
+/**
+ * Render a price in 32nds with an eighth-of-a-32nd remainder: "0-03 ¾".
+ *
+ * Unlike the other precisions this handles sign explicitly.  Calendar spreads
+ * trade through zero, and flooring a negative price the way the outright
+ * formatters do would turn −0-03¾ into "-1-28 ¼".
+ */
+function eighth32ToFrac(decimal: number): string {
+  const sign = decimal < 0 ? "-" : "";
+  const abs  = Math.abs(decimal);
+
+  // Work in integer 256ths so a value on the grid never drifts off it
+  const n256    = Math.round(abs * 256);
+  const handle  = Math.floor(n256 / 256);
+  const rem     = n256 % 256;
+  const whole32 = Math.floor(rem / 8);
+  const eighths = rem % 8;
+
+  const frac = EIGHTHS[eighths]!;
+  return `${sign}${handle}-${String(whole32).padStart(2, "0")}${frac ? ` ${frac}` : ""}`;
 }

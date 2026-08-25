@@ -555,6 +555,7 @@ export function SingleOrderDashboard({
           summary={summary}
           highlightedBenchmark={selectedAlgo !== null ? highlightedBenchmark(selectedAlgo) : null}
           resolveSymbol={resolveSymbol}
+          {...(priceFormatter !== undefined ? { priceFormatter } : {})}
           brokerOrderId={brokerOrderIdOverride}
           onBrokerOrderIdChange={setBrokerOrderIdOverride}
           onOrderTimeChange={(d) =>

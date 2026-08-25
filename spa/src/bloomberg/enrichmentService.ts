@@ -18,6 +18,8 @@
  *      by the bridge; we pass orderTime as the target datetime).
  *
  *   4. Bid/ask ticks ([orderTime − 2 min, lastFillTime + 30 s]) for TWAS.
+ *      The bridge chunks long windows so these stay real quotes; when it has
+ *      to fall back to bar-estimated spreads it says so via bidAskSource.
  *
  * Trades that cannot produce an arrival price are skipped (no enrichment key
  * inserted) so the dashboard shows N/A rather than fabricated numbers.
@@ -241,7 +243,7 @@ async function enrichOneTrade(
   // Bloomberg returns naive ISO timestamps in the exchange's local timezone;
   // without correction the time-window filters in TWAP/vol/TWAS are wrong.
   const bars = shiftToUtc(rawBars, barStart.getTime());
-  const rawTicks = shiftToUtc(rawTickData, tickStart.getTime());
+  const rawTicks = shiftToUtc(rawTickData.ticks, tickStart.getTime());
   const rawTradeTicks = shiftToUtc(rawTradeTickData, orderTime.getTime());
 
   // ── Arrival price ────────────────────────────────────────────────────────
@@ -307,6 +309,7 @@ async function enrichOneTrade(
     bid: t.bid,
     ask: t.ask,
   }));
+  const bidAskSource = rawTickData.source;
 
   // ── Trade ticks (Date-typed for short-order VWAP) ─────────────────────────
   const tradeTicks: TradeTick[] = rawTradeTicks.map((t) => ({
@@ -324,6 +327,7 @@ async function enrichOneTrade(
     reversion30s: rev30sPrice ?? avgFillPrice,
     reversion1m:  rev1mPrice  ?? avgFillPrice,
     bidAskTicks,
+    bidAskSource,
     tradeTicks,
     barsSnapshot: bars,
   };
@@ -471,7 +475,7 @@ export async function enrichSingleOrder(
   ]);
 
   const bars         = shiftToUtc(rawBars,         barStart.getTime());
-  const rawTicks     = shiftToUtc(rawTickData,     tickStart.getTime());
+  const rawTicks     = shiftToUtc(rawTickData.ticks, tickStart.getTime());
   const rawTradeTicks = shiftToUtc(rawTradeTickData, orderTime.getTime());
 
   // Arrival price: bridge returns (bid+ask)/2 at orderTime (primary).
@@ -540,6 +544,7 @@ export async function enrichSingleOrder(
     bid: t.bid,
     ask: t.ask,
   }));
+  const bidAskSource = rawTickData.source;
 
   // ── Trade ticks (Date-typed for short-order VWAP) ─────────────────────────
   const tradeTicks: TradeTick[] = rawTradeTicks.map((t) => ({
@@ -557,6 +562,7 @@ export async function enrichSingleOrder(
     reversion30s: rev30sPrice ?? fillVwap,
     reversion1m:  rev1mPrice  ?? fillVwap,
     bidAskTicks,
+    bidAskSource,
     tradeTicks,
     barsSnapshot: bars,
   };

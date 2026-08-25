@@ -47,6 +47,8 @@ export interface TCAResult {
   reversion_30s_bps: number | null;
   reversion_1m_bps: number | null;
   TWAS_bps: number | null;
+  /** Same time-weighted average spread expressed as a raw price width (ask − bid). */
+  TWAS_price: number | null;
   vol_during_order_price: number | null; // 1σ price std-dev during order window
   vol_during_order_bps: number | null;   // same expressed in bps
   TWAP_dev_bps: number | null;           // slippage vs market TWAP during [orderTime, lastFillTime]
@@ -54,6 +56,9 @@ export interface TCAResult {
 }
 
 // ── Bloomberg enrichment payload (one per orderId) ───────────────────────────
+/** Provenance of a bid/ask stream — see the bridge's /bid-ask-ticks endpoint. */
+export type BidAskSource = "ticks" | "bars" | null;
+
 export interface BidAskTick {
   time: Date;
   bid: number;
@@ -74,6 +79,9 @@ export interface BloombergEnrichment {
   reversion30s: number; // last-traded price at lastFillTime + 30 s (from trade ticks)
   reversion1m: number;  // bar close at lastFillTime + 1 min
   bidAskTicks: BidAskTick[];
+  /** Where bidAskTicks came from: real Bloomberg quotes, or spreads estimated
+   *  from 1-minute bar ranges. null when there are no ticks at all. */
+  bidAskSource: BidAskSource;
   tradeTicks: TradeTick[];    // last-traded price+size ticks for short-order VWAP
   barsSnapshot: IntradayBar[]; // 1-min bars for the order window (used by volatility)
 }
@@ -104,6 +112,11 @@ export interface ParentOrderSummary {
   MI_bps: number | null;
   /** Time-weighted average spread over the full parent order window. */
   TWAS_bps: number | null;
+  /** Same spread expressed as a raw price width (ask − bid), for instruments
+   *  where bps against a near-zero mid is hard to read — e.g. calendar spreads. */
+  TWAS_price: number | null;
+  /** Provenance of the quotes behind TWAS: real ticks vs bar-range estimate. */
+  bidAskSource: BidAskSource;
   /** Raw market price 1 minute after the parent order's last fill (from Bloomberg). */
   reversion1m_price: number | null;
 }

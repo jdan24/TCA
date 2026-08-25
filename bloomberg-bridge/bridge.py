@@ -20,6 +20,7 @@ replace `create_session()` / `session.stop()` with a module-level singleton.
 from __future__ import annotations
 
 import base64
+import math
 import pathlib
 import re
 import time
@@ -157,9 +158,49 @@ def blp_dt_to_iso(value: Any) -> str:
 
 # ── Timestamp UTC normalisation ──────────────────────────────────────────────
 
+# Bloomberg may return an item slightly *before* the requested start (bars are
+# aligned to minute boundaries).  Allow that much slack before the floor below
+# concludes the exchange offset is a whole hour smaller.
+_OFFSET_TOLERANCE_S = 120
+
+
+def _infer_offset_hours(
+    items: list[dict[str, Any]],
+    request_start_utc: datetime,
+) -> tuple[int, float] | None:
+    """
+    Infer the exchange→UTC offset (whole hours) from the first item's naive
+    timestamp, together with the residual: how far that item sat past the
+    request start once shifted.
+
+    Returns (offset_hours, residual_secs), or None when it cannot be inferred.
+
+    Uses floor rather than rounding.  Bloomberg never returns data before the
+    requested start, so the shifted first item must land at or after it, giving
+    a residual in [0, 1 h).  Rounding instead added a spurious hour whenever the
+    first quote arrived more than 30 minutes into the window — routine on an
+    illiquid instrument such as a futures calendar spread, whose quotes can sit
+    unchanged for long stretches.
+    """
+    if not items:
+        return None
+    try:
+        # Strip tzinfo for naive arithmetic; round to minute boundary
+        ref = request_start_utc.replace(tzinfo=None, second=0, microsecond=0)
+        first_naive = datetime.fromisoformat(items[0]["time"])
+        diff_secs = (first_naive - ref).total_seconds()
+        offset_hours = math.floor((diff_secs + _OFFSET_TOLERANCE_S) / 3_600)
+        if abs(offset_hours) > 14:
+            return None  # Implausible — caller stamps Z without shifting
+        return offset_hours, diff_secs - offset_hours * 3_600
+    except Exception:
+        return None
+
+
 def _normalize_to_utc(
     items: list[dict[str, Any]],
     request_start_utc: datetime,
+    offset_hours: int | None = None,
 ) -> list[dict[str, Any]]:
     """
     Shift bar/tick timestamps from exchange-local time to UTC and append 'Z'.
@@ -169,10 +210,9 @@ def _normalize_to_utc(
     request datetimes carried a UTC offset.  This means a CME bar at
     14:40 CDT arrives as "2026-05-28T14:40:00", but the SPA expects UTC.
 
-    We detect the shift by comparing the first item's naive time against
-    the known UTC request start.  The difference, rounded to the nearest
-    hour, is the exchange→UTC offset; we correct every timestamp and
-    append 'Z' so the SPA's `new Date()` calls produce correct UTC epochs.
+    The offset is inferred by _infer_offset_hours() unless the caller supplies
+    one.  Callers that stitch several requests together (see /bid-ask-ticks)
+    pass a single shared offset so every chunk lands on the same timeline.
 
     Example (CDT = UTC-5, request start 19:40 UTC):
       First bar  : "2026-05-28T14:40:00" (14:40 CDT)
@@ -182,20 +222,15 @@ def _normalize_to_utc(
     """
     if not items:
         return items
+
+    if offset_hours is None:
+        inferred = _infer_offset_hours(items, request_start_utc)
+        if inferred is None:
+            # Can't work out the offset — don't corrupt data; just stamp Z as-is
+            return [{**item, "time": item["time"] + "Z"} for item in items]
+        offset_hours = inferred[0]
+
     try:
-        # Strip tzinfo for naive arithmetic; round to minute boundary
-        ref = request_start_utc.replace(tzinfo=None, second=0, microsecond=0)
-        first_naive = datetime.fromisoformat(items[0]["time"])
-        diff_secs = (first_naive - ref).total_seconds()
-        offset_hours = round(diff_secs / 3_600)
-
-        if abs(offset_hours) > 14:
-            # Implausible — don't corrupt data; just stamp Z as-is
-            return [
-                {**item, "time": item["time"] + "Z"}
-                for item in items
-            ]
-
         shift = timedelta(hours=-offset_hours)
         return [
             {
@@ -397,8 +432,15 @@ def _get_intraday_ticks(
     end: datetime,
     event_types: list[str],
     timeout_ms: int = 15_000,
+    normalize: bool = True,
 ) -> list[dict[str, Any]]:
-    """IntradayTickRequest for specific event types."""
+    """
+    IntradayTickRequest for specific event types.
+
+    Pass normalize=False to get the raw exchange-local timestamps back.  Callers
+    that issue several requests for one logical window use that to apply a single
+    shared UTC offset across every chunk (see /bid-ask-ticks).
+    """
     session = _create_session()
     try:
         svc = session.getService("//blp/refdata")
@@ -427,7 +469,7 @@ def _get_intraday_ticks(
                 except Exception:
                     pass
         # Shift exchange-local timestamps → UTC
-        return _normalize_to_utc(raw_ticks, start)
+        return _normalize_to_utc(raw_ticks, start) if normalize else raw_ticks
     finally:
         session.stop()
 
@@ -474,10 +516,17 @@ def _reconstruct_bid_ask_pairs(
 ) -> list[dict[str, Any]]:
     """
     Convert a stream of individual BID/ASK ticks to paired quotes.
-    Each time either side updates, a new (bid, ask, time) pair is emitted.
+
+    A pair is emitted only when the prevailing quote actually *changes*.
+    Bloomberg repeats a BID or ASK tick on every refresh even when the price is
+    unchanged, which on a quiet instrument inflates an hour of data into
+    thousands of identical pairs.  Dropping the repeats is lossless for TWAS:
+    consumers weight each pair until the next one, so a removed duplicate is
+    absorbed into its predecessor's Δt.
     """
     current_bid: float | None = None
     current_ask: float | None = None
+    last_emitted: tuple[float, float] | None = None
     pairs = []
 
     for tick in sorted(raw_ticks, key=lambda t: t["time"]):
@@ -489,12 +538,19 @@ def _reconstruct_bid_ask_pairs(
         else:
             continue
 
-        if current_bid is not None and current_ask is not None:
-            pairs.append({
-                "time": tick["time"],
-                "bid": current_bid,
-                "ask": current_ask,
-            })
+        if current_bid is None or current_ask is None:
+            continue
+
+        quote = (current_bid, current_ask)
+        if quote == last_emitted:
+            continue
+        last_emitted = quote
+
+        pairs.append({
+            "time": tick["time"],
+            "bid": current_bid,
+            "ask": current_ask,
+        })
 
     return pairs
 
@@ -610,29 +666,78 @@ def reference(security: str, fields: str = "HIST_VOL_30D,VOLUME_AVG_30D,FUT_CONT
     return _get_reference_data(ticker, field_list)
 
 
+def _infer_min_tick(bars: list[dict[str, Any]]) -> float | None:
+    """
+    Smallest non-zero price increment observed across the bars' OHLC values.
+
+    A crude but reliable read on the instrument's tick size, used to floor the
+    synthetic spread below.  Returns None when the bars carry fewer than two
+    distinct prices.
+    """
+    prices: set[float] = set()
+    for bar in bars:
+        for key in ("open", "high", "low", "close"):
+            try:
+                prices.add(round(float(bar[key]), 10))
+            except Exception:
+                pass
+
+    ordered = sorted(prices)
+    min_tick: float | None = None
+    for lower, upper in zip(ordered, ordered[1:]):
+        diff = upper - lower
+        if diff > 1e-9 and (min_tick is None or diff < min_tick):
+            min_tick = diff
+    return min_tick
+
+
 def _estimate_spread_from_bars(bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Construct synthetic bid/ask pairs from 1-minute OHLC bars.
 
-    Used as a fallback when tick-level data times out (e.g. orders > 90 min).
-    Spread is estimated as 25 % of the bar's high-low range, centred on the
-    bar's close price.  This is a rough proxy — sufficient for TWAS context
-    but not a substitute for real tick data on short orders.
+    Last-resort fallback for when no BID/ASK ticks are available at all.  The
+    width is 50 % of the bar's high-low range, centred on the bar's close, and
+    floored at one tick.
+
+    The floor matters: the high-low range measures intra-bar *movement*, not
+    spread, so a market that trades at a single price for the whole minute
+    yields a range of zero and would otherwise be reported as having no spread.
+    That is exactly what happens on a pinned futures calendar spread, where most
+    minutes print at one price and the real market is still a tick wide.
+
+    This remains a rough proxy — the endpoint labels it "bars" so the SPA can
+    caveat it — and is never a substitute for real quote data.
     """
+    min_tick = _infer_min_tick(bars)
     pairs = []
     for bar in bars:
         try:
             bar_range = float(bar["high"]) - float(bar["low"])
-            half_spread = bar_range * 0.25
+            width = bar_range * 0.5
+            if min_tick is not None:
+                width = max(width, min_tick)
+            half_spread = width / 2
             mid = float(bar["close"])
             pairs.append({
                 "time": bar["time"],
-                "bid": round(mid - half_spread, 6),
-                "ask": round(mid + half_spread, 6),
+                # 10 dp, not fewer: Treasury spreads live on a 1/256 grid, and
+                # rounding bid and ask independently at 8 dp shaved the width off
+                # the tick boundary (0.00390624 instead of 1/256 = 0.00390625).
+                "bid": round(mid - half_spread, 10),
+                "ask": round(mid + half_spread, 10),
             })
         except Exception:
             pass
     return pairs
+
+
+# Tick requests are split into chunks of this many minutes.  Bloomberg's
+# IntradayTickRequest slows sharply with window size, and a single multi-hour
+# request routinely blew past the drain deadline; several small ones do not.
+_TICK_CHUNK_MINUTES = 45
+
+# Ceiling on chunks per request (~12 h) so a bad start/end can't fan out.
+_MAX_TICK_CHUNKS = 16
 
 
 @app.get("/bid-ask-ticks")
@@ -640,15 +745,17 @@ def bid_ask_ticks(security: str, start: str, end: str):
     """
     Bid/ask tick stream for TWAS calculation (and arrival price mid-point).
 
-    Returns a chronological list of paired {time, bid, ask} quotes.
-    Each entry reflects the prevailing best bid and ask after a quote update.
+    Returns {"source": "ticks" | "bars" | "none", "pairs": [{time, bid, ask}]}.
+    Each pair reflects the prevailing best bid and ask after a quote change.
 
-    For orders ≤ 90 minutes: fetches real BID/ASK ticks with a 60-second
-    timeout (up from the default 15 s used by other endpoints).
-    For orders > 90 minutes, or when ticks time out: falls back to synthetic
-    bid/ask pairs estimated from 1-minute OHLC bars (25 % of the bar range
-    centred on close).  The bar-based estimate is labelled in the response so
-    the SPA can show an appropriate caveat in the TWAS tooltip.
+    The window is split into 45-minute chunks and fetched with real BID/ASK
+    ticks, chunk by chunk, so a long parent order still gets true quote data —
+    previously anything over 60 minutes skipped ticks entirely in favour of a
+    spread estimated from bar ranges, which reports ~0 spread on any instrument
+    that trades at one price for most of each minute.
+
+    "source" tells the SPA which path produced the pairs so it can caveat the
+    bar-based estimate in the TWAS tooltip.
 
     Query params:
       security  bare ticker, e.g. 'ESH4'
@@ -659,32 +766,62 @@ def bid_ask_ticks(security: str, start: str, end: str):
     ticker = resolve_ticker(security)
     start_dt = parse_dt(start)
     end_dt   = parse_dt(end)
-    window_minutes = (end_dt - start_dt).total_seconds() / 60
 
-    # For windows ≤ 60 min, try real BID/ASK ticks with a 45-second timeout.
-    # Longer windows produce too many ticks to transfer reliably; skip straight
-    # to bar-based estimation so the response stays fast.
-    if window_minutes <= 60:
+    # ── Real BID/ASK ticks, fetched in chunks ────────────────────────────────
+    chunks: list[tuple[datetime, datetime]] = []
+    cursor = start_dt
+    while cursor < end_dt and len(chunks) < _MAX_TICK_CHUNKS:
+        chunk_end = min(cursor + timedelta(minutes=_TICK_CHUNK_MINUTES), end_dt)
+        chunks.append((cursor, chunk_end))
+        cursor = chunk_end
+
+    raw_ticks: list[dict[str, Any]] = []
+    # Best (smallest-residual) offset seen, as (residual_secs, offset_hours).
+    # The chunk whose first tick arrives soonest after its own start gives the
+    # most trustworthy read on the exchange offset; that one offset is then
+    # applied to every chunk so the merged stream shares a single timeline.
+    best_offset: tuple[float, int] | None = None
+
+    for chunk_start, chunk_end in chunks:
         try:
-            raw = _get_intraday_ticks(ticker, start_dt, end_dt, ["BID", "ASK"], timeout_ms=45_000)
-            tick_pairs = _reconstruct_bid_ask_pairs(raw)
-            if tick_pairs:
-                return tick_pairs
+            chunk_raw = _get_intraday_ticks(
+                ticker, chunk_start, chunk_end, ["BID", "ASK"],
+                timeout_ms=45_000, normalize=False,
+            )
         except HTTPException:
-            pass  # Fall through to bar estimation
+            break  # Bloomberg timed out or rejected — keep the chunks we have
 
-    # Bar-based spread estimation — used for long windows and as fallback when
-    # ticks time out.  Returns the same {time, bid, ask} shape as real ticks.
+        if not chunk_raw:
+            continue
+
+        inferred = _infer_offset_hours(chunk_raw, chunk_start)
+        if inferred is not None:
+            offset_hours, residual = inferred
+            if best_offset is None or residual < best_offset[0]:
+                best_offset = (residual, offset_hours)
+
+        raw_ticks.extend(chunk_raw)
+
+    if raw_ticks:
+        normalized = _normalize_to_utc(
+            raw_ticks, start_dt,
+            offset_hours=best_offset[1] if best_offset is not None else None,
+        )
+        tick_pairs = _reconstruct_bid_ask_pairs(normalized)
+        if tick_pairs:
+            return {"source": "ticks", "pairs": tick_pairs}
+
+    # ── Fallback: spread estimated from 1-minute bar ranges ──────────────────
     try:
         bars = _get_intraday_bars(ticker, start_dt, end_dt, 1)
         estimated = _estimate_spread_from_bars(bars)
         if estimated:
-            return estimated
+            return {"source": "bars", "pairs": estimated}
     except Exception:
         pass
 
-    # Nothing worked — return empty so the SPA falls back to N/A gracefully.
-    return []
+    # Nothing worked — the SPA falls back to N/A gracefully.
+    return {"source": "none", "pairs": []}
 
 
 @app.get("/trade-ticks")
