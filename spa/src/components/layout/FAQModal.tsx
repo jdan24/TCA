@@ -178,6 +178,7 @@ export function FAQModal({ onClose }: FAQModalProps) {
               <Row label="Source (2nd)" value="Bloomberg FUT_CONT_SIZE, converted as below" />
               <Row label="Treasury conversion" value="Treasury futures quote as a percent of par, so their point value is FUT_CONT_SIZE ÷ 100: ZN's 100,000 face becomes $1,000 per point. Contracts quoted in currency-per-unit (ES 50, CL 1,000, 6E 125,000) are used as-is." />
               <Row label="No point value" value={<Pill color="gray">N/A</Pill>} />
+              <Row label="Hiding them" value="The $ columns hide through the table's Columns menu; the Total Cost tile has its own dismiss control, and both are remembered between sessions. Exports carry whatever columns the table is showing." />
               <p>Shown beside the bps figure on each benchmark in the Parent Order Summary, and as its own column in the order and fill tables. Positive is a cost, matching the bps convention.</p>
               <p>When neither a manual override nor a Bloomberg value is available the figure is N/A. It is never defaulted to a multiplier of 1 — for a futures contract that would understate the cost by three orders of magnitude while looking authoritative.</p>
               <p><strong>No FX conversion.</strong> The point value is in the contract's own currency, so a EUR-denominated contract produces a figure in EUR. The Total Cost tile refuses to sum across currencies and shows N/A instead.</p>
@@ -251,17 +252,20 @@ export function FAQModal({ onClose }: FAQModalProps) {
               <Row label="Source (per fill)" value="Bloomberg bid/ask ticks filtered to [orderTime, lastFillTime] for that fill" />
               <Row label="Source (Parent Order Summary)" value="Single TWAS computed over the full parent order window [orderTime, lastFillTime] — not an average of per-fill values. The quote in force at orderTime is carried forward, since a quote that never changes produces no tick inside the window." />
               <Row label="TWAS (price)" value="The same time-weighted average as a raw price width (ask − bid), shown next to the bps figure and as its own column in multi-order mode. Treasury futures render it in 32nds." />
+              <Row label="On the scatter" value="Each order's TWAS also appears as a dashed mark on the Spread vs Slippage chart — see that entry below." />
               <Row label="Near-zero mid" value="bps is shown as N/A when |mid| is below 1e-6 — a calendar spread can trade through zero, where (ask − bid) / mid explodes. The price width stays meaningful there." />
               <Row label="≈ prefix" value="The spread was estimated from 1-minute bar ranges because Bloomberg quote ticks were unavailable for the window — a rough proxy, not a measurement." />
               <p>A liquidity environment proxy: how wide the market spread was, on average, while the order was executing. Comparing TWAS to IS helps distinguish execution skill from market conditions — high IS in a wide-spread environment is less concerning than high IS with a tight spread.</p>
               <p>On instruments whose price sits near zero — futures calendar spreads especially — read the price width first: a spread quoted 0-03¾ / 0-03⅞ is one eighth of a 32nd wide, which is a large number in bps only because the mid is small.</p>
             </Entry>
 
-            <Entry name="Spread vs Slippage chart — the dashed line" tag="IS = TWAS">
-              <Formula>dashed line: IS = TWAS</Formula>
-              <Row label="Below the line" value={<Pill color="green">beat the spread</Pill>} />
-              <Row label="Above the line" value={<Pill color="red">paid more than the quoted width</Pill>} />
-              <p>The line is the <strong>full</strong> quoted spread, so it is a generous bar. IS is measured against the arrival mid, and simply crossing to the far touch costs half the spread — such an execution lands around y = x/2, comfortably below the line. A point above the line paid more than the entire quoted width.</p>
+            <Entry name="Spread vs Slippage chart — spread marks" tag="per order">
+              <Row label="Dot" value="One order: its TWAS on X, its IS on Y" />
+              <Row label="Dashed mark" value="Drawn at that same order's TWAS level, directly above or below its dot — the full cost of the spread it traded through" />
+              <Row label="Dot under its mark" value={<Pill color="green">beat the spread</Pill>} />
+              <Row label="Dot over its mark" value={<Pill color="red">paid more than the quoted width</Pill>} />
+              <p>Dots are coloured to say the same thing, so the reading survives turning the marks off — useful on a crowded plot. The subtitle counts how many orders beat their own spread cost.</p>
+              <p>The mark is the <strong>full</strong> quoted spread, which is a generous bar. IS is measured against the arrival mid, so simply crossing to the far touch costs half the spread and lands at roughly half the mark's height — comfortably under it. A dot above its mark paid more than the entire quoted width.</p>
             </Entry>
 
             <Entry name="Trend Cost" tag="bps · IS decomposition">

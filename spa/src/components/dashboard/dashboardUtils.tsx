@@ -108,15 +108,22 @@ interface ChartCardProps {
   children: ReactNode;
   /** Optional DOM id — used by html2canvas to capture the card for PDF export. */
   id?: string;
+  /** Optional controls rendered top-right, e.g. a display toggle. Hidden in print. */
+  actions?: ReactNode;
 }
 
-export function ChartCard({ title, subtitle, children, id }: ChartCardProps) {
+export function ChartCard({ title, subtitle, children, id, actions }: ChartCardProps) {
   return (
     <div id={id} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
-      <div className="mb-3">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h3>
-        {subtitle !== undefined && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{subtitle}</p>
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h3>
+          {subtitle !== undefined && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{subtitle}</p>
+          )}
+        </div>
+        {actions !== undefined && (
+          <div className="shrink-0 print:hidden">{actions}</div>
         )}
       </div>
       {children}

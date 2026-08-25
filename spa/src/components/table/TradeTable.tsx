@@ -11,7 +11,8 @@
  *   • Color-coded bps cells
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import * as XLSX from "xlsx";
 import {
   createColumnHelper,
@@ -285,42 +286,14 @@ function csvField(value: unknown): string {
   return `"${s.replace(/"/g, '""')}"`;
 }
 
-const CSV_COLUMNS: Array<{
-  header: string;
-  value: (row: TableRow) => unknown;
-}> = [
-  { header: "Order ID",           value: (r) => r.orderId },
-  { header: "Symbol",             value: (r) => r.symbol },
-  { header: "Side",               value: (r) => r.side },
-  { header: "Qty",                value: (r) => r.orderQty },
-  { header: "Fill Price",         value: (r) => r.avgFillPrice },
-  { header: "Arrival Price",      value: (r) => r.arrivalPrice },
-  { header: "Order Time (UTC)",   value: (r) => fmtUtc(r.orderTime) },
-  { header: "First Fill (UTC)",   value: (r) => fmtUtc(r.firstFillTime) },
-  { header: "Last Fill (UTC)",    value: (r) => fmtUtc(r.lastFillTime) },
-  { header: "Algo",               value: (r) => r.algo },
-  { header: "TTF",                value: (r) => fmtTtf(r.timeToFill_ms) },
-  { header: "IS (bps)",           value: (r) => r.IS_bps },
-  { header: "IS ($)",             value: (r) => r.IS_usd },
-  { header: "vs Mkt VWAP (bps)", value: (r) => r.VWAP_dev_bps },
-  { header: "vs Mkt VWAP ($)",   value: (r) => r.VWAP_dev_usd },
-  { header: "Mkt VWAP",           value: (r) => r.marketVWAP_price },
-  { header: "vs Mkt TWAP (bps)", value: (r) => r.TWAP_dev_bps },
-  { header: "vs Mkt TWAP ($)",   value: (r) => r.TWAP_dev_usd },
-  { header: "Mkt Impact (bps)",   value: (r) => r.MI_bps },
-  { header: "Rev +30s (bps)",     value: (r) => r.reversion_30s_bps },
-  { header: "Rev +1m (bps)",      value: (r) => r.reversion_1m_bps },
-  { header: "TWAS (bps)",         value: (r) => r.TWAS_bps },
-  { header: "TWAS (price)",       value: (r) => r.TWAS_price },
-  { header: "1σ Vol (price)",      value: (r) => r.vol_during_order_price },
-  { header: "1σ Vol (bps)",        value: (r) => r.vol_during_order_bps },
-];
+// ── Exports (visible columns only, in display order) ──────────────────────────
+// One definition drives both CSV and XLSX. They used to keep separate lists and
+// had already drifted: the CSV list was fixed, so hiding a column in the table
+// changed the spreadsheet but not the CSV.
 
-// ── XLSX export (visible columns only) ────────────────────────────────────────
+type ExportColDef = { header: string; value: (row: TableRow) => number | string | null };
 
-type XlsxColDef = { header: string; value: (row: TableRow) => number | string | null };
-
-const XLSX_COL_DEFS: Record<string, XlsxColDef> = {
+const EXPORT_COL_DEFS: Record<string, ExportColDef> = {
   orderId:                { header: "Order ID",           value: (r) => r.orderId },
   symbol:                 { header: "Symbol",             value: (r) => r.symbol },
   side:                   { header: "Side",               value: (r) => r.side },
@@ -350,8 +323,8 @@ const XLSX_COL_DEFS: Record<string, XlsxColDef> = {
 
 function exportFillDetailToXlsx(data: TableRow[], visibleColumnIds: string[], filename: string) {
   const cols = visibleColumnIds
-    .map((id) => XLSX_COL_DEFS[id])
-    .filter((c): c is XlsxColDef => c !== undefined);
+    .map((id) => EXPORT_COL_DEFS[id])
+    .filter((c): c is ExportColDef => c !== undefined);
 
   const rows = data.map((row) => {
     const obj: Record<string, unknown> = {};
@@ -366,10 +339,15 @@ function exportFillDetailToXlsx(data: TableRow[], visibleColumnIds: string[], fi
   XLSX.writeFile(wb, filename);
 }
 
-function exportToCsv(data: TableRow[], filename: string) {
-  const headerRow = CSV_COLUMNS.map((c) => csvField(c.header)).join(",");
+function exportToCsv(data: TableRow[], visibleColumnIds: string[], filename: string) {
+  const cols = visibleColumnIds
+    .map((id) => EXPORT_COL_DEFS[id])
+    .filter((c): c is ExportColDef => c !== undefined);
+  if (cols.length === 0) return;
+
+  const headerRow = cols.map((c) => csvField(c.header)).join(",");
   const dataRows  = data.map((row) =>
-    CSV_COLUMNS.map((c) => csvField(c.value(row))).join(","),
+    cols.map((c) => csvField(c.value(row))).join(","),
   );
   const csv  = [headerRow, ...dataRows].join("\r\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -897,7 +875,49 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
     pageIndex: 0,
     pageSize: 25,
   });
+  // The Columns menu renders in a portal. The card wrapper is overflow-hidden
+  // (for its rounded corners), which clipped an absolutely-positioned menu to
+  // the card's height — with only a few rows there was barely any room for it.
+  // A fixed-position portal anchored to the button escapes every ancestor.
   const [colMenuOpen, setColMenuOpen] = useState(false);
+  const colBtnRef = useRef<HTMLButtonElement>(null);
+  const colMenuRef = useRef<HTMLDivElement>(null);
+  const [colMenuPos, setColMenuPos] = useState<{ top: number; right: number } | null>(null);
+
+  const openColMenu = useCallback(() => {
+    const rect = colBtnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setColMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    setColMenuOpen(true);
+  }, []);
+
+  // Dismiss on outside click, Escape, or anything that moves the anchor.
+  useEffect(() => {
+    if (!colMenuOpen) return;
+
+    const onPointerDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (colMenuRef.current?.contains(target)) return;
+      if (colBtnRef.current?.contains(target)) return; // the button toggles itself
+      setColMenuOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setColMenuOpen(false);
+    };
+    // Reposition would drift out of sync with the button, so just close.
+    const onReflow = () => setColMenuOpen(false);
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onReflow, true);
+    window.addEventListener("resize", onReflow);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onReflow, true);
+      window.removeEventListener("resize", onReflow);
+    };
+  }, [colMenuOpen]);
 
   const visibleColumns = hideMetrics
     ? allColumns.filter((c) => {
@@ -970,17 +990,24 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
           className="flex-1 min-w-[160px] max-w-xs px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
 
-        <div className="relative">
+        <div>
           <button
+            ref={colBtnRef}
             type="button"
-            onClick={() => setColMenuOpen((o) => !o)}
+            onClick={() => (colMenuOpen ? setColMenuOpen(false) : openColMenu())}
             className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors select-none"
           >
             Columns ▾
           </button>
 
-          {colMenuOpen && (
-            <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-2 z-20 min-w-[180px]">
+          {colMenuOpen && colMenuPos !== null && createPortal(
+            <div
+              ref={colMenuRef}
+              style={{ position: "fixed", top: colMenuPos.top, right: colMenuPos.right }}
+              // Capped at 70vh with its own scrollbar so a long column list stays
+              // usable on a short screen instead of running off the bottom.
+              className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-2 z-50 min-w-[180px] max-h-[70vh] overflow-y-auto"
+            >
               {table
                 .getAllColumns()
                 .filter((c) => c.getCanHide())
@@ -1006,16 +1033,20 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
               >
                 Close
               </button>
-            </div>
+            </div>,
+            document.body,
           )}
         </div>
 
-        {/* Export CSV — always exports all rows, ignoring filters and pagination */}
+        {/* Export CSV — all rows (ignores filters and pagination), visible columns only */}
         {!hideMetrics && (
           <button
             type="button"
-            onClick={() => exportToCsv(allData, "trade-detail.csv")}
-            title="Export all rows to CSV (ignores filters & pagination)"
+            onClick={() => {
+              const visibleIds = table.getVisibleLeafColumns().map((c) => c.id);
+              exportToCsv(allData, visibleIds, "trade-detail.csv");
+            }}
+            title="Export all rows to CSV — every row, but only the columns shown in the table"
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors whitespace-nowrap"
           >
             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
