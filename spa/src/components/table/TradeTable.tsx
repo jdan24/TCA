@@ -31,12 +31,15 @@ import type { BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
 import { useTCAStore } from "@/store/useTCAStore";
 import { resolveBenchmark } from "@/hooks/useAlgoMap";
 import { fmtUsd } from "@/components/dashboard/dashboardUtils";
+import { toGenericTicker } from "@/tca/genericTicker";
 
 // ── Merged row type ───────────────────────────────────────────────────────────
 
 interface TableRow {
   orderId: string;
   symbol: string;
+  /** Symbol with the expiry stripped, e.g. "FV Comdty" — see tca/genericTicker.ts. */
+  genericTicker: string;
   side: "BUY" | "SELL";
   orderQty: number;
   avgFillPrice: number;
@@ -63,7 +66,13 @@ interface TableRow {
   marketVWAP_price: number | null;
 }
 
-function mergeRows(trades: TradeRecord[], results: TCAResult[], enrichment: Record<string, BloombergEnrichment>): TableRow[] {
+function mergeRows(
+  trades: TradeRecord[],
+  results: TCAResult[],
+  enrichment: Record<string, BloombergEnrichment>,
+  /** Defaults to stripping the expiry off the raw symbol when no resolver is supplied. */
+  genericFor: (ric: string) => string = toGenericTicker,
+): TableRow[] {
   const resultMap = new Map<string, TCAResult>();
   for (const r of results) resultMap.set(r.orderId, r);
   return trades.map((t) => {
@@ -72,6 +81,7 @@ function mergeRows(trades: TradeRecord[], results: TCAResult[], enrichment: Reco
     return {
       orderId: t.orderId,
       symbol: t.symbol,
+      genericTicker: genericFor(t.symbol),
       side: t.side,
       orderQty: t.orderQty,
       avgFillPrice: t.avgFillPrice,
@@ -105,6 +115,7 @@ function mergeRows(trades: TradeRecord[], results: TCAResult[], enrichment: Reco
 const COLUMN_LABELS: Record<string, string> = {
   orderId: "Order ID",
   symbol: "Symbol",
+  genericTicker: "Generic Ticker",
   side: "Side",
   orderQty: "Qty",
   avgFillPrice: "Fill Price",
@@ -296,6 +307,7 @@ type ExportColDef = { header: string; value: (row: TableRow) => number | string 
 const EXPORT_COL_DEFS: Record<string, ExportColDef> = {
   orderId:                { header: "Order ID",           value: (r) => r.orderId },
   symbol:                 { header: "Symbol",             value: (r) => r.symbol },
+  genericTicker:          { header: "Generic Ticker",     value: (r) => r.genericTicker },
   side:                   { header: "Side",               value: (r) => r.side },
   orderQty:               { header: "Qty",                value: (r) => r.orderQty },
   avgFillPrice:           { header: "Fill Price",         value: (r) => r.avgFillPrice },
@@ -702,6 +714,12 @@ interface TradeTableProps {
    * the parent can remove all fills for that order from its state.
    */
   onDeleteOrder?: (orderId: string) => void;
+  /**
+   * Maps a file symbol to its generic ticker for the Generic Ticker column.
+   * Callers pass a resolver that goes through the symbol map first, so a RIC
+   * becomes "FV Comdty" rather than a stripped version of the raw RIC.
+   */
+  genericFor?: (ric: string) => string;
 }
 
 const PAGE_SIZES = [10, 25, 50] as const;
@@ -717,10 +735,10 @@ const METRIC_COLUMN_IDS = new Set([
   "timeToFill_ms", "IS_bps", "VWAP_dev_bps", "VWAP_dev_usd", "marketVWAP_price",
   "TWAP_dev_bps", "TWAP_dev_usd", "MI_bps", "reversion_30s_bps", "reversion_1m_bps",
   "TWAS_bps", "TWAS_price", "vol_during_order_price", "vol_during_order_bps",
-  "arrivalPrice", "algo",
+  "arrivalPrice", "algo", "genericTicker",
 ]);
 
-export function TradeTable({ trades, results, title = "Trade Detail", hideMetrics = false, resolveSymbol, priceFormatterForSymbol, showExcelExport = false, onDeleteOrder }: TradeTableProps) {
+export function TradeTable({ trades, results, title = "Trade Detail", hideMetrics = false, resolveSymbol, priceFormatterForSymbol, showExcelExport = false, onDeleteOrder, genericFor }: TradeTableProps) {
   const aggregationFilter = useTCAStore((s) => s.aggregationFilter);
   const setAggregationFilter = useTCAStore((s) => s.setAggregationFilter);
   const rawTrades   = useTCAStore((s) => s.rawTrades);
@@ -755,6 +773,15 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
       cell: (i) => (
         <span className="text-xs font-semibold text-gray-900 dark:text-white">
           {resolveSymbol ? resolveSymbol(i.getValue()) : i.getValue()}
+        </span>
+      ),
+      enableGlobalFilter: true,
+    });
+    const genericTickerCol = col.accessor("genericTicker", {
+      header: "Generic Ticker",
+      cell: (i) => (
+        <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+          {i.getValue()}
         </span>
       ),
       enableGlobalFilter: true,
@@ -839,6 +866,7 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
     return [
       editOrderTime,
       symbolCol,
+      genericTickerCol,
       ...PRE_TIME_COLS_NO_SYMBOL.slice(1), // side, qty, fillPrice, arrivalPrice
       algoCol,
       // IS, vs VWAP, vs TWAP, TWAS, TWAS (price), Vol(bps), then rest
@@ -856,7 +884,10 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
     [aggregationFilter],
   );
 
-  const allData = useMemo(() => mergeRows(trades, results, enrichment), [trades, results, enrichment]);
+  const allData = useMemo(
+    () => mergeRows(trades, results, enrichment, genericFor),
+    [trades, results, enrichment, genericFor],
+  );
   const data = useMemo(
     () => (filteredIds ? allData.filter((r) => filteredIds.has(r.orderId)) : allData),
     [allData, filteredIds],

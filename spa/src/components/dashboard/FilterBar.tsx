@@ -1,18 +1,24 @@
 /**
  * FilterBar — dataset-level filter controls for the multi-order dashboard.
  *
- * Renders compact dropdowns for categorical dimensions (Symbol, Account ID,
- * Client, Algo) and two date inputs (From / To) for the order-time range.
+ * Renders a multi-select checkbox menu per categorical dimension (Symbol,
+ * Account ID, Client, Algo) and two date inputs (From / To) for the order-time
+ * range. Several values can be active at once on any dimension — a report
+ * spanning many contracts is usually narrowed to a handful, not to exactly one.
  *
- * A dimension's dropdown is only shown when the dataset contains ≥ 2 distinct
+ * A dimension's control is only shown when the dataset contains ≥ 2 distinct
  * non-null values for that dimension — hiding irrelevant controls when the
  * uploaded file doesn't have that column.
+ *
+ * Selecting nothing means "all", which is also how DataFilter encodes it: an
+ * empty array is no filter at all, never an empty result set.
  *
  * Each active filter shows a small × button to clear it independently.
  * A "Clear all" pill appears when ≥ 2 dimensions are active simultaneously.
  */
 
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { format, parseISO } from "date-fns";
 import type { DataFilter, TradeRecord } from "@/types";
 import { EMPTY_FILTER } from "@/types";
@@ -50,14 +56,10 @@ export function FilterBar({ trades, filter, onChange }: FilterBarProps) {
     return { symbols, accountIds, accountDescs, algos, minDate, maxDate };
   }, [trades]);
 
-  const activeCount = [
-    filter.symbol,
-    filter.accountId,
-    filter.accountDescription,
-    filter.algo,
-    filter.dateFrom,
-    filter.dateTo,
-  ].filter(Boolean).length;
+  const activeCount =
+    [filter.symbols, filter.accountIds, filter.accountDescriptions, filter.algos]
+      .filter((a) => a.length > 0).length +
+    [filter.dateFrom, filter.dateTo].filter(Boolean).length;
 
   function set<K extends keyof DataFilter>(key: K, value: DataFilter[K]) {
     onChange({ ...filter, [key]: value });
@@ -77,38 +79,38 @@ export function FilterBar({ trades, filter, onChange }: FilterBarProps) {
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-1 py-2 border-b border-gray-100 dark:border-gray-800">
       {/* ── Categorical dropdowns ─────────────────────────────────────── */}
       {opts.symbols.length >= 2 && (
-        <FilterSelect
+        <FilterMultiSelect
           label="Symbol"
           options={opts.symbols}
-          value={filter.symbol}
-          onChange={(v) => set("symbol", v)}
+          selected={filter.symbols}
+          onChange={(v) => set("symbols", v)}
         />
       )}
 
       {opts.accountIds.length >= 2 && (
-        <FilterSelect
+        <FilterMultiSelect
           label="Account"
           options={opts.accountIds}
-          value={filter.accountId}
-          onChange={(v) => set("accountId", v)}
+          selected={filter.accountIds}
+          onChange={(v) => set("accountIds", v)}
         />
       )}
 
       {opts.accountDescs.length >= 2 && (
-        <FilterSelect
+        <FilterMultiSelect
           label="Client"
           options={opts.accountDescs}
-          value={filter.accountDescription}
-          onChange={(v) => set("accountDescription", v)}
+          selected={filter.accountDescriptions}
+          onChange={(v) => set("accountDescriptions", v)}
         />
       )}
 
       {opts.algos.length >= 2 && (
-        <FilterSelect
+        <FilterMultiSelect
           label="Algo"
           options={opts.algos}
-          value={filter.algo}
-          onChange={(v) => set("algo", v)}
+          selected={filter.algos}
+          onChange={(v) => set("algos", v)}
         />
       )}
 
@@ -139,42 +141,152 @@ export function FilterBar({ trades, filter, onChange }: FilterBarProps) {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-interface FilterSelectProps {
+interface FilterMultiSelectProps {
   label: string;
   options: string[];
-  value: string | null;
-  onChange: (v: string | null) => void;
+  selected: string[];
+  onChange: (v: string[]) => void;
 }
 
-function FilterSelect({ label, options, value, onChange }: FilterSelectProps) {
-  const isActive = value !== null;
+/**
+ * A checkbox menu behind a pill button.
+ *
+ * The menu renders into a portal at fixed position rather than absolutely
+ * inside the bar. The filter bar sits inside cards and scroll containers that
+ * would otherwise clip it — the same problem the TradeTable Columns menu hit,
+ * solved the same way (see TradeTable.tsx, "The Columns menu renders in a
+ * portal"). Dismissal on outside click / Escape / scroll / resize is copied
+ * from there too.
+ */
+function FilterMultiSelect({ label, options, selected, onChange }: FilterMultiSelectProps) {
+  const isActive = selected.length > 0;
+
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  const openMenu = useCallback(() => {
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setPos({ top: rect.bottom + 4, left: rect.left });
+    setOpen(true);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onPointerDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (menuRef.current?.contains(target)) return;
+      if (btnRef.current?.contains(target)) return; // the button toggles itself
+      setOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    // Repositioning would drift out of sync with the button, so just close.
+    const onReflow = () => setOpen(false);
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onReflow, true);
+    window.addEventListener("resize", onReflow);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onReflow, true);
+      window.removeEventListener("resize", onReflow);
+    };
+  }, [open]);
+
+  function toggle(option: string) {
+    onChange(
+      selected.includes(option)
+        ? selected.filter((v) => v !== option)
+        : [...selected, option],
+    );
+  }
+
+  // "All" and "3 selected" both mean the same thing when everything is ticked,
+  // so show the count only while it is genuinely a subset.
+  const summary = !isActive
+    ? "All"
+    : selected.length === 1
+      ? selected[0]
+      : `${selected.length} selected`;
+
   return (
     <div className="flex items-center gap-1">
       <label className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
         {label}
       </label>
-      <select
-        value={value ?? ""}
-        onChange={(e) => onChange(e.target.value || null)}
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => (open ? setOpen(false) : openMenu())}
+        aria-haspopup="true"
+        aria-expanded={open}
+        title={isActive ? selected.join(", ") : `All ${label.toLowerCase()}s`}
         className={[
-          "text-xs rounded-lg border py-1 pl-2 pr-6 appearance-none cursor-pointer transition-colors",
-          "focus:outline-none focus:ring-2 focus:ring-blue-500",
+          "text-xs rounded-lg border py-1 pl-2 pr-2 cursor-pointer transition-colors select-none",
+          "focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[180px] truncate",
           isActive
             ? "border-blue-400 dark:border-blue-600 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-medium"
             : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300",
         ].join(" ")}
       >
-        <option value="">All</option>
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
+        {summary} ▾
+      </button>
+
+      {open && pos !== null && createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: "fixed", top: pos.top, left: pos.left }}
+          // Capped with its own scrollbar so a long symbol list stays usable on
+          // a short screen instead of running off the bottom.
+          className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-2 z-50 min-w-[180px] max-h-[70vh] overflow-y-auto"
+        >
+          <div className="flex items-center gap-2 px-2 pb-1.5">
+            <button
+              type="button"
+              onClick={() => onChange([...options])}
+              className="text-[10px] text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+            >
+              Select all
+            </button>
+            <span className="text-[10px] text-gray-300 dark:text-gray-600">·</span>
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="text-[10px] text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+          <hr className="mb-1 border-gray-100 dark:border-gray-800" />
+          {options.map((o) => (
+            <label
+              key={o}
+              className="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer text-xs text-gray-700 dark:text-gray-300 select-none"
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(o)}
+                onChange={() => toggle(o)}
+                className="rounded accent-blue-500"
+              />
+              <span className="truncate">{o}</span>
+            </label>
+          ))}
+        </div>,
+        document.body,
+      )}
+
       {isActive && (
         <button
           type="button"
-          onClick={() => onChange(null)}
+          onClick={() => onChange([])}
           aria-label={`Clear ${label} filter`}
           className="flex items-center justify-center w-4 h-4 rounded-full text-xs text-blue-500 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors leading-none"
         >

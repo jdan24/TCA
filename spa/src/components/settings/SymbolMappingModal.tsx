@@ -40,9 +40,14 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
   const datasetRics = [...new Set(rawTrades.map((t) => t.symbol))];
   const mappedRics = new Set(mappings.map((m) => m.ric));
 
-  // Tracks whether mappings changed this session, so we can prompt for a data
-  // refresh when the modal closes.
-  const [dirty, setDirty] = useState(false);
+  // Tracks whether anything changed that invalidates the *fetched Bloomberg
+  // data*, so we can prompt for a refresh when the modal closes.
+  //
+  // Only bbgTicker / bbgYellowKey qualify: they decide which security Bloomberg
+  // returns. priceMultiplier and pointValue are applied downstream on every
+  // render, so editing them re-prices the loaded report instantly — prompting
+  // for a re-fetch there would be an expensive no-op.
+  const [needsRefetch, setNeedsRefetch] = useState(false);
   // CSV import flow: parsed rows awaiting a replace-vs-add choice, plus status text.
   const [pendingImport, setPendingImport] = useState<SymbolMapping[] | null>(null);
   const [importMsg, setImportMsg] = useState<{ kind: "error" | "info"; text: string } | null>(null);
@@ -64,7 +69,7 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
   });
 
   function handleClose() {
-    if (dirty) setSymbolMapDirty(true);
+    if (needsRefetch) setSymbolMapDirty(true);
     onClose();
   }
 
@@ -109,18 +114,18 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
       ...(isValidPv ? { pointValue: pv } : {}),
     };
     addMapping(newMapping);
-    setDirty(true);
+    setNeedsRefetch(true);
     setNewRow({ ric: "", bbgTicker: "", bbgYellowKey: "Index", priceMultiplier: "", pointValue: "" });
   }
 
   function handleUpdate(ric: string, patch: Partial<SymbolMapping>) {
     updateMapping(ric, patch);
-    setDirty(true);
+    if ("bbgTicker" in patch || "bbgYellowKey" in patch) setNeedsRefetch(true);
   }
 
   function handleDelete(ric: string) {
     deleteMapping(ric);
-    setDirty(true);
+    setNeedsRefetch(true);
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -143,7 +148,7 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
       if (mappings.length === 0) {
         // Nothing to merge against — import directly.
         const count = importMappings(parsed, "replace");
-        setDirty(true);
+        setNeedsRefetch(true);
         setImportMsg({ kind: "info", text: `Imported ${count} mapping${count === 1 ? "" : "s"}.${note}` });
       } else {
         setPendingImport(parsed);
@@ -160,7 +165,7 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
   function applyImport(strategy: "replace" | "merge") {
     if (!pendingImport) return;
     const count = importMappings(pendingImport, strategy);
-    setDirty(true);
+    setNeedsRefetch(true);
     setPendingImport(null);
     setImportMsg({
       kind: "info",
@@ -368,7 +373,8 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
                       ...(field !== "pointValue" && m.pointValue !== undefined
                         ? { pointValue: m.pointValue } : {}),
                     });
-                    setDirty(true);
+                    // Only priceMultiplier / pointValue can be cleared here and
+                    // both recompute live — no Bloomberg refresh needed.
                   }}
                 />
               ))}

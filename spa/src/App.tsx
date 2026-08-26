@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { enrichAllTrades, enrichSingleOrder, type EnrichProgress } from "@/bloomberg/enrichmentService";
 import { Header } from "@/components/layout/Header";
 import { SymbolRefreshBanner } from "@/components/layout/SymbolRefreshBanner";
@@ -11,7 +11,7 @@ import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { CorporateTemplateProvider } from "@/hooks/useCorporateTemplate";
 import { useTCAStore } from "@/store/useTCAStore";
 import { computeAll } from "@/tca/compute";
-import { buildPointValueResolver } from "@/tca/pointValue";
+import { buildPointValueResolver, buildPriceScaleResolver } from "@/tca/pointValue";
 import { parseSymbolMapCsvText } from "@/parsers/symbolMapCsv";
 import type { TradeRecord } from "@/types";
 
@@ -57,15 +57,41 @@ function App() {
   // null = wizard not shown; non-null = wizard shown with these trades.
   const [wizardTrades, setWizardTrades] = useState<TradeRecord[] | null>(null);
 
+  // ── Price multiplier, applied as a derived layer ──────────────────────────
+  // The multiplier lives in the symbol map and is applied here rather than
+  // baked into the records at import time, so changing it in the Symbols table
+  // re-prices the loaded report on the spot — no Bloomberg re-fetch required.
+  //
+  // Every file-sourced price scales together; Bloomberg's own prices never do.
+  // Scaling a fill without its arrival price would manufacture slippage.
+  //
+  // Single-order mode is excluded: SingleOrderDashboard already applies its own
+  // singleOrderPriceScale, and scaling here too would square the multiplier.
+  const scaledTrades = useMemo(() => {
+    if (mode === "single") return rawTrades;
+    const scaleFor = buildPriceScaleResolver(symbolMap.mappings);
+    return rawTrades.map((t) => {
+      const k = scaleFor(t.symbol);
+      if (k === 1) return t;
+      return {
+        ...t,
+        avgFillPrice: t.avgFillPrice * k,
+        arrivalPrice: t.arrivalPrice !== null ? t.arrivalPrice * k : null,
+        fileVwap:     t.fileVwap     !== null ? t.fileVwap     * k : null,
+        fileTwap:     t.fileTwap     !== null ? t.fileTwap     * k : null,
+      };
+    });
+  }, [rawTrades, symbolMap.mappings, mode]);
+
   // Re-run TCA metrics whenever trades, Bloomberg enrichment, or the symbol
   // mappings change — the mappings carry the manual point-value overrides that
-  // the cash slippage figures depend on.
+  // the cash slippage figures depend on, and the price multiplier above.
   useEffect(() => {
-    if (rawTrades.length > 0) {
-      const pointValueFor = buildPointValueResolver(symbolMap.mappings, rawTrades, enrichment);
-      setResults(computeAll(rawTrades, enrichment, pointValueFor));
+    if (scaledTrades.length > 0) {
+      const pointValueFor = buildPointValueResolver(symbolMap.mappings, scaledTrades, enrichment);
+      setResults(computeAll(scaledTrades, enrichment, pointValueFor));
     }
-  }, [rawTrades, enrichment, symbolMap.mappings, setResults]);
+  }, [scaledTrades, enrichment, symbolMap.mappings, setResults]);
 
   async function handleFetchBloomberg() {
     if (rawTrades.length === 0 || !bloombergConnected || enrichProgress !== null) return;
@@ -80,7 +106,10 @@ function App() {
 
     const result = mode === "single"
       ? await enrichSingleOrder(rawTrades, setEnrichProgress, singleOrderResolver, singleOrderTimeOverride ?? undefined)
-      : await enrichAllTrades(rawTrades, setEnrichProgress, symbolMap.resolve);
+      // Scaled, not raw: enrichOneTrade falls back to avgFillPrice for the
+      // reversion marks, and a fallback in the wrong price scale would show up
+      // as reversion that never happened.
+      : await enrichAllTrades(scaledTrades, setEnrichProgress, symbolMap.resolve);
     setAllEnrichment(result);
     // Record the exact time window used for this fetch so the stale indicator
     // can accurately detect when the override has moved outside the fetched range.
@@ -159,7 +188,7 @@ function App() {
       ) : (
         <main className="flex-1 overflow-auto">
           <Dashboard
-            trades={rawTrades}
+            trades={scaledTrades}
             results={results}
             bloombergConnected={bloombergConnected}
             enrichedCount={enrichedCount}

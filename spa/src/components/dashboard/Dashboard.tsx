@@ -16,7 +16,8 @@ import { toPng } from "html-to-image";
 import type { EnrichProgress } from "@/bloomberg/enrichmentService";
 import type { AggregationSet, DataFilter, TCAResult, TradeRecord } from "@/types";
 import { EMPTY_FILTER } from "@/types";
-import { buildAggregations } from "@/tca/aggregate";
+import { buildAggregations, buildSpreadSavings } from "@/tca/aggregate";
+import { toGenericTicker } from "@/tca/genericTicker";
 import { decToTreasuryFrac, getTreasuryPrecision } from "@/tca/treasuryFrac";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { MultiOrderPrintLayout, type MOChartImages } from "@/components/export/MultiOrderPrintLayout";
@@ -28,6 +29,32 @@ import { SlippageChart } from "./SlippageChart";
 import { SpreadScatter } from "./SpreadScatter";
 import { SummaryCards } from "./SummaryCards";
 import { VWAPDeviation } from "./VWAPDeviation";
+
+/** Empty selection = no filter on this dimension. */
+function matches(selected: string[], value: string | null): boolean {
+  return selected.length === 0 || (value !== null && selected.includes(value));
+}
+
+// ── Grouping-toggle persistence ───────────────────────────────────────────────
+
+const GROUP_GENERIC_KEY = "tca_agg_generic_v1";
+
+function loadGroupGeneric(): boolean {
+  try {
+    const raw = localStorage.getItem(GROUP_GENERIC_KEY);
+    return raw === null ? true : raw === "true"; // default: generic
+  } catch {
+    return true;
+  }
+}
+
+function saveGroupGeneric(v: boolean): void {
+  try {
+    localStorage.setItem(GROUP_GENERIC_KEY, String(v));
+  } catch {
+    // localStorage unavailable (private browsing) — the setting just won't persist
+  }
+}
 
 interface DashboardProps {
   trades: TradeRecord[];
@@ -61,6 +88,23 @@ export function Dashboard({
     },
     [resolveSymbol],
   );
+
+  // Generic ticker for a file symbol: resolve the RIC to its Bloomberg form
+  // first, then drop the expiry — "FVU6"/"FVZ6" both become "FV Comdty".
+  // Derived rather than stored on TradeRecord: the import wizard rewrites
+  // `symbol` after parsing, so a stored value would go stale.
+  const genericFor = useMemo(
+    () => (ric: string) => toGenericTicker(resolveSymbol(ric)),
+    [resolveSymbol],
+  );
+
+  // Group the aggregation tables by generic ticker or by specific expiry.
+  // Persisted so the choice survives a reload, like the KPI tile visibility.
+  const [groupGeneric, setGroupGeneric] = useState<boolean>(loadGroupGeneric);
+  function changeGroupGeneric(v: boolean) {
+    setGroupGeneric(v);
+    saveGroupGeneric(v);
+  }
 
   const [showPrintLayout, setShowPrintLayout]     = useState(false);
   const [capturingPrint, setCapturingPrint]       = useState(false);
@@ -109,11 +153,11 @@ export function Dashboard({
   const filteredTrades = useMemo(() => {
     return trades.filter((t) => {
       if (deletedOrderIds.has(t.orderId)) return false;
-      if (filter.symbol && t.symbol !== filter.symbol) return false;
-      if (filter.accountId && t.accountId !== filter.accountId) return false;
-      if (filter.accountDescription && t.accountDescription !== filter.accountDescription)
-        return false;
-      if (filter.algo && t.algo !== filter.algo) return false;
+      // An empty selection is "no filter on this dimension", not "match nothing".
+      if (!matches(filter.symbols, t.symbol)) return false;
+      if (!matches(filter.accountIds, t.accountId)) return false;
+      if (!matches(filter.accountDescriptions, t.accountDescription)) return false;
+      if (!matches(filter.algos, t.algo)) return false;
       const d = t.orderTime.toISOString().slice(0, 10); // "YYYY-MM-DD"
       if (filter.dateFrom && d < filter.dateFrom) return false;
       if (filter.dateTo && d > filter.dateTo) return false;
@@ -132,8 +176,19 @@ export function Dashboard({
   );
 
   const aggregations: AggregationSet = useMemo(
-    () => buildAggregations(filteredTrades, filteredResults),
-    [filteredTrades, filteredResults],
+    () => buildAggregations(
+      filteredTrades,
+      filteredResults,
+      groupGeneric ? genericFor : undefined,
+    ),
+    [filteredTrades, filteredResults, groupGeneric, genericFor],
+  );
+
+  // Always by generic ticker — collapsing expiries onto the instrument is the
+  // point of this table, so it ignores the toggle above.
+  const spreadSavings = useMemo(
+    () => buildSpreadSavings(filteredTrades, filteredResults, genericFor),
+    [filteredTrades, filteredResults, genericFor],
   );
 
   const isFiltered = filteredTrades.length !== trades.length;
@@ -144,6 +199,7 @@ export function Dashboard({
         trades={filteredTrades}
         results={filteredResults}
         aggregations={aggregations}
+        genericFor={genericFor}
         charts={printCharts}
         onBack={() => { setShowPrintLayout(false); setPrintCharts(null); }}
       />
@@ -256,6 +312,7 @@ export function Dashboard({
         results={filteredResults}
         title="Order Detail"
         priceFormatterForSymbol={priceFormatterForSymbol}
+        genericFor={genericFor}
         onDeleteOrder={handleDeleteOrder}
       />
 
@@ -272,7 +329,12 @@ export function Dashboard({
       </div>
 
       {/* ── Aggregation tables ───────────────────────────────────────────── */}
-      <AggregationSection aggregations={aggregations} />
+      <AggregationSection
+        aggregations={aggregations}
+        spreadSavings={spreadSavings}
+        groupGeneric={groupGeneric}
+        onGroupGenericChange={changeGroupGeneric}
+      />
     </div>
   );
 }

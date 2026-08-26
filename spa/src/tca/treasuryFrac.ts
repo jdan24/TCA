@@ -42,8 +42,12 @@ const PATTERNS: Array<{ re: RegExp; precision: TreasuryPrecision }> = [
 /**
  * A two-legged calendar spread ticker: the same root and a month/year code
  * twice over, e.g. "3YU63YZ6" or "TUM6TUU6".
+ *
+ * Exported because tca/genericTicker.ts must recognise spreads too: the
+ * single-expiry root pattern matches them by accident and yields nonsense
+ * ("3YU63YZ6" → "3YU63Y"), so spreads have to be ruled out first.
  */
-const SPREAD_RE = /^([A-Z0-9]+?)[FGHJKMNQUVXZ]\d{1,2}\1[FGHJKMNQUVXZ]\d{1,2}$/;
+export const SPREAD_RE = /^([A-Z0-9]+?)[FGHJKMNQUVXZ]\d{1,2}\1[FGHJKMNQUVXZ]\d{1,2}$/;
 
 /**
  * Returns the fractional-price precision for the given Bloomberg symbol,

@@ -84,6 +84,8 @@ interface MultiOrderPrintLayoutProps {
   trades:       TradeRecord[];
   results:      TCAResult[];
   aggregations: AggregationSet;
+  /** Maps a file symbol to its generic ticker for the Order Detail table. */
+  genericFor: (ric: string) => string;
   charts:       MOChartImages;
   onBack:       () => void;
 }
@@ -165,7 +167,7 @@ function PrintAggTable({ title, rows }: { title: string; rows: AggregateRow[] })
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function MultiOrderPrintLayout({
-  trades, results, aggregations, charts, onBack,
+  trades, results, aggregations, genericFor, charts, onBack,
 }: MultiOrderPrintLayoutProps) {
   const {
     logoDataUrl, disclaimerText, reportTitle, bridgeStatus,
@@ -402,7 +404,7 @@ export function MultiOrderPrintLayout({
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 text-left">
                   {[
-                    "Order Time (UTC)", "Symbol", "Side", "Qty", "Fill Price",
+                    "Order Time (UTC)", "Symbol", "Generic", "Side", "Qty", "Fill Price",
                     "Algo", "IS (bps)", "VWAP Dev (bps)", "TWAS (bps)", "TTF", "1σ Vol (bps)",
                   ].map((h) => (
                     <th key={h} className="px-1.5 py-1.5 font-semibold whitespace-nowrap">{h}</th>
@@ -416,6 +418,7 @@ export function MultiOrderPrintLayout({
                     <tr key={`${t.orderId}-${i}`} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
                       <td className="px-1.5 py-1 font-mono whitespace-nowrap">{fmtUtc(t.orderTime)}</td>
                       <td className="px-1.5 py-1 font-semibold">{t.symbol}</td>
+                      <td className="px-1.5 py-1 text-gray-500 whitespace-nowrap">{genericFor(t.symbol)}</td>
                       <td className="px-1.5 py-1">
                         <span className={`font-semibold ${t.side === "BUY" ? "text-blue-600" : "text-red-500"}`}>
                           {t.side}

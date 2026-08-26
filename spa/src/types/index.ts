@@ -168,21 +168,53 @@ export interface AggregationSet {
   bySymbolSide: AggregateRow[];
 }
 
+// ── Spread-savings aggregation (multi-order, grouped by generic ticker) ───────
+/**
+ * How much of the quoted spread the execution actually kept, per instrument.
+ *
+ * savingsPct = (avgSpread_bps / 2 − wAvgIS_bps) / avgSpread_bps
+ *
+ * The IS term is subtracted because a positive IS_bps is a cost in this
+ * codebase (see tca/slippage.ts). That makes the scale read:
+ *   1.0  → filled at or better than the near touch
+ *   0.5  → filled at mid
+ *   0.0  → paid the full spread
+ *   < 0  → worse than crossing the spread
+ */
+export interface SpreadSavingsRow {
+  /** Generic ticker, e.g. "FV Comdty" — expiry deliberately dropped. */
+  groupKey: string;
+  count: number;
+  totalQty: number;
+  /** Simple mean of TWAS_bps across the group's orders. */
+  avgSpread_bps: number | null;
+  /** Quantity-weighted mean of IS_bps: Σ(IS × qty) / Σqty. */
+  wAvgIS_bps: number | null;
+  /** Fraction, not a percentage — the table multiplies by 100 for display. */
+  savingsPct: number | null;
+}
+
 // ── Multi-order dashboard filter ─────────────────────────────────────────────
+/**
+ * Categorical dimensions are multi-select: an empty array means "no filter on
+ * this dimension" (match everything), not "match nothing". Ticking several
+ * values ORs them together — the common case being a handful of contracts out
+ * of a report that spans many.
+ */
 export interface DataFilter {
-  symbol: string | null;
-  accountId: string | null;
-  accountDescription: string | null;
-  algo: string | null;
+  symbols: string[];
+  accountIds: string[];
+  accountDescriptions: string[];
+  algos: string[];
   dateFrom: string | null; // "YYYY-MM-DD" inclusive lower bound on orderTime
   dateTo: string | null;   // "YYYY-MM-DD" inclusive upper bound on orderTime
 }
 
 export const EMPTY_FILTER: DataFilter = {
-  symbol: null,
-  accountId: null,
-  accountDescription: null,
-  algo: null,
+  symbols: [],
+  accountIds: [],
+  accountDescriptions: [],
+  algos: [],
   dateFrom: null,
   dateTo: null,
 };

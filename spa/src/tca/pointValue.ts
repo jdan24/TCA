@@ -8,6 +8,9 @@
  *
  * Returns null when neither is available, so every downstream cash figure
  * shows N/A rather than a number built on a guessed multiplier.
+ *
+ * Also home to buildPriceScaleResolver — the other per-symbol setting the
+ * mapping table carries, resolved the same way.
  */
 import type { BloombergEnrichment, SymbolMapping, TradeRecord } from "@/types";
 
@@ -36,4 +39,26 @@ export function buildPointValueResolver(
   }
 
   return (ric: string) => overrides.get(ric) ?? fromBloomberg.get(ric) ?? null;
+}
+
+/**
+ * Multiplier applied to file-sourced prices before they are compared with
+ * Bloomberg prices — 0.01 when the file quotes 100× Bloomberg, 100 for the
+ * reverse. Returns 1 (a no-op) when the symbol has no mapping or the stored
+ * value is unusable.
+ *
+ * The multiplier is resolved on every render rather than baked into the trade
+ * records at import time, so editing it in the Symbols table re-prices the
+ * loaded report immediately and never needs another Bloomberg fetch.
+ */
+export function buildPriceScaleResolver(
+  mappings: SymbolMapping[],
+): (ric: string) => number {
+  const scales = new Map<string, number>();
+  for (const m of mappings) {
+    if (typeof m.priceMultiplier === "number" && isFinite(m.priceMultiplier) && m.priceMultiplier > 0) {
+      scales.set(m.ric, m.priceMultiplier);
+    }
+  }
+  return (ric: string) => scales.get(ric) ?? 1;
 }

@@ -446,41 +446,54 @@ export function ImportWizardMulti({
 
   // ── Transformation + completion ────────────────────────────────────────────
   function handleComplete() {
-    // 1. Build price-multiplier and symbol-replacement lookups.
-    //    Also persist each mapped symbol to localStorage.
-    const multMap: Record<string, number> = {};
+    // 1. Persist each symbol's mapping to localStorage, and build the RIC →
+    //    Bloomberg-identifier replacement lookup.
+    //
+    //    The stored priceMultiplier is now the only copy of the multiplier —
+    //    App.tsx reads it back to scale prices on every render — so it has to
+    //    be written for every row that carries one, mapped or not.
     // Maps original file RIC → full Bloomberg identifier ("ES1 Index")
     const symbolReplace: Record<string, string> = {};
 
     for (const row of symbolRows) {
       const mult = parseFloat(row.priceMultiplier);
       const effectiveMult = !isNaN(mult) && mult > 0 ? mult : 1;
-      if (effectiveMult !== 1) {
-        multMap[row.ric] = effectiveMult;
+      const multPatch = effectiveMult !== 1 ? { priceMultiplier: effectiveMult } : {};
+      const ticker = row.bbgTicker.trim();
+
+      if (!ticker) {
+        // No Bloomberg ticker, but a multiplier still has to survive: store a
+        // scale-only entry keyed on the file RIC. resolve() returns the raw RIC
+        // until a ticker is filled in via the Symbol Mapping modal — same shape
+        // as persistScaleToMap() in SingleOrderDashboard.
+        if (effectiveMult !== 1) {
+          addMapping({ ric: row.ric, bbgTicker: "", bbgYellowKey: row.bbgYellowKey, ...multPatch });
+        }
+        continue;
       }
 
-      if (row.bbgTicker.trim()) {
-        const fullId = `${row.bbgTicker.trim()} ${row.bbgYellowKey}`;
-        symbolReplace[row.ric] = fullId;
+      const fullId = `${ticker} ${row.bbgYellowKey}`;
+      symbolReplace[row.ric] = fullId;
 
-        // Persist original-RIC → Bloomberg mapping (for future imports)
+      // Persist original-RIC → Bloomberg mapping (for future imports)
+      addMapping({
+        ric:          row.ric,
+        bbgTicker:    ticker,
+        bbgYellowKey: row.bbgYellowKey,
+        ...multPatch,
+      });
+
+      // Add a passthrough mapping so resolve("ES1 Index") = "ES1 Index" for
+      // Bloomberg API calls after the symbol field is replaced in the store.
+      // It also carries the multiplier, since the replaced symbol is what the
+      // price scaler looks up.
+      if (fullId !== row.ric) {
         addMapping({
-          ric:          row.ric,
-          bbgTicker:    row.bbgTicker.trim(),
+          ric:          fullId,
+          bbgTicker:    ticker,
           bbgYellowKey: row.bbgYellowKey,
-          ...(effectiveMult !== 1 ? { priceMultiplier: effectiveMult } : {}),
+          ...multPatch,
         });
-
-        // Add a passthrough mapping so resolve("ES1 Index") = "ES1 Index"
-        // for Bloomberg API calls after the symbol field is replaced in the store.
-        if (fullId !== row.ric) {
-          addMapping({
-            ric:          fullId,
-            bbgTicker:    row.bbgTicker.trim(),
-            bbgYellowKey: row.bbgYellowKey,
-            ...(effectiveMult !== 1 ? { priceMultiplier: effectiveMult } : {}),
-          });
-        }
       }
     }
 
@@ -492,18 +505,14 @@ export function ImportWizardMulti({
     );
 
     // 3. Apply all transformations to produce the final trade list.
+    //
+    // Prices are deliberately NOT scaled here. The multiplier is persisted to
+    // the symbol map above and applied as a derived layer in App.tsx, so that
+    // editing it later re-prices the loaded report instead of requiring a
+    // re-import. Baking it in here as well would apply it twice.
     const transformed: TradeRecord[] = trades.map((trade) => {
-      // Price multiplier (keyed by original file RIC before symbol replacement)
-      const mult = multMap[trade.symbol] ?? 1;
-
       // Replace symbol with full Bloomberg identifier when a mapping exists
       const newSymbol = symbolReplace[trade.symbol] ?? trade.symbol;
-
-      // Scale ALL file-sourced price fields by the same multiplier so they
-      // remain aligned with the (scaled) fill price.
-      const newArrivalPrice = trade.arrivalPrice !== null ? trade.arrivalPrice * mult : null;
-      const newFileVwap     = trade.fileVwap      !== null ? trade.fileVwap      * mult : null;
-      const newFileTwap     = trade.fileTwap      !== null ? trade.fileTwap      * mult : null;
 
       // Algo
       const newAlgo =
@@ -521,10 +530,6 @@ export function ImportWizardMulti({
       return {
         ...trade,
         symbol:        newSymbol,
-        avgFillPrice:  trade.avgFillPrice * mult,
-        arrivalPrice:  newArrivalPrice,
-        fileVwap:      newFileVwap,
-        fileTwap:      newFileTwap,
         algo:          newAlgo,
         orderTime:     newOrderTime,
         firstFillTime: newFirstFill,
