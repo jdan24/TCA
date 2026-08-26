@@ -146,7 +146,9 @@ export function FAQModal({ onClose }: FAQModalProps) {
             <Entry name="Reference Data" tag="ReferenceDataRequest">
               <Row label="HIST_VOL_30D" value="30-day historical annualised volatility (%)" />
               <Row label="VOLUME_AVG_30D" value="30-day average daily volume (contracts)" />
-              <Row label="FUT_CONT_SIZE" value="Contract notional — converted to a cash point value (see Slippage in Cash Terms)" />
+              <Row label="FUT_VAL_PT" value="Cash value of one point — the preferred source for cash slippage (see Slippage in Cash Terms)" />
+              <Row label="FUT_CONT_SIZE" value="Contract notional — converted to a cash point value when FUT_VAL_PT is unavailable" />
+              <Row label="CRNCY" value="Quote currency. A trailing lowercase letter marks a minor unit (USd = cents), which halves-by-100 the derived point value" />
               <p>Fetched once per unique symbol. Used for Market Impact estimation and for the cash slippage figures.</p>
             </Entry>
 
@@ -175,8 +177,10 @@ export function FAQModal({ onClose }: FAQModalProps) {
               <Formula>$ = (fillPrice − benchmarkPrice) × sideSign × quantity × pointValue</Formula>
               <Row label="pointValue" value="Cash value of a 1.00 price move for one contract — 1000 for a 3Y/10Y note, 50 for ES" />
               <Row label="Source (1st)" value="Manual per-symbol override in the Symbols table — leave blank to use Bloomberg" />
-              <Row label="Source (2nd)" value="Bloomberg FUT_CONT_SIZE, converted as below" />
+              <Row label="Source (2nd)" value="Bloomberg FUT_VAL_PT — the cash value of one point, already correct for however the contract is quoted" />
+              <Row label="Source (3rd)" value="Bloomberg FUT_CONT_SIZE, converted as below" />
               <Row label="Treasury conversion" value="Treasury futures quote as a percent of par, so their point value is FUT_CONT_SIZE ÷ 100: ZN's 100,000 face becomes $1,000 per point. Contracts quoted in currency-per-unit (ES 50, CL 1,000, 6E 125,000) are used as-is." />
+              <Row label="Cents conversion" value="FX and some energy futures are quoted by Bloomberg in a currency's minor unit, flagged by a trailing lowercase letter on CRNCY (USd = US cents, GBp = pence). Their point value is also FUT_CONT_SIZE ÷ 100: 6C's 100,000 CAD quoted at 72.70 USd means a 1.00 move is $1,000, not $100,000. Cash figures are reported in the major unit (USD)." />
               <Row label="No point value" value={<Pill color="gray">N/A</Pill>} />
               <Row label="Hiding them" value="The $ columns hide through the table's Columns menu; the Total Cost tile has its own dismiss control, and both are remembered between sessions. Exports carry whatever columns the table is showing." />
               <p>Shown beside the bps figure on each benchmark in the Parent Order Summary, and as its own column in the order and fill tables. Positive is a cost, matching the bps convention.</p>

@@ -12,9 +12,15 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AggregationSet, AggregateRow, TCAResult, TradeRecord } from "@/types";
+import type { AggregationSet, AggregateRow, SpreadSavingsRow, TCAResult, TradeRecord } from "@/types";
 import { useCorporateTemplate, type BridgeStatus } from "@/hooks/useCorporateTemplate";
 import { fmtBps, fmtTtf, safeAvg } from "@/components/dashboard/dashboardUtils";
+import {
+  Legend as SpreadSavingsLegend,
+  renderCell as renderSpreadSavingsCell,
+  SPREAD_SAVINGS_COLUMNS,
+  type SpreadSavingsColumnId,
+} from "@/components/dashboard/SpreadSavingsTable";
 
 // ── Section type & constants ──────────────────────────────────────────────────
 
@@ -22,8 +28,8 @@ export type SectionId =
   | "kpi"
   | "slippage"
   | "vwap_dev"
-  | "reversion"
   | "spread"
+  | "spread_savings"
   | "by_symbol"
   | "by_algo"
   | "by_symbol_algo"
@@ -32,7 +38,8 @@ export type SectionId =
 
 export const ALL_SECTIONS: SectionId[] = [
   "kpi",
-  "slippage", "vwap_dev", "reversion", "spread",
+  "slippage", "vwap_dev", "spread",
+  "spread_savings",
   "by_symbol", "by_algo", "by_symbol_algo", "by_symbol_side",
   "order_table",
 ];
@@ -50,13 +57,13 @@ const SECTION_GROUPS: SectionGroup[] = [
     items: [
       { id: "slippage",  label: "IS vs Order Size" },
       { id: "vwap_dev",  label: "VWAP Deviation"   },
-      { id: "reversion", label: "Price Reversion"   },
       { id: "spread",    label: "Spread vs IS"      },
     ],
   },
   {
     heading: "Aggregation Tables",
     items: [
+      { id: "spread_savings", label: "Spread Savings"    },
       { id: "by_symbol",      label: "By Symbol"        },
       { id: "by_algo",        label: "By Algo"           },
       { id: "by_symbol_algo", label: "By Symbol + Algo"  },
@@ -74,7 +81,6 @@ const SECTION_GROUPS: SectionGroup[] = [
 export interface MOChartImages {
   slippage:  string | null;
   vwapDev:   string | null;
-  reversion: string | null;
   spread:    string | null;
 }
 
@@ -86,6 +92,9 @@ interface MultiOrderPrintLayoutProps {
   aggregations: AggregationSet;
   /** Maps a file symbol to its generic ticker for the Order Detail table. */
   genericFor: (ric: string) => string;
+  spreadSavings: SpreadSavingsRow[];
+  /** The same column selection made on screen — the print view mirrors it. */
+  spreadSavingsColumns: SpreadSavingsColumnId[];
   charts:       MOChartImages;
   onBack:       () => void;
 }
@@ -164,10 +173,63 @@ function PrintAggTable({ title, rows }: { title: string; rows: AggregateRow[] })
   );
 }
 
+/**
+ * Print-friendly Spread Savings table.
+ *
+ * Columns mirror the on-screen selection, and the cells come from the same
+ * renderer the screen table uses so the two can never drift. The legend is
+ * included only when the Spread Savings column itself is shown — without that
+ * column there is nothing for it to explain.
+ */
+function PrintSpreadSavingsTable({
+  rows,
+  visibleColumns,
+}: {
+  rows: SpreadSavingsRow[];
+  visibleColumns: SpreadSavingsColumnId[];
+}) {
+  if (rows.length === 0) return null;
+  const cols = SPREAD_SAVINGS_COLUMNS.filter((c) => visibleColumns.includes(c.id));
+
+  return (
+    <div className="break-inside-avoid mb-5">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-1.5">
+        Spread Savings by Instrument
+      </p>
+      <div className="border border-gray-200 rounded-lg overflow-hidden">
+        <table className="w-full text-[10px]">
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 text-left">
+              {["Generic Ticker", ...cols.map((c) => c.label)].map((h, i) => (
+                <th key={h} className={`px-2 py-1.5 font-semibold ${i === 0 ? "text-left" : "text-right"}`}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 text-gray-700">
+            {rows.map((row, i) => (
+              <tr key={row.groupKey} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
+                <td className="px-2 py-1.5 font-medium">{row.groupKey}</td>
+                {cols.map((c) => (
+                  <td key={c.id} className="px-2 py-1.5 text-right tabular-nums">
+                    {renderSpreadSavingsCell(row, c.id)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {visibleColumns.includes("savingsPct") && <SpreadSavingsLegend />}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function MultiOrderPrintLayout({
-  trades, results, aggregations, genericFor, charts, onBack,
+  trades, results, aggregations, genericFor, spreadSavings, spreadSavingsColumns, charts, onBack,
 }: MultiOrderPrintLayoutProps) {
   const {
     logoDataUrl, disclaimerText, reportTitle, bridgeStatus,
@@ -253,7 +315,6 @@ export function MultiOrderPrintLayout({
   const CHART_DEFS = [
     { id: "slippage"  as SectionId, label: "IS vs Order Size", src: charts.slippage  },
     { id: "vwap_dev"  as SectionId, label: "VWAP Deviation",   src: charts.vwapDev   },
-    { id: "reversion" as SectionId, label: "Price Reversion",  src: charts.reversion },
     { id: "spread"    as SectionId, label: "Spread vs IS",     src: charts.spread    },
   ];
   const enabledCharts = CHART_DEFS.filter((c) => vis(c.id));
@@ -374,7 +435,8 @@ export function MultiOrderPrintLayout({
   }
 
   // — Aggregation tables ————————————————————————————————————————————————————
-  if (hasAnyAgg) {
+  const showSpreadSavings = vis("spread_savings") && spreadSavings.length > 0;
+  if (hasAnyAgg || showSpreadSavings) {
     contentGroups.push({
       key: "agg",
       node: (
@@ -382,6 +444,12 @@ export function MultiOrderPrintLayout({
           <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-3">
             Aggregation
           </p>
+          {showSpreadSavings && (
+            <PrintSpreadSavingsTable
+              rows={spreadSavings}
+              visibleColumns={spreadSavingsColumns}
+            />
+          )}
           {enabledAggs.map((a) => (
             <PrintAggTable key={a.id} title={a.label} rows={a.rows} />
           ))}

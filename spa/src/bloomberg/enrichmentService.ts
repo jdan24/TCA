@@ -32,7 +32,7 @@
  */
 
 import type { BidAskTick, BloombergEnrichment, IntradayBar, TradeTick, TradeRecord } from "@/types";
-import { pointValueFromContractSize } from "@/tca/dollars";
+import { pointValueFromContractSize, pointValueFromValPt, toMajorCurrency } from "@/tca/dollars";
 import { getTreasuryPrecision } from "@/tca/treasuryFrac";
 import {
   fetchArrivalPrice,
@@ -313,12 +313,21 @@ async function enrichOneTrade(
   }));
   const bidAskSource = rawTickData.source;
 
-  // Cash value of a 1.00 price move. Treasury futures quote as a percent of
-  // par, so their FUT_CONT_SIZE needs dividing by 100; see dollars.ts.
-  const pointValue = pointValueFromContractSize(
-    refData["FUT_CONT_SIZE"],
-    getTreasuryPrecision(bbgSymbol) !== null,
-  );
+  // Cash value of a 1.00 price move. Bloomberg's own FUT_VAL_PT already accounts
+  // for the contract's quote scale, so it wins when populated. Otherwise derive
+  // it from FUT_CONT_SIZE, allowing for per-par quoting (Treasuries) and minor
+  // currencies ("USd" is cents); see dollars.ts.
+  const pointValue =
+    pointValueFromValPt(refData["FUT_VAL_PT"]) ??
+    pointValueFromContractSize(
+      refData["FUT_CONT_SIZE"],
+      getTreasuryPrecision(bbgSymbol) !== null,
+      refData["CRNCY"],
+    );
+  // Major-unit currency of the cash figures: a contract quoted in USd produces
+  // a P&L in USD. null when Bloomberg says nothing, so display falls back to
+  // the currency column from the file.
+  const currency = toMajorCurrency(refData["CRNCY"]);
 
   // ── Trade ticks (Date-typed for short-order VWAP) ─────────────────────────
   const tradeTicks: TradeTick[] = rawTradeTicks.map((t) => ({
@@ -336,6 +345,7 @@ async function enrichOneTrade(
     reversion30s: rev30sPrice ?? avgFillPrice,
     reversion1m:  rev1mPrice  ?? avgFillPrice,
     pointValue,
+    currency,
     bidAskTicks,
     bidAskSource,
     tradeTicks,
@@ -392,7 +402,9 @@ export async function enrichAllTrades(
         "CLOSE_TO_CLOSE_HIST_VOL_30D", // close-to-close 30D, common for rates/FI futures
         "VOLUME_AVG_30D",
         "VOLUME_AVG_20D",
-        "FUT_CONT_SIZE",          // contract notional -> cash point value
+        "FUT_VAL_PT",             // cash value of one point — preferred, when populated
+        "FUT_CONT_SIZE",          // contract notional -> cash point value (fallback)
+        "CRNCY",                  // quote currency; "USd" means cents, not dollars
       ]);
     }),
   );
@@ -469,7 +481,9 @@ export async function enrichSingleOrder(
   const refData = await fetchReference(bbgSymbol, [
     "HIST_VOL_30D", "VOLATILITY_30D", "RETURN_VOL_30D_MID",
     "CLOSE_TO_CLOSE_HIST_VOL_30D", "VOLUME_AVG_30D", "VOLUME_AVG_20D",
-    "FUT_CONT_SIZE",
+    "FUT_VAL_PT",             // cash value of one point — preferred, when populated
+    "FUT_CONT_SIZE",          // contract notional -> cash point value (fallback)
+    "CRNCY",                  // quote currency; "USd" means cents, not dollars
   ]);
 
   // ── Bars + ticks + snapshot (parallel, one call each) ─────────────────────
@@ -558,12 +572,21 @@ export async function enrichSingleOrder(
   }));
   const bidAskSource = rawTickData.source;
 
-  // Cash value of a 1.00 price move. Treasury futures quote as a percent of
-  // par, so their FUT_CONT_SIZE needs dividing by 100; see dollars.ts.
-  const pointValue = pointValueFromContractSize(
-    refData["FUT_CONT_SIZE"],
-    getTreasuryPrecision(bbgSymbol) !== null,
-  );
+  // Cash value of a 1.00 price move. Bloomberg's own FUT_VAL_PT already accounts
+  // for the contract's quote scale, so it wins when populated. Otherwise derive
+  // it from FUT_CONT_SIZE, allowing for per-par quoting (Treasuries) and minor
+  // currencies ("USd" is cents); see dollars.ts.
+  const pointValue =
+    pointValueFromValPt(refData["FUT_VAL_PT"]) ??
+    pointValueFromContractSize(
+      refData["FUT_CONT_SIZE"],
+      getTreasuryPrecision(bbgSymbol) !== null,
+      refData["CRNCY"],
+    );
+  // Major-unit currency of the cash figures: a contract quoted in USd produces
+  // a P&L in USD. null when Bloomberg says nothing, so display falls back to
+  // the currency column from the file.
+  const currency = toMajorCurrency(refData["CRNCY"]);
 
   // ── Trade ticks (Date-typed for short-order VWAP) ─────────────────────────
   const tradeTicks: TradeTick[] = rawTradeTicks.map((t) => ({
@@ -581,6 +604,7 @@ export async function enrichSingleOrder(
     reversion30s: rev30sPrice ?? fillVwap,
     reversion1m:  rev1mPrice  ?? fillVwap,
     pointValue,
+    currency,
     bidAskTicks,
     bidAskSource,
     tradeTicks,

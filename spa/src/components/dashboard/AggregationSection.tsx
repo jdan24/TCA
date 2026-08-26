@@ -18,11 +18,14 @@
 import { useTCAStore } from "@/store/useTCAStore";
 import type { AggregateRow, AggregationSet, SpreadSavingsRow } from "@/types";
 import { AggregateTable } from "./AggregateTable";
-import { SpreadSavingsTable } from "./SpreadSavingsTable";
+import { SpreadSavingsTable, type SpreadSavingsColumnId } from "./SpreadSavingsTable";
 
 interface AggregationSectionProps {
   aggregations: AggregationSet;
   spreadSavings: SpreadSavingsRow[];
+  /** Optional Spread Savings columns currently shown — also drives the print view. */
+  spreadSavingsColumns: SpreadSavingsColumnId[];
+  onSpreadSavingsColumnsChange: (ids: SpreadSavingsColumnId[]) => void;
   /** True = symbol tables keyed on generic ticker; false = on specific expiry. */
   groupGeneric: boolean;
   onGroupGenericChange: (v: boolean) => void;
@@ -31,6 +34,8 @@ interface AggregationSectionProps {
 export function AggregationSection({
   aggregations,
   spreadSavings,
+  spreadSavingsColumns,
+  onSpreadSavingsColumnsChange,
   groupGeneric,
   onGroupGenericChange,
 }: AggregationSectionProps) {
@@ -55,7 +60,11 @@ export function AggregationSection({
   return (
     <div className="space-y-4">
       {/* Spread savings — full width, always by generic ticker */}
-      <SpreadSavingsTable rows={spreadSavings} />
+      <SpreadSavingsTable
+        rows={spreadSavings}
+        visibleColumns={spreadSavingsColumns}
+        onVisibleColumnsChange={onSpreadSavingsColumnsChange}
+      />
 
       {/* Grouping toggle for the three symbol-keyed tables below */}
       <div className="flex items-center justify-end gap-2 print:hidden">

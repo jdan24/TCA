@@ -159,7 +159,9 @@ export function SummaryCards({ results, trades }: SummaryCardsProps) {
       if (usd === null) continue;
       sum += usd;
       priced += 1;
-      currencies.add(trade.currency);
+      // r.currency is Bloomberg's quote currency when known, so a USd-quoted
+      // contract lands in the USD bucket rather than splitting the total.
+      currencies.add(r.currency);
     }
 
     if (priced === 0) {

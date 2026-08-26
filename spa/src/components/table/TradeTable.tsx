@@ -11,7 +11,7 @@
  *   • Color-coded bps cells
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import * as XLSX from "xlsx";
 import {
@@ -30,6 +30,7 @@ import {
 import type { BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
 import { useTCAStore } from "@/store/useTCAStore";
 import { resolveBenchmark } from "@/hooks/useAlgoMap";
+import { usePortalMenu } from "@/hooks/usePortalMenu";
 import { fmtUsd } from "@/components/dashboard/dashboardUtils";
 import { toGenericTicker } from "@/tca/genericTicker";
 
@@ -96,7 +97,9 @@ function mergeRows(
       VWAP_dev_bps: r?.VWAP_dev_bps ?? null,
       VWAP_dev_usd: r?.VWAP_dev_usd ?? null,
       TWAP_dev_usd: r?.TWAP_dev_usd ?? null,
-      currency: t.currency,
+      // The result carries Bloomberg's quote currency when known; the file's
+      // column is only the fallback. See computeAll in tca/compute.ts.
+      currency: r?.currency ?? t.currency,
       MI_bps: r?.MI_bps ?? null,
       reversion_30s_bps: r?.reversion_30s_bps ?? null,
       reversion_1m_bps: r?.reversion_1m_bps ?? null,
@@ -906,49 +909,17 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
     pageIndex: 0,
     pageSize: 25,
   });
-  // The Columns menu renders in a portal. The card wrapper is overflow-hidden
-  // (for its rounded corners), which clipped an absolutely-positioned menu to
-  // the card's height — with only a few rows there was barely any room for it.
-  // A fixed-position portal anchored to the button escapes every ancestor.
-  const [colMenuOpen, setColMenuOpen] = useState(false);
-  const colBtnRef = useRef<HTMLButtonElement>(null);
-  const colMenuRef = useRef<HTMLDivElement>(null);
-  const [colMenuPos, setColMenuPos] = useState<{ top: number; right: number } | null>(null);
-
-  const openColMenu = useCallback(() => {
-    const rect = colBtnRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setColMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
-    setColMenuOpen(true);
-  }, []);
-
-  // Dismiss on outside click, Escape, or anything that moves the anchor.
-  useEffect(() => {
-    if (!colMenuOpen) return;
-
-    const onPointerDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (colMenuRef.current?.contains(target)) return;
-      if (colBtnRef.current?.contains(target)) return; // the button toggles itself
-      setColMenuOpen(false);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setColMenuOpen(false);
-    };
-    // Reposition would drift out of sync with the button, so just close.
-    const onReflow = () => setColMenuOpen(false);
-
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    window.addEventListener("scroll", onReflow, true);
-    window.addEventListener("resize", onReflow);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("scroll", onReflow, true);
-      window.removeEventListener("resize", onReflow);
-    };
-  }, [colMenuOpen]);
+  // The Columns menu renders in a portal — see usePortalMenu for why, and for
+  // the scroll handling that keeps this list scrollable once it grows past the
+  // menu's height cap.
+  const {
+    open: colMenuOpen,
+    btnRef: colBtnRef,
+    menuRef: colMenuRef,
+    pos: colMenuPos,
+    toggle: toggleColMenu,
+    close: closeColMenu,
+  } = usePortalMenu("right");
 
   const visibleColumns = hideMetrics
     ? allColumns.filter((c) => {
@@ -1025,7 +996,7 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
           <button
             ref={colBtnRef}
             type="button"
-            onClick={() => (colMenuOpen ? setColMenuOpen(false) : openColMenu())}
+            onClick={toggleColMenu}
             className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors select-none"
           >
             Columns ▾
@@ -1059,7 +1030,7 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
               <hr className="my-1 border-gray-100 dark:border-gray-800" />
               <button
                 type="button"
-                onClick={() => setColMenuOpen(false)}
+                onClick={closeColMenu}
                 className="w-full text-[10px] py-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
               >
                 Close

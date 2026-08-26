@@ -70,6 +70,10 @@ export function computeAll(
 
     return {
       orderId: trade.orderId,
+      // Bloomberg's quote currency wins: it is what the point value — and so
+      // the cash figures — are actually denominated in. A 6B fill priced in USd
+      // yields USD, whatever the file's currency column says.
+      currency: e?.currency ?? trade.currency,
       IS_bps: computeSlippage(trade, e?.arrivalPrice ?? null),
       VWAP_dev_bps: computeVWAPDeviation(trade, e),
       MI_bps: computeMarketImpact(trade, e),
@@ -433,6 +437,15 @@ export function computeParentOrderSummary(
   // Quantity-weighted at the parent level: fillVwap already aggregates the
   // fills, so one multiplication by totalQty is the whole order's cost.
   const pointValue = pointValueFor(firstTrade.symbol);
+  // Same rule as computeAll: Bloomberg's quote currency is the one the cash
+  // figures are in. All slices share a security, so the first enriched one wins.
+  const currencyFromBloomberg = (() => {
+    for (const t of trades) {
+      const c = enrichment[t.orderId]?.currency;
+      if (c) return c;
+    }
+    return null;
+  })();
   const usd = (benchmark: number | null) =>
     dollarSlippage(fillVwap, benchmark, side, totalQty, pointValue);
 
@@ -462,7 +475,7 @@ export function computeParentOrderSummary(
     VWAP_dev_usd: usd(marketVwap),
     TWAP_dev_usd: usd(marketTwap),
     pointValue,
-    currency: firstTrade.currency,
+    currency: currencyFromBloomberg ?? firstTrade.currency,
     reversion1m_price,
   };
 }

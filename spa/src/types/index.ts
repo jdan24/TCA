@@ -43,6 +43,9 @@ export interface TCAResult {
   IS_bps: number | null;
   VWAP_dev_bps: number | null;
   MI_bps: number | null;
+  /** Currency the cash figures below are denominated in. Bloomberg's quote
+   *  currency when known (normalised to its major unit), else the file's. */
+  currency: string;
   /** Slippage in cash terms. null when no point value is known for the symbol. */
   IS_usd: number | null;
   VWAP_dev_usd: number | null;
@@ -86,6 +89,10 @@ export interface BloombergEnrichment {
   /** Cash value of a 1.00 price move for one contract, from FUT_CONT_SIZE.
    *  null when Bloomberg does not supply it for this security. */
   pointValue: number | null;
+  /** Major-unit currency of the cash figures, from CRNCY — "USd" is reported
+   *  here as "USD", since the point value above is already in major units.
+   *  null when Bloomberg supplies no currency. */
+  currency: string | null;
   bidAskTicks: BidAskTick[];
   /** Where bidAskTicks came from: real Bloomberg quotes, or spreads estimated
    *  from 1-minute bar ranges. null when there are no ticks at all. */

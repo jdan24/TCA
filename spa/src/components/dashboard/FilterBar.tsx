@@ -17,9 +17,10 @@
  * A "Clear all" pill appears when ≥ 2 dimensions are active simultaneously.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import { createPortal } from "react-dom";
 import { format, parseISO } from "date-fns";
+import { usePortalMenu } from "@/hooks/usePortalMenu";
 import type { DataFilter, TradeRecord } from "@/types";
 import { EMPTY_FILTER } from "@/types";
 
@@ -149,56 +150,13 @@ interface FilterMultiSelectProps {
 }
 
 /**
- * A checkbox menu behind a pill button.
- *
- * The menu renders into a portal at fixed position rather than absolutely
- * inside the bar. The filter bar sits inside cards and scroll containers that
- * would otherwise clip it — the same problem the TradeTable Columns menu hit,
- * solved the same way (see TradeTable.tsx, "The Columns menu renders in a
- * portal"). Dismissal on outside click / Escape / scroll / resize is copied
- * from there too.
+ * A checkbox menu behind a pill button. See usePortalMenu for why the menu is
+ * portal'd and how it dismisses — including the scroll handling that keeps a
+ * long symbol list scrollable without the menu closing under the cursor.
  */
 function FilterMultiSelect({ label, options, selected, onChange }: FilterMultiSelectProps) {
   const isActive = selected.length > 0;
-
-  const [open, setOpen] = useState(false);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-
-  const openMenu = useCallback(() => {
-    const rect = btnRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setPos({ top: rect.bottom + 4, left: rect.left });
-    setOpen(true);
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-
-    const onPointerDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (menuRef.current?.contains(target)) return;
-      if (btnRef.current?.contains(target)) return; // the button toggles itself
-      setOpen(false);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    // Repositioning would drift out of sync with the button, so just close.
-    const onReflow = () => setOpen(false);
-
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    window.addEventListener("scroll", onReflow, true);
-    window.addEventListener("resize", onReflow);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("scroll", onReflow, true);
-      window.removeEventListener("resize", onReflow);
-    };
-  }, [open]);
+  const { open, btnRef, menuRef, pos, toggle: toggleMenu } = usePortalMenu("left");
 
   function toggle(option: string) {
     onChange(
@@ -224,7 +182,7 @@ function FilterMultiSelect({ label, options, selected, onChange }: FilterMultiSe
       <button
         ref={btnRef}
         type="button"
-        onClick={() => (open ? setOpen(false) : openMenu())}
+        onClick={toggleMenu}
         aria-haspopup="true"
         aria-expanded={open}
         title={isActive ? selected.join(", ") : `All ${label.toLowerCase()}s`}

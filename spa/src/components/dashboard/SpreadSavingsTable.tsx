@@ -13,26 +13,129 @@
  * See buildSpreadSavings() in tca/aggregate.ts for the arithmetic.
  */
 
+import { createPortal } from "react-dom";
 import type { SpreadSavingsRow } from "@/types";
+import { usePortalMenu } from "@/hooks/usePortalMenu";
 import { ChartCard } from "./dashboardUtils";
+
+// ── Columns ───────────────────────────────────────────────────────────────────
+//
+// Generic Ticker is deliberately absent: it identifies the row, so hiding it
+// would leave a table of unattributable numbers. Everything else is optional.
+
+export type SpreadSavingsColumnId =
+  | "count"
+  | "totalQty"
+  | "avgSpread_bps"
+  | "wAvgIS_bps"
+  | "savingsPct";
+
+export const SPREAD_SAVINGS_COLUMNS: ReadonlyArray<{
+  id: SpreadSavingsColumnId;
+  label: string;
+}> = [
+  { id: "count",         label: "Orders"          },
+  { id: "totalQty",      label: "Total Qty"       },
+  { id: "avgSpread_bps", label: "Avg Spread Cost" },
+  { id: "wAvgIS_bps",    label: "Wtd Avg IS"      },
+  { id: "savingsPct",    label: "Spread Savings"  },
+];
+
+const ALL_COLUMN_IDS: SpreadSavingsColumnId[] = SPREAD_SAVINGS_COLUMNS.map((c) => c.id);
+
+// ── Visibility persistence ────────────────────────────────────────────────────
+
+const VISIBLE_COLS_KEY = "tca_spread_savings_cols_v1";
+
+/** Defaults to every column; an explicitly emptied set is a valid state. */
+export function loadSpreadSavingsCols(): SpreadSavingsColumnId[] {
+  try {
+    const raw = localStorage.getItem(VISIBLE_COLS_KEY);
+    if (raw === null) return [...ALL_COLUMN_IDS];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [...ALL_COLUMN_IDS];
+    // Drop anything unrecognised so a stale key can't resurrect a dead column.
+    return ALL_COLUMN_IDS.filter((id) => (parsed as string[]).includes(id));
+  } catch {
+    return [...ALL_COLUMN_IDS];
+  }
+}
+
+export function saveSpreadSavingsCols(ids: SpreadSavingsColumnId[]): void {
+  try {
+    localStorage.setItem(VISIBLE_COLS_KEY, JSON.stringify(ids));
+  } catch {
+    // localStorage unavailable (private browsing) — the setting just won't persist
+  }
+}
 
 interface SpreadSavingsTableProps {
   rows: SpreadSavingsRow[];
+  /** Ids of the optional columns to show, in canonical order. */
+  visibleColumns: SpreadSavingsColumnId[];
+  onVisibleColumnsChange: (ids: SpreadSavingsColumnId[]) => void;
 }
 
-const HEADERS = [
-  "Generic Ticker",
-  "Orders",
-  "Total Qty",
-  "Avg Spread Cost",
-  "Wtd Avg IS",
-  "Spread Savings",
-] as const;
+export function SpreadSavingsTable({
+  rows,
+  visibleColumns,
+  onVisibleColumnsChange,
+}: SpreadSavingsTableProps) {
+  const { open, btnRef, menuRef, pos, toggle } = usePortalMenu("right");
 
-export function SpreadSavingsTable({ rows }: SpreadSavingsTableProps) {
+  // Render in canonical order regardless of the order ids were toggled in.
+  const cols = SPREAD_SAVINGS_COLUMNS.filter((c) => visibleColumns.includes(c.id));
+
+  function toggleColumn(id: SpreadSavingsColumnId) {
+    const next = visibleColumns.includes(id)
+      ? visibleColumns.filter((x) => x !== id)
+      : [...visibleColumns, id];
+    onVisibleColumnsChange(ALL_COLUMN_IDS.filter((x) => next.includes(x)));
+  }
+
+  const columnsMenu = (
+    <div className="print:hidden">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        className="px-2.5 py-1 text-[11px] rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors select-none"
+      >
+        Columns ▾
+      </button>
+      {open && pos !== null && createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: "fixed", top: pos.top, right: pos.right }}
+          className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-2 z-50 min-w-[180px] max-h-[70vh] overflow-y-auto"
+        >
+          {SPREAD_SAVINGS_COLUMNS.map((c) => (
+            <label
+              key={c.id}
+              className="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer text-xs text-gray-700 dark:text-gray-300 select-none"
+            >
+              <input
+                type="checkbox"
+                checked={visibleColumns.includes(c.id)}
+                onChange={() => toggleColumn(c.id)}
+                className="rounded accent-blue-500"
+              />
+              {c.label}
+            </label>
+          ))}
+          <hr className="my-1 border-gray-100 dark:border-gray-800" />
+          <p className="px-2 pb-0.5 text-[10px] text-gray-400 dark:text-gray-600">
+            Also applies to the print layout
+          </p>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+
   if (rows.length === 0) {
     return (
-      <ChartCard title="Spread Savings by Instrument">
+      <ChartCard title="Spread Savings by Instrument" actions={columnsMenu}>
         <p className="py-8 text-center text-xs text-gray-400 dark:text-gray-600 italic">
           No data
         </p>
@@ -44,12 +147,13 @@ export function SpreadSavingsTable({ rows }: SpreadSavingsTableProps) {
     <ChartCard
       title="Spread Savings by Instrument"
       subtitle="Execution quality measured against the spread that was quoted at the time"
+      actions={columnsMenu}
     >
       <div className="overflow-x-auto -mx-4 px-4">
         <table className="w-full text-xs min-w-[560px]">
           <thead>
             <tr className="border-b border-gray-100 dark:border-gray-800">
-              {HEADERS.map((h) => (
+              {["Generic Ticker", ...cols.map((c) => c.label)].map((h) => (
                 <th
                   key={h}
                   className="pb-2 pr-3 text-left text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap"
@@ -68,36 +172,51 @@ export function SpreadSavingsTable({ rows }: SpreadSavingsTableProps) {
                 <td className="py-2 pr-3 font-medium text-gray-800 dark:text-gray-200 whitespace-nowrap">
                   {row.groupKey}
                 </td>
-                <td className="py-2 pr-3 tabular-nums text-gray-600 dark:text-gray-400">
-                  {row.count}
-                </td>
-                <td className="py-2 pr-3 tabular-nums text-gray-600 dark:text-gray-400">
-                  {row.totalQty.toLocaleString()}
-                </td>
-                {/* Spread width is an environment reading, not a good/bad score */}
-                <td className="py-2 pr-3">
-                  <BpsCell value={row.avgSpread_bps} neutral />
-                </td>
-                <td className="py-2 pr-3">
-                  <BpsCell value={row.wAvgIS_bps} />
-                </td>
-                <td className="py-2 pr-3">
-                  <SavingsCell value={row.savingsPct} />
-                </td>
+                {cols.map((c) => (
+                  <td key={c.id} className="py-2 pr-3">
+                    {renderCell(row, c.id)}
+                  </td>
+                ))}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      <Legend />
+      {visibleColumns.includes("savingsPct") && <Legend />}
     </ChartCard>
   );
 }
 
+/**
+ * One cell's contents. Shared with the print layout so a column can never
+ * render differently in the two places.
+ *
+ * Spread width is an environment reading rather than a good/bad score, so it is
+ * shown neutrally; IS follows the usual negative-is-favourable colouring.
+ */
+export function renderCell(row: SpreadSavingsRow, id: SpreadSavingsColumnId) {
+  switch (id) {
+    case "count":
+      return <span className="tabular-nums text-gray-600 dark:text-gray-400">{row.count}</span>;
+    case "totalQty":
+      return (
+        <span className="tabular-nums text-gray-600 dark:text-gray-400">
+          {row.totalQty.toLocaleString()}
+        </span>
+      );
+    case "avgSpread_bps":
+      return <BpsCell value={row.avgSpread_bps} neutral />;
+    case "wAvgIS_bps":
+      return <BpsCell value={row.wAvgIS_bps} />;
+    case "savingsPct":
+      return <SavingsCell value={row.savingsPct} />;
+  }
+}
+
 // ── Legend ────────────────────────────────────────────────────────────────────
 
-function Legend() {
+export function Legend() {
   const items: Array<{ mark: string; text: string }> = [
     { mark: "100%",     text: "filled at or better than the near touch" },
     { mark: "50%",      text: "filled at mid" },

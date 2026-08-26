@@ -3,8 +3,8 @@
  *
  * Two sources, in priority order:
  *   1. A manual per-symbol override in the symbol-mapping table.
- *   2. Bloomberg's FUT_CONT_SIZE, converted in the enrichment service
- *      (see pointValueFromContractSize in tca/dollars.ts).
+ *   2. Bloomberg's FUT_VAL_PT, falling back to a conversion of FUT_CONT_SIZE —
+ *      both resolved in the enrichment service (see tca/dollars.ts).
  *
  * Returns null when neither is available, so every downstream cash figure
  * shows N/A rather than a number built on a guessed multiplier.

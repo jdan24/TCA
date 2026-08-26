@@ -7,8 +7,8 @@
  *   ├─ SummaryCards (6 KPI tiles, full width) ──────────────────────────┤
  *   ├─ OrderDetail / TradeTable (full width) ───────────────────────────┤
  *   ├─ SlippageChart ──── VWAPDeviation ────────────────────────────────┤
- *   ├─ ReversionChart ── SpreadScatter ─────────────────────────────────┤
- *   └─ AggregationSection (By Symbol / Algo / Symbol+Algo / Symbol+Side)┘
+ *   ├─ SpreadScatter (full width) ──────────────────────────────────────┤
+ *   └─ AggregationSection (Spread Savings / By Symbol / Algo / …)───────┘
  */
 
 import { useMemo, useState } from "react";
@@ -24,9 +24,13 @@ import { MultiOrderPrintLayout, type MOChartImages } from "@/components/export/M
 import { TradeTable } from "@/components/table/TradeTable";
 import { AggregationSection } from "./AggregationSection";
 import { FilterBar } from "./FilterBar";
-import { ReversionChart } from "./ReversionChart";
 import { SlippageChart } from "./SlippageChart";
 import { SpreadScatter } from "./SpreadScatter";
+import {
+  loadSpreadSavingsCols,
+  saveSpreadSavingsCols,
+  type SpreadSavingsColumnId,
+} from "./SpreadSavingsTable";
 import { SummaryCards } from "./SummaryCards";
 import { VWAPDeviation } from "./VWAPDeviation";
 
@@ -106,6 +110,15 @@ export function Dashboard({
     saveGroupGeneric(v);
   }
 
+  // Which Spread Savings columns are shown. Owned here rather than in the table
+  // because the print layout renders the same selection.
+  const [spreadSavingsColumns, setSpreadSavingsColumns] =
+    useState<SpreadSavingsColumnId[]>(loadSpreadSavingsCols);
+  function changeSpreadSavingsColumns(ids: SpreadSavingsColumnId[]) {
+    setSpreadSavingsColumns(ids);
+    saveSpreadSavingsCols(ids);
+  }
+
   const [showPrintLayout, setShowPrintLayout]     = useState(false);
   const [capturingPrint, setCapturingPrint]       = useState(false);
   const [printCharts,    setPrintCharts]           = useState<MOChartImages | null>(null);
@@ -118,13 +131,12 @@ export function Dashboard({
         if (!el) return null;
         return toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 }).catch(() => null);
       };
-      const [slippage, vwapDev, reversion, spread] = await Promise.all([
+      const [slippage, vwapDev, spread] = await Promise.all([
         capture("mo-chart-slippage"),
         capture("mo-chart-vwap-dev"),
-        capture("mo-chart-reversion"),
         capture("mo-chart-spread"),
       ]);
-      setPrintCharts({ slippage, vwapDev, reversion, spread });
+      setPrintCharts({ slippage, vwapDev, spread });
       setShowPrintLayout(true);
     } finally {
       setCapturingPrint(false);
@@ -200,6 +212,8 @@ export function Dashboard({
         results={filteredResults}
         aggregations={aggregations}
         genericFor={genericFor}
+        spreadSavings={spreadSavings}
+        spreadSavingsColumns={spreadSavingsColumns}
         charts={printCharts}
         onBack={() => { setShowPrintLayout(false); setPrintCharts(null); }}
       />
@@ -322,16 +336,15 @@ export function Dashboard({
         <div id="mo-chart-vwap-dev"><VWAPDeviation trades={filteredTrades} results={filteredResults} /></div>
       </div>
 
-      {/* ── Line + scatter (2-col) ───────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div id="mo-chart-reversion"><ReversionChart trades={filteredTrades} results={filteredResults} /></div>
-        <div id="mo-chart-spread"><SpreadScatter results={filteredResults} /></div>
-      </div>
+      {/* ── Spread vs slippage (full width) ──────────────────────────────── */}
+      <div id="mo-chart-spread"><SpreadScatter results={filteredResults} /></div>
 
       {/* ── Aggregation tables ───────────────────────────────────────────── */}
       <AggregationSection
         aggregations={aggregations}
         spreadSavings={spreadSavings}
+        spreadSavingsColumns={spreadSavingsColumns}
+        onSpreadSavingsColumnsChange={changeSpreadSavingsColumns}
         groupGeneric={groupGeneric}
         onGroupGenericChange={changeGroupGeneric}
       />
