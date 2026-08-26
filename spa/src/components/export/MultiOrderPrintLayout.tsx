@@ -200,9 +200,10 @@ function PrintSpreadSavingsTable({
         <table className="w-full text-[10px]">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 text-left">
-              {["Generic Ticker", ...cols.map((c) => c.label)].map((h, i) => (
-                <th key={h} className={`px-2 py-1.5 font-semibold ${i === 0 ? "text-left" : "text-right"}`}>
-                  {h}
+              <th className="px-2 py-1.5 font-semibold text-left">Generic Ticker</th>
+              {cols.map((c) => (
+                <th key={c.id} className="px-2 py-1.5 font-semibold text-right">
+                  {c.label}
                 </th>
               ))}
             </tr>

@@ -121,11 +121,32 @@ export function buildAggregations(
  */
 const MIN_SPREAD_BPS = 1e-6;
 
+/** Median of a list of numbers; even counts average the two middle values. */
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[mid] ?? null;
+  const lo = sorted[mid - 1];
+  const hi = sorted[mid];
+  return lo !== undefined && hi !== undefined ? (lo + hi) / 2 : null;
+}
+
 /**
- * Per-instrument view of how much of the quoted spread the execution kept.
+ * Per-instrument view of how much of the quoted spread the execution kept,
+ * alongside the market conditions that produced it.
  *
  * Always grouped by generic ticker — collapsing expiries is the whole point of
  * the table, so it does not follow the dashboard's group-by toggle.
+ *
+ * On the volatility columns
+ * ─────────────────────────
+ * Savings divides by the spread, so on a one-tick market the denominator is
+ * tiny and the figure reports drift rather than spread capture: ES is ~0.42 bps
+ * wide while a 5-minute window carries ~11 bps of movement, which turns an
+ * ordinary +3 bps of drift into −664%. Those rows are not wrong, they are
+ * outside the metric's domain — so the volatility the orders traded through is
+ * reported beside the score rather than the score being suppressed.
  *
  * Every figure is null rather than 0 when its inputs are missing, so a group
  * with no Bloomberg quotes reads as "no data" instead of "paid nothing".
@@ -160,29 +181,59 @@ export function buildSpreadSavings(
     // 1-lot. Orders missing IS are excluded from both sums, not counted as zero.
     let isWeightedSum = 0;
     let isWeight = 0;
+    // Savings is computed per order and then quantity-weighted, rather than as a
+    // ratio of the group's aggregates. Each order is scored against the spread
+    // *it* actually faced, and the resulting mean is comparable with a median.
+    let savWeightedSum = 0;
+    let savWeight = 0;
+    const isValues: number[] = [];
+    const volValues: number[] = [];
+    const volRates: number[] = [];
+
     for (const t of gTrades) {
       const r = resultMap.get(t.orderId);
-      if (!r || r.IS_bps === null || !isFinite(r.IS_bps)) continue;
-      if (!(t.orderQty > 0)) continue;
-      isWeightedSum += r.IS_bps * t.orderQty;
-      isWeight += t.orderQty;
-    }
-    const wAvgIS_bps = isWeight > 0 ? isWeightedSum / isWeight : null;
+      if (!r) continue;
+      const qty = t.orderQty > 0 ? t.orderQty : 0;
+      const is = r.IS_bps !== null && isFinite(r.IS_bps) ? r.IS_bps : null;
+      const spread = r.TWAS_bps !== null && isFinite(r.TWAS_bps) ? r.TWAS_bps : null;
 
-    const savingsPct =
-      avgSpread_bps !== null &&
-      Math.abs(avgSpread_bps) >= MIN_SPREAD_BPS &&
-      wAvgIS_bps !== null
-        ? (avgSpread_bps / 2 - wAvgIS_bps) / avgSpread_bps
-        : null;
+      if (is !== null) {
+        isValues.push(is);
+        if (qty > 0) {
+          isWeightedSum += is * qty;
+          isWeight += qty;
+        }
+      }
+
+      // A near-zero spread makes the per-order ratio explode, so that order is
+      // dropped instead of being allowed to poison the group's mean.
+      if (is !== null && spread !== null && Math.abs(spread) >= MIN_SPREAD_BPS && qty > 0) {
+        savWeightedSum += ((spread / 2 - is) / spread) * qty;
+        savWeight += qty;
+      }
+
+      // Volatility is a reading of the environment, so each order's window counts
+      // once — no quantity weighting, matching how avgSpread_bps is built.
+      const vol = r.vol_during_order_bps;
+      if (vol !== null && isFinite(vol)) {
+        volValues.push(vol);
+        // σ grows with √duration, so dividing by √minutes turns a total into a
+        // rate that is comparable between a 30-second and a two-hour order.
+        const minutes = r.timeToFill_ms / 60_000;
+        if (minutes > 0) volRates.push(vol / Math.sqrt(minutes));
+      }
+    }
 
     rows.push({
       groupKey,
       count: gTrades.length,
       totalQty: gTrades.reduce((s, t) => s + t.orderQty, 0),
       avgSpread_bps,
-      wAvgIS_bps,
-      savingsPct,
+      wAvgIS_bps: isWeight > 0 ? isWeightedSum / isWeight : null,
+      medianIS_bps: median(isValues),
+      avgVol_bps: safeAvg(volValues),
+      avgVolRate_bps: safeAvg(volRates),
+      savingsPct: savWeight > 0 ? savWeightedSum / savWeight : null,
     });
   }
 

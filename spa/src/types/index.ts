@@ -197,6 +197,18 @@ export interface SpreadSavingsRow {
   avgSpread_bps: number | null;
   /** Quantity-weighted mean of IS_bps: Σ(IS × qty) / Σqty. */
   wAvgIS_bps: number | null;
+  /** Median of per-order IS_bps, deliberately unweighted. Read against
+   *  wAvgIS_bps, which is weighted: a gap between the two exposes an outlier
+   *  order or a single large one carrying the group. */
+  medianIS_bps: number | null;
+  /** Simple mean of per-order vol_during_order_bps — 1σ of market price over
+   *  each order's own window. The drift the orders were actually exposed to,
+   *  and the context that makes a large negative savingsPct legible. */
+  avgVol_bps: number | null;
+  /** Mean of per-order σ ÷ √minutes: volatility as a rate rather than a total.
+   *  σ grows with √duration, so this is what compares across orders and
+   *  instruments of different lengths. */
+  avgVolRate_bps: number | null;
   /** Fraction, not a percentage — the table multiplies by 100 for display. */
   savingsPct: number | null;
 }

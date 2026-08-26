@@ -28,16 +28,40 @@ export type SpreadSavingsColumnId =
   | "totalQty"
   | "avgSpread_bps"
   | "wAvgIS_bps"
+  | "medianIS_bps"
+  | "avgVol_bps"
+  | "avgVolRate_bps"
   | "savingsPct";
 
 export const SPREAD_SAVINGS_COLUMNS: ReadonlyArray<{
   id: SpreadSavingsColumnId;
   label: string;
+  /** Header tooltip, for the columns whose meaning is not obvious from the label. */
+  title?: string;
 }> = [
   { id: "count",         label: "Orders"          },
   { id: "totalQty",      label: "Total Qty"       },
   { id: "avgSpread_bps", label: "Avg Spread Cost" },
-  { id: "wAvgIS_bps",    label: "Wtd Avg IS"      },
+  {
+    id: "wAvgIS_bps",
+    label: "Wtd Avg IS",
+    title: "Quantity-weighted average slippage vs arrival",
+  },
+  {
+    id: "medianIS_bps",
+    label: "Median IS",
+    title: "Median per-order slippage, unweighted — a gap against the weighted average means one order is carrying the group",
+  },
+  {
+    id: "avgVol_bps",
+    label: "Avg Vol",
+    title: "1σ of market price over each order's own window — the drift the orders were exposed to",
+  },
+  {
+    id: "avgVolRate_bps",
+    label: "Vol Rate",
+    title: "bps per √minute — volatility normalised for order duration, so orders of different lengths compare",
+  },
   { id: "savingsPct",    label: "Spread Savings"  },
 ];
 
@@ -45,17 +69,28 @@ const ALL_COLUMN_IDS: SpreadSavingsColumnId[] = SPREAD_SAVINGS_COLUMNS.map((c) =
 
 // ── Visibility persistence ────────────────────────────────────────────────────
 
-const VISIBLE_COLS_KEY = "tca_spread_savings_cols_v1";
+// What is stored is the set of *hidden* columns, not the visible ones.
+//
+// Storing visible ids means a saved preference can never contain a column added
+// later, so a new column is silently invisible for exactly the people who
+// customised the table — the worst possible audience to hide it from. Recording
+// hides instead makes anything unnamed visible, so this addition and every
+// future one default to on.
+//
+// The previous "_v1" key held visible ids and is deliberately not migrated: it
+// cannot be told apart from a deliberate hide-everything. A customised table
+// comes back once with all columns showing.
+const HIDDEN_COLS_KEY = "tca_spread_savings_hidden_v1";
 
-/** Defaults to every column; an explicitly emptied set is a valid state. */
+/** Visible columns, in canonical order. Anything not recorded as hidden shows. */
 export function loadSpreadSavingsCols(): SpreadSavingsColumnId[] {
   try {
-    const raw = localStorage.getItem(VISIBLE_COLS_KEY);
+    const raw = localStorage.getItem(HIDDEN_COLS_KEY);
     if (raw === null) return [...ALL_COLUMN_IDS];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [...ALL_COLUMN_IDS];
-    // Drop anything unrecognised so a stale key can't resurrect a dead column.
-    return ALL_COLUMN_IDS.filter((id) => (parsed as string[]).includes(id));
+    const hidden = new Set(parsed as string[]);
+    return ALL_COLUMN_IDS.filter((id) => !hidden.has(id));
   } catch {
     return [...ALL_COLUMN_IDS];
   }
@@ -63,7 +98,9 @@ export function loadSpreadSavingsCols(): SpreadSavingsColumnId[] {
 
 export function saveSpreadSavingsCols(ids: SpreadSavingsColumnId[]): void {
   try {
-    localStorage.setItem(VISIBLE_COLS_KEY, JSON.stringify(ids));
+    const visible = new Set(ids);
+    const hidden = ALL_COLUMN_IDS.filter((id) => !visible.has(id));
+    localStorage.setItem(HIDDEN_COLS_KEY, JSON.stringify(hidden));
   } catch {
     // localStorage unavailable (private browsing) — the setting just won't persist
   }
@@ -153,12 +190,18 @@ export function SpreadSavingsTable({
         <table className="w-full text-xs min-w-[560px]">
           <thead>
             <tr className="border-b border-gray-100 dark:border-gray-800">
-              {["Generic Ticker", ...cols.map((c) => c.label)].map((h) => (
+              <th className="pb-2 pr-3 text-left text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap">
+                Generic Ticker
+              </th>
+              {cols.map((c) => (
                 <th
-                  key={h}
-                  className="pb-2 pr-3 text-left text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap"
+                  key={c.id}
+                  {...(c.title !== undefined ? { title: c.title } : {})}
+                  className={`pb-2 pr-3 text-left text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap${
+                    c.title !== undefined ? " cursor-help" : ""
+                  }`}
                 >
-                  {h}
+                  {c.label}
                 </th>
               ))}
             </tr>
@@ -209,6 +252,14 @@ export function renderCell(row: SpreadSavingsRow, id: SpreadSavingsColumnId) {
       return <BpsCell value={row.avgSpread_bps} neutral />;
     case "wAvgIS_bps":
       return <BpsCell value={row.wAvgIS_bps} />;
+    case "medianIS_bps":
+      return <BpsCell value={row.medianIS_bps} />;
+    // Volatility describes the environment rather than scoring it, so both vol
+    // columns stay neutral instead of taking the good/bad colouring.
+    case "avgVol_bps":
+      return <BpsCell value={row.avgVol_bps} neutral />;
+    case "avgVolRate_bps":
+      return <BpsCell value={row.avgVolRate_bps} neutral />;
     case "savingsPct":
       return <SavingsCell value={row.savingsPct} />;
   }
