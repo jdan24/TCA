@@ -9,7 +9,13 @@
 
 import { useState } from "react";
 import type { ParentOrderSummary } from "@/types";
-import { fmtTtf, fmtUsd } from "@/components/dashboard/dashboardUtils";
+import {
+  fmtSigma,
+  fmtTtf,
+  fmtUsd,
+  sigmaBandClass,
+  SIGMA_TOOLTIP,
+} from "@/components/dashboard/dashboardUtils";
 
 // ── UTC helpers ───────────────────────────────────────────────────────────────
 
@@ -80,6 +86,27 @@ function DetailRow({ label, value, mono = false, title }: { label: string; value
       <span className="text-[11px] text-gray-500 dark:text-gray-400 shrink-0">{label}</span>
       <span className={`text-xs font-semibold text-gray-900 dark:text-white tabular-nums text-right ${mono ? "font-mono" : ""}`}>
         {value}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Slippage in standard deviations of the market's own movement. Banded by
+ * significance rather than by sign, so a favourable result never wears a
+ * warning colour — see sigmaBandClass.
+ */
+function SigmaRow({ label, value }: { label: string; value: number | null }) {
+  return (
+    <div
+      className="flex items-baseline justify-between gap-2 py-1.5 border-b border-gray-100 dark:border-gray-800 last:border-0 cursor-help"
+      title={SIGMA_TOOLTIP}
+    >
+      <span className="text-[11px] text-gray-500 dark:text-gray-400 shrink-0">{label}</span>
+      <span className={`text-xs font-semibold tabular-nums text-right ${
+        value === null ? "text-gray-400 dark:text-gray-600" : sigmaBandClass(value)
+      }`}>
+        {value === null ? "N/A (needs BBG)" : fmtSigma(value)}
       </span>
     </div>
   );
@@ -459,6 +486,7 @@ export function ParentSummaryCard({
                 ? summary.vol_during_order_price.toFixed(4)
                 : "N/A (needs BBG)"
             } />
+            <SigmaRow label="Vol-Adj IS" value={summary.volAdjIS} />
             <BpsRow label="Impact (bps)"       value={summary.MI_bps} neutral />
             <BpsRow label="Reversion 1m (bps)" value={reversion1m_bps} invert />
             <BpsRow

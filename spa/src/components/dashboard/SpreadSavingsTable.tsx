@@ -16,7 +16,7 @@
 import { createPortal } from "react-dom";
 import type { SpreadSavingsRow } from "@/types";
 import { usePortalMenu } from "@/hooks/usePortalMenu";
-import { ChartCard } from "./dashboardUtils";
+import { ChartCard, fmtSigma, sigmaBandClass, SIGMA_TOOLTIP } from "./dashboardUtils";
 
 // ── Columns ───────────────────────────────────────────────────────────────────
 //
@@ -29,6 +29,7 @@ export type SpreadSavingsColumnId =
   | "avgSpread_bps"
   | "wAvgIS_bps"
   | "medianIS_bps"
+  | "wAvgVolAdjIS"
   | "avgVol_bps"
   | "avgVolRate_bps"
   | "savingsPct";
@@ -51,6 +52,11 @@ export const SPREAD_SAVINGS_COLUMNS: ReadonlyArray<{
     id: "medianIS_bps",
     label: "Median IS",
     title: "Median per-order slippage, unweighted — a gap against the weighted average means one order is carrying the group",
+  },
+  {
+    id: "wAvgVolAdjIS",
+    label: "Vol-Adj IS",
+    title: SIGMA_TOOLTIP,
   },
   {
     id: "avgVol_bps",
@@ -254,6 +260,13 @@ export function renderCell(row: SpreadSavingsRow, id: SpreadSavingsColumnId) {
       return <BpsCell value={row.wAvgIS_bps} />;
     case "medianIS_bps":
       return <BpsCell value={row.medianIS_bps} />;
+    // Banded by significance rather than by sign — see sigmaBandClass.
+    case "wAvgVolAdjIS":
+      return (
+        <span className={`tabular-nums font-medium ${sigmaBandClass(row.wAvgVolAdjIS)}`}>
+          {fmtSigma(row.wAvgVolAdjIS)}
+        </span>
+      );
     // Volatility describes the environment rather than scoring it, so both vol
     // columns stay neutral instead of taking the good/bad colouring.
     case "avgVol_bps":

@@ -8,7 +8,7 @@
 
 import type { AggregateRow } from "@/types";
 import { ChartCard } from "./dashboardUtils";
-import { fmtBps, fmtTtf } from "./dashboardUtils";
+import { fmtBps, fmtSigma, fmtTtf, sigmaBandClass, SIGMA_TOOLTIP } from "./dashboardUtils";
 
 interface AggregateTableProps {
   title: string;
@@ -42,12 +42,15 @@ export function AggregateTable({
             <tr className="border-b border-gray-100 dark:border-gray-800">
               {[
                 "Group", "Orders", "Total Qty",
-                "Avg IS", "Avg VWAP Dev", "Avg MI", "Avg TWAS",
+                "Avg IS", "Vol-Adj IS", "Avg VWAP Dev", "Avg MI", "Avg TWAS",
                 "Avg TTF", "Win %", "Best IS", "Worst IS",
               ].map((h) => (
                 <th
                   key={h}
-                  className="pb-2 pr-3 text-left text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap"
+                  {...(h === "Vol-Adj IS" ? { title: SIGMA_TOOLTIP } : {})}
+                  className={`pb-2 pr-3 text-left text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap${
+                    h === "Vol-Adj IS" ? " cursor-help" : ""
+                  }`}
                 >
                   {h}
                 </th>
@@ -83,6 +86,15 @@ export function AggregateTable({
                   {/* Avg IS */}
                   <td className="py-2 pr-3">
                     <BpsCell value={row.avgIS_bps} />
+                  </td>
+                  {/* Vol-Adj IS — banded by significance, not by sign alone */}
+                  <td className="py-2 pr-3">
+                    <span
+                      className={`tabular-nums font-medium ${sigmaBandClass(row.avgVolAdjIS)}`}
+                      title={SIGMA_TOOLTIP}
+                    >
+                      {fmtSigma(row.avgVolAdjIS)}
+                    </span>
                   </td>
                   {/* Avg VWAP Dev */}
                   <td className="py-2 pr-3">

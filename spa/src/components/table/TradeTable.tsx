@@ -31,7 +31,7 @@ import type { BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
 import { useTCAStore } from "@/store/useTCAStore";
 import { resolveBenchmark } from "@/hooks/useAlgoMap";
 import { usePortalMenu } from "@/hooks/usePortalMenu";
-import { fmtUsd } from "@/components/dashboard/dashboardUtils";
+import { fmtSigma, fmtUsd, sigmaBandClass, SIGMA_TOOLTIP } from "@/components/dashboard/dashboardUtils";
 import { toGenericTicker } from "@/tca/genericTicker";
 
 // ── Merged row type ───────────────────────────────────────────────────────────
@@ -61,6 +61,7 @@ interface TableRow {
   reversion_1m_bps: number | null;
   TWAS_bps: number | null;
   TWAS_price: number | null;
+  volAdjIS: number | null;
   vol_during_order_price: number | null;
   vol_during_order_bps: number | null;
   TWAP_dev_bps: number | null;
@@ -105,6 +106,7 @@ function mergeRows(
       reversion_1m_bps: r?.reversion_1m_bps ?? null,
       TWAS_bps: r?.TWAS_bps ?? null,
       TWAS_price: r?.TWAS_price ?? null,
+      volAdjIS: r?.volAdjIS ?? null,
       vol_during_order_price: r?.vol_during_order_price ?? null,
       vol_during_order_bps: r?.vol_during_order_bps ?? null,
       TWAP_dev_bps: r?.TWAP_dev_bps ?? null,
@@ -138,6 +140,7 @@ const COLUMN_LABELS: Record<string, string> = {
   MI_bps: "Mkt Impact",
   reversion_30s_bps: "Rev +30s",
   reversion_1m_bps: "Rev +1m",
+  volAdjIS: "Vol-Adj IS",
   TWAS_bps: "TWAS",
   TWAS_price: "TWAS (price)",
   vol_during_order_price: "1σ Vol (price)",
@@ -330,6 +333,7 @@ const EXPORT_COL_DEFS: Record<string, ExportColDef> = {
   MI_bps:                 { header: "Mkt Impact (bps)",  value: (r) => r.MI_bps },
   reversion_30s_bps:      { header: "Rev +30s (bps)",    value: (r) => r.reversion_30s_bps },
   reversion_1m_bps:       { header: "Rev +1m (bps)",     value: (r) => r.reversion_1m_bps },
+  volAdjIS:               { header: "Vol-Adj IS (sigma)", value: (r) => r.volAdjIS },
   TWAS_bps:               { header: "TWAS (bps)",        value: (r) => r.TWAS_bps },
   TWAS_price:             { header: "TWAS (price)",      value: (r) => r.TWAS_price },
   vol_during_order_price: { header: "1σ Vol (price)",     value: (r) => r.vol_during_order_price },
@@ -584,6 +588,19 @@ const POST_TIME_COLS = [
     sortingFn: nullableSort,
     enableGlobalFilter: false,
   }),
+  col.accessor("volAdjIS", {
+    header: () => <span title={SIGMA_TOOLTIP} className="cursor-help">Vol-Adj IS</span>,
+    cell: (i) => {
+      const v = i.getValue();
+      return (
+        <span className={`tabular-nums font-medium ${sigmaBandClass(v)}`} title={SIGMA_TOOLTIP}>
+          {fmtSigma(v)}
+        </span>
+      );
+    },
+    sortingFn: nullableSort,
+    enableGlobalFilter: false,
+  }),
   col.accessor("VWAP_dev_bps", {
     header: "vs Mkt VWAP",
     cell: (i) => (
@@ -738,7 +755,7 @@ const METRIC_COLUMN_IDS = new Set([
   "timeToFill_ms", "IS_bps", "VWAP_dev_bps", "VWAP_dev_usd", "marketVWAP_price",
   "TWAP_dev_bps", "TWAP_dev_usd", "MI_bps", "reversion_30s_bps", "reversion_1m_bps",
   "TWAS_bps", "TWAS_price", "vol_during_order_price", "vol_during_order_bps",
-  "arrivalPrice", "algo", "genericTicker",
+  "arrivalPrice", "algo", "genericTicker", "volAdjIS",
 ]);
 
 export function TradeTable({ trades, results, title = "Trade Detail", hideMetrics = false, resolveSymbol, priceFormatterForSymbol, showExcelExport = false, onDeleteOrder, genericFor }: TradeTableProps) {

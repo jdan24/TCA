@@ -17,7 +17,7 @@
 import { useState } from "react";
 import type { TCAResult, TradeRecord } from "@/types";
 import { resolveBenchmark } from "@/hooks/useAlgoMap";
-import { fmtBps, fmtTtf, fmtUsd, safeAvg } from "./dashboardUtils";
+import { fmtBps, fmtSigma, fmtTtf, fmtUsd, safeAvg, SIGMA_TOOLTIP } from "./dashboardUtils";
 
 interface SummaryCardsProps {
   results: TCAResult[];
@@ -33,11 +33,13 @@ interface KpiCardProps {
   value: string;
   sub: string;
   sentiment?: Sentiment;
+  /** Hover explanation for a tile whose unit is not self-evident. */
+  title?: string;
   /** When provided, a dismiss control appears on hover/focus. */
   onHide?: () => void;
 }
 
-function KpiCard({ label, value, sub, sentiment = "neutral", onHide }: KpiCardProps) {
+function KpiCard({ label, value, sub, sentiment = "neutral", title, onHide }: KpiCardProps) {
   const valueClass =
     sentiment === "good"
       ? "text-green-600 dark:text-green-400"
@@ -46,7 +48,12 @@ function KpiCard({ label, value, sub, sentiment = "neutral", onHide }: KpiCardPr
         : "text-gray-900 dark:text-white";
 
   return (
-    <div className="group relative bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex flex-col gap-1">
+    <div
+      {...(title !== undefined ? { title } : {})}
+      className={`group relative bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex flex-col gap-1${
+        title !== undefined ? " cursor-help" : ""
+      }`}
+    >
       {onHide !== undefined && (
         <button
           type="button"
@@ -107,6 +114,17 @@ function saveHiddenKpis(ids: string[]): void {
   }
 }
 
+/**
+ * Unlike the bps tiles, sign alone is not enough here: everything inside ±1σ is
+ * normal noise and should read as neutral rather than as a win or a loss.
+ */
+function volAdjSentiment(v: number | null): Sentiment {
+  if (v === null || !isFinite(v)) return "neutral";
+  if (v > 1) return "bad";
+  if (v < -1) return "good";
+  return "neutral";
+}
+
 function bpsSentiment(v: number | null): Sentiment {
   if (v === null) return "neutral";
   return v <= 0 ? "good" : "bad";
@@ -134,6 +152,10 @@ export function SummaryCards({ results, trades }: SummaryCardsProps) {
   const vwapVals = results.map((r) => r.VWAP_dev_bps);
   const avgVwap = safeAvg(vwapVals);
   const vwapCount = vwapVals.filter((v) => v !== null).length;
+
+  const volAdjVals = results.map((r) => r.volAdjIS);
+  const avgVolAdj = safeAvg(volAdjVals);
+  const volAdjCount = volAdjVals.filter((v) => v !== null).length;
 
   const twasVals = results.map((r) => r.TWAS_bps);
   const avgTwas = safeAvg(twasVals);
@@ -188,12 +210,19 @@ export function SummaryCards({ results, trades }: SummaryCardsProps) {
   }
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-3">
       <KpiCard
         label="Avg IS"
         value={fmtBps(avgIS)}
         sub={subOf(isCount)}
         sentiment={bpsSentiment(avgIS)}
+      />
+      <KpiCard
+        label="Vol-Adj IS"
+        value={fmtSigma(avgVolAdj)}
+        sub={subOf(volAdjCount)}
+        sentiment={volAdjSentiment(avgVolAdj)}
+        title={SIGMA_TOOLTIP}
       />
       <KpiCard
         label="Avg VWAP Dev"

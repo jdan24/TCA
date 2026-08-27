@@ -64,6 +64,43 @@ export function fmtUsd(
   return `${v > 0 ? "+" : v < 0 ? "-" : ""}${body}`;
 }
 
+/** Format a nullable vol-adjusted IS, e.g. "+0.27σ" / "-1.40σ" / "N/A". */
+export function fmtSigma(v: number | null | undefined, decimals = 2): string {
+  if (v === null || v === undefined || !isFinite(v)) return "N/A";
+  const sign = v > 0 ? "+" : "";
+  return `${sign}${v.toFixed(decimals)}\u03c3`;
+}
+
+/**
+ * Colour band for a vol-adjusted IS. Direction picks the hue, magnitude the
+ * intensity, so a favourable result never wears a warning colour:
+ *
+ *   z < -2      green        unusually good
+ *   -2 .. -1    light green  better than normal
+ *   -1 .. +1    grey         within normal noise
+ *   +1 .. +2    amber        notable cost
+ *   z > +2      red          well outside normal
+ *
+ * Shared so the tables, the KPI tile, the single-order summary and both print
+ * layouts can never disagree about what counts as significant.
+ */
+export function sigmaBandClass(v: number | null | undefined): string {
+  if (v === null || v === undefined || !isFinite(v)) {
+    return "text-gray-300 dark:text-gray-600";
+  }
+  if (v > 2)  return "text-red-500 dark:text-red-400";
+  if (v > 1)  return "text-amber-600 dark:text-amber-400";
+  if (v < -2) return "text-green-600 dark:text-green-400";
+  if (v < -1) return "text-emerald-500 dark:text-emerald-400";
+  return "text-gray-600 dark:text-gray-400";
+}
+
+/** One-line explanation of the σ scale, reused by every tooltip that shows it. */
+export const SIGMA_TOOLTIP =
+  "Slippage divided by one standard deviation of the market's own movement " +
+  "during the order. Within \u00b11\u03c3 is normal noise; beyond \u00b12\u03c3 is well outside it. " +
+  "Positive is a cost.";
+
 /** Format time-to-fill milliseconds as a human-readable string. */
 export function fmtTtf(ms: number): string {
   if (ms < 1_000) return `${ms}ms`;

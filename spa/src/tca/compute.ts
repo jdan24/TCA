@@ -18,7 +18,7 @@ import { computeSlippage } from "./slippage";
 import { dollarSlippage } from "./dollars";
 import { computeTWAS, MIN_ABS_MID } from "./spread";
 import { computeTimeToFill } from "./timing";
-import { computeOrderVol } from "./volatility";
+import { computeOrderVol, volAdjustedIS } from "./volatility";
 import { computeMarketTWAP, computeTWAPDeviation, computeVWAPDeviation } from "./vwapTwap";
 import { sideSign } from "./tcaUtils";
 
@@ -68,13 +68,15 @@ export function computeAll(
     const usd = (benchmark: number | null) =>
       dollarSlippage(trade.avgFillPrice, benchmark, trade.side, trade.orderQty, pv);
 
+    const IS_bps = computeSlippage(trade, e?.arrivalPrice ?? null);
+
     return {
       orderId: trade.orderId,
       // Bloomberg's quote currency wins: it is what the point value — and so
       // the cash figures — are actually denominated in. A 6B fill priced in USd
       // yields USD, whatever the file's currency column says.
       currency: e?.currency ?? trade.currency,
-      IS_bps: computeSlippage(trade, e?.arrivalPrice ?? null),
+      IS_bps,
       VWAP_dev_bps: computeVWAPDeviation(trade, e),
       MI_bps: computeMarketImpact(trade, e),
       timeToFill_ms: computeTimeToFill(trade),
@@ -87,6 +89,7 @@ export function computeAll(
       TWAS_price: twas.price,
       vol_during_order_price: vol.price,
       vol_during_order_bps: vol.bps,
+      volAdjIS: volAdjustedIS(IS_bps, vol.bps),
       TWAP_dev_bps: computeTWAPDeviation(trade, marketTWAPFinal),
       // Market VWAP price: Bloomberg scalar, then file VWAP as offline fallback
       marketVWAP_price,
@@ -462,6 +465,7 @@ export function computeParentOrderSummary(
     duration_ms,
     vol_during_order_price,
     vol_during_order_bps,
+    volAdjIS: volAdjustedIS(IS_bps, vol_during_order_bps),
     participationRate,
     marketVwap,
     marketTwap,

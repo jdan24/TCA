@@ -57,6 +57,9 @@ function groupBy(
     const avgVWAP_dev_bps = safeAvg(gResults.map((r) => r.VWAP_dev_bps));
     const avgMI_bps = safeAvg(gResults.map((r) => r.MI_bps));
     const avgTWAS_bps = safeAvg(gResults.map((r) => r.TWAS_bps));
+    // Simple mean — matches avgIS_bps and the rest of this row. Orders with no
+    // usable σ return null from volAdjustedIS and safeAvg drops them.
+    const avgVolAdjIS = safeAvg(gResults.map((r) => r.volAdjIS));
     const avgTTF_ms = safeAvg(gResults.map((r) => r.timeToFill_ms)) ?? 0;
 
     // Win rate: fraction of orders with IS_bps <= 0 among those with IS data
@@ -75,6 +78,7 @@ function groupBy(
       avgVWAP_dev_bps,
       avgMI_bps,
       avgTWAS_bps,
+      avgVolAdjIS,
       avgTTF_ms,
       winRate,
       bestIS_bps,
@@ -187,6 +191,10 @@ export function buildSpreadSavings(
     let savWeightedSum = 0;
     let savWeight = 0;
     const isValues: number[] = [];
+    // Quantity-weighted, matching wAvgIS_bps rather than the simple mean the
+    // AggregateTables use — this table weights its IS figures by size.
+    let vaWeightedSum = 0;
+    let vaWeight = 0;
     const volValues: number[] = [];
     const volRates: number[] = [];
 
@@ -212,6 +220,11 @@ export function buildSpreadSavings(
         savWeight += qty;
       }
 
+      if (r.volAdjIS !== null && isFinite(r.volAdjIS) && qty > 0) {
+        vaWeightedSum += r.volAdjIS * qty;
+        vaWeight += qty;
+      }
+
       // Volatility is a reading of the environment, so each order's window counts
       // once — no quantity weighting, matching how avgSpread_bps is built.
       const vol = r.vol_during_order_bps;
@@ -231,6 +244,7 @@ export function buildSpreadSavings(
       avgSpread_bps,
       wAvgIS_bps: isWeight > 0 ? isWeightedSum / isWeight : null,
       medianIS_bps: median(isValues),
+      wAvgVolAdjIS: vaWeight > 0 ? vaWeightedSum / vaWeight : null,
       avgVol_bps: safeAvg(volValues),
       avgVolRate_bps: safeAvg(volRates),
       savingsPct: savWeight > 0 ? savWeightedSum / savWeight : null,
