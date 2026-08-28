@@ -17,6 +17,8 @@ import {
   YAxis,
 } from "recharts";
 import type { TCAResult, TradeRecord } from "@/types";
+import { useChartAlgoFilter } from "@/hooks/useChartAlgoFilter";
+import { AlgoFilterMenu } from "./AlgoFilterMenu";
 import { ChartCard, EmptyState, paletteColor } from "./dashboardUtils";
 
 interface SlippageChartProps {
@@ -30,6 +32,8 @@ interface Point {
 }
 
 export function SlippageChart({ trades, results }: SlippageChartProps) {
+  const algoFilter = useChartAlgoFilter("slippage", trades);
+
   const tradeMap = useMemo(() => {
     const m = new Map<string, TradeRecord>();
     for (const t of trades) m.set(t.orderId, t);
@@ -43,6 +47,7 @@ export function SlippageChart({ trades, results }: SlippageChartProps) {
       if (r.IS_bps === null) continue;
       const trade = tradeMap.get(r.orderId);
       if (!trade) continue;
+      if (!algoFilter.includes(trade)) continue;
       const sym = trade.symbol;
       const point: Point = { qty: trade.orderQty, is: r.IS_bps };
       const bucket = g.get(sym);
@@ -57,15 +62,24 @@ export function SlippageChart({ trades, results }: SlippageChartProps) {
       pts,
       color: paletteColor(i),
     }));
-  }, [results, tradeMap]);
+  }, [results, tradeMap, algoFilter]);
+
+  const actions = <AlgoFilterMenu filter={algoFilter} />;
 
   if (series.length === 0) {
     return (
       <ChartCard
         title="IS vs Order Size"
         subtitle="Slippage (bps) vs order quantity — colored by symbol"
+        actions={actions}
       >
-        <EmptyState message="No IS data — add an arrivalPrice column or fetch Bloomberg data" />
+        <EmptyState
+          message={
+            algoFilter.isNarrowed
+              ? "No orders match the selected algos"
+              : "No IS data — add an arrivalPrice column or fetch Bloomberg data"
+          }
+        />
       </ChartCard>
     );
   }
@@ -74,6 +88,7 @@ export function SlippageChart({ trades, results }: SlippageChartProps) {
     <ChartCard
       title="IS vs Order Size"
       subtitle="Slippage (bps) vs order quantity — colored by symbol"
+      actions={actions}
     >
       <ResponsiveContainer width="100%" height={240}>
         <ScatterChart margin={{ top: 8, right: 16, bottom: 24, left: 0 }}>

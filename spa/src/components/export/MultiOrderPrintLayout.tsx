@@ -40,6 +40,7 @@ export type SectionId =
   | "kpi"
   | "slippage"
   | "vwap_dev"
+  | "twap_dev"
   | "spread"
   | "spread_savings"
   | "by_symbol"
@@ -51,7 +52,7 @@ export type SectionId =
 
 export const ALL_SECTIONS: SectionId[] = [
   "kpi",
-  "slippage", "vwap_dev", "spread",
+  "slippage", "vwap_dev", "twap_dev", "spread",
   "spread_savings",
   "by_symbol", "by_algo", "by_symbol_algo", "by_symbol_side", "by_symbol_algo_side",
   "order_table",
@@ -70,6 +71,7 @@ const SECTION_GROUPS: SectionGroup[] = [
     items: [
       { id: "slippage",  label: "IS vs Order Size" },
       { id: "vwap_dev",  label: "VWAP Deviation"   },
+      { id: "twap_dev",  label: "TWAP Deviation"   },
       { id: "spread",    label: "Spread vs IS"      },
     ],
   },
@@ -95,6 +97,7 @@ const SECTION_GROUPS: SectionGroup[] = [
 export interface MOChartImages {
   slippage:  string | null;
   vwapDev:   string | null;
+  twapDev:   string | null;
   spread:    string | null;
 }
 
@@ -340,6 +343,7 @@ export function MultiOrderPrintLayout({
   const CHART_DEFS = [
     { id: "slippage"  as SectionId, label: "IS vs Order Size", src: charts.slippage  },
     { id: "vwap_dev"  as SectionId, label: "VWAP Deviation",   src: charts.vwapDev   },
+    { id: "twap_dev"  as SectionId, label: "TWAP Deviation",   src: charts.twapDev   },
     { id: "spread"    as SectionId, label: "Spread vs IS",     src: charts.spread    },
   ];
   const enabledCharts = CHART_DEFS.filter((c) => vis(c.id));

@@ -6,7 +6,8 @@
  *   │ trade count · enriched count · [Fetch Bloomberg] · [↺ New file]  │
  *   ├─ SummaryCards (6 KPI tiles, full width) ──────────────────────────┤
  *   ├─ OrderDetail / TradeTable (full width) ───────────────────────────┤
- *   ├─ SlippageChart ──── VWAPDeviation ────────────────────────────────┤
+ *   ├─ SlippageChart (full width) ──────────────────────────────────────┤
+ *   ├─ VWAP Deviation ──── TWAP Deviation ──────────────────────────────┤
  *   ├─ SpreadScatter (full width) ──────────────────────────────────────┤
  *   └─ AggregationSection (Spread Savings / By Symbol / Algo / …)───────┘
  */
@@ -37,7 +38,7 @@ import {
   type AggregateColumnId,
 } from "./AggregateTable";
 import { SummaryCards } from "./SummaryCards";
-import { VWAPDeviation } from "./VWAPDeviation";
+import { DeviationChart } from "./DeviationChart";
 
 /** Empty selection = no filter on this dimension. */
 function matches(selected: string[], value: string | null): boolean {
@@ -157,12 +158,13 @@ export function Dashboard({
         if (!el) return null;
         return toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 }).catch(() => null);
       };
-      const [slippage, vwapDev, spread] = await Promise.all([
+      const [slippage, vwapDev, twapDev, spread] = await Promise.all([
         capture("mo-chart-slippage"),
         capture("mo-chart-vwap-dev"),
+        capture("mo-chart-twap-dev"),
         capture("mo-chart-spread"),
       ]);
-      setPrintCharts({ slippage, vwapDev, spread });
+      setPrintCharts({ slippage, vwapDev, twapDev, spread });
       setShowPrintLayout(true);
     } finally {
       setCapturingPrint(false);
@@ -357,14 +359,39 @@ export function Dashboard({
         onDeleteOrder={handleDeleteOrder}
       />
 
-      {/* ── Scatter charts (2-col) ───────────────────────────────────────── */}
+      {/* ── IS vs order size (full width) ────────────────────────────────── */}
+      <div id="mo-chart-slippage">
+        <SlippageChart trades={filteredTrades} results={filteredResults} />
+      </div>
+
+      {/* ── Benchmark deviations, side by side so the pair reads together ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div id="mo-chart-slippage"><SlippageChart trades={filteredTrades} results={filteredResults} /></div>
-        <div id="mo-chart-vwap-dev"><VWAPDeviation trades={filteredTrades} results={filteredResults} /></div>
+        <div id="mo-chart-vwap-dev">
+          <DeviationChart
+            trades={filteredTrades}
+            results={filteredResults}
+            chartId="vwap-dev"
+            title="VWAP Deviation"
+            benchmark="VWAP"
+            valueOf={(r) => r.VWAP_dev_bps}
+          />
+        </div>
+        <div id="mo-chart-twap-dev">
+          <DeviationChart
+            trades={filteredTrades}
+            results={filteredResults}
+            chartId="twap-dev"
+            title="TWAP Deviation"
+            benchmark="TWAP"
+            valueOf={(r) => r.TWAP_dev_bps}
+          />
+        </div>
       </div>
 
       {/* ── Spread vs slippage (full width) ──────────────────────────────── */}
-      <div id="mo-chart-spread"><SpreadScatter results={filteredResults} /></div>
+      <div id="mo-chart-spread">
+        <SpreadScatter trades={filteredTrades} results={filteredResults} />
+      </div>
 
       {/* ── Aggregation tables ───────────────────────────────────────────── */}
       <AggregationSection

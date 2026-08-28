@@ -32,7 +32,9 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { TCAResult } from "@/types";
+import type { TCAResult, TradeRecord } from "@/types";
+import { useChartAlgoFilter } from "@/hooks/useChartAlgoFilter";
+import { AlgoFilterMenu } from "./AlgoFilterMenu";
 import { ChartCard, EmptyState } from "./dashboardUtils";
 
 const BEAT_COLOR = "#10b981"; // emerald — slippage under the spread it crossed
@@ -43,6 +45,8 @@ const MARKER_COLOR = "#94a3b8";
 const MARKER_HALF_WIDTH = 9;
 
 interface SpreadScatterProps {
+  /** Needed for the algo filter — the algo lives on the trade, not the result. */
+  trades: TradeRecord[];
   results: TCAResult[];
 }
 
@@ -73,18 +77,27 @@ function SpreadMarker(props: unknown) {
   );
 }
 
-export function SpreadScatter({ results }: SpreadScatterProps) {
+export function SpreadScatter({ trades, results }: SpreadScatterProps) {
   const [showMarkers, setShowMarkers] = useState(true);
+  const algoFilter = useChartAlgoFilter("spread", trades);
+
+  const tradeMap = useMemo(() => {
+    const m = new Map<string, TradeRecord>();
+    for (const t of trades) m.set(t.orderId, t);
+    return m;
+  }, [trades]);
 
   const points = useMemo<Point[]>(() => {
     const pts: Point[] = [];
     for (const r of results) {
       if (r.TWAS_bps !== null && r.IS_bps !== null) {
+        const trade = tradeMap.get(r.orderId);
+        if (!trade || !algoFilter.includes(trade)) continue;
         pts.push({ twas: r.TWAS_bps, is: r.IS_bps, beat: r.IS_bps < r.TWAS_bps });
       }
     }
     return pts;
-  }, [results]);
+  }, [results, tradeMap, algoFilter]);
 
   // Marker series: same x as each order, plotted at its own TWAS level.
   const markers = useMemo(
@@ -94,13 +107,35 @@ export function SpreadScatter({ results }: SpreadScatterProps) {
 
   const beatCount = points.filter((p) => p.beat).length;
 
+  // The spread-marks toggle and the algo filter share the actions slot.
+  const actions = (
+    <div className="flex items-center gap-2">
+      <AlgoFilterMenu filter={algoFilter} />
+      <button
+        type="button"
+        onClick={() => setShowMarkers((v) => !v)}
+        title="Show or hide the dashed spread-cost marker above each order"
+        className="px-2 py-1 text-[11px] rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors whitespace-nowrap"
+      >
+        {showMarkers ? "Hide" : "Show"} spread marks
+      </button>
+    </div>
+  );
+
   if (points.length === 0) {
     return (
       <ChartCard
         title="Spread vs Slippage"
         subtitle="TWAS (bps) vs IS (bps) — liquidity vs execution cost"
+        actions={actions}
       >
-        <EmptyState message="Bloomberg bid/ask tick data required for TWAS" />
+        <EmptyState
+          message={
+            algoFilter.isNarrowed
+              ? "No orders match the selected algos"
+              : "Bloomberg bid/ask tick data required for TWAS"
+          }
+        />
       </ChartCard>
     );
   }
@@ -109,16 +144,7 @@ export function SpreadScatter({ results }: SpreadScatterProps) {
     <ChartCard
       title="Spread vs Slippage"
       subtitle={`${beatCount} of ${points.length} beat the full cost of their spread`}
-      actions={
-        <button
-          type="button"
-          onClick={() => setShowMarkers((v) => !v)}
-          title="Show or hide the dashed spread-cost marker above each order"
-          className="px-2 py-1 text-[11px] rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors whitespace-nowrap"
-        >
-          {showMarkers ? "Hide" : "Show"} spread marks
-        </button>
-      }
+      actions={actions}
     >
       <ResponsiveContainer width="100%" height={240}>
         <ScatterChart margin={{ top: 8, right: 16, bottom: 24, left: 0 }}>

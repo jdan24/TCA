@@ -1,8 +1,15 @@
 /**
- * VWAP Deviation bar chart — avg deviation (bps) grouped by symbol + side.
+ * DeviationChart — average benchmark deviation (bps) grouped by symbol + side.
  *
- * Bars are colored green (favorable, negative) or red (adverse, positive).
- * Requires Bloomberg enrichment; shows empty state otherwise.
+ * Rendered twice on the multi-order dashboard, once against market VWAP and once
+ * against market TWAP. The two plots are identical apart from which metric they
+ * read, so they share one component rather than a near-copy each.
+ *
+ * Bars are coloured green (favourable, negative) or red (adverse, positive).
+ * Requires Bloomberg enrichment; shows an empty state otherwise.
+ *
+ * Each instance carries its own algo filter, narrowing within whatever the
+ * dashboard-level FilterBar has already left.
  */
 
 import { useMemo } from "react";
@@ -18,11 +25,20 @@ import {
   YAxis,
 } from "recharts";
 import type { TCAResult, TradeRecord } from "@/types";
+import { useChartAlgoFilter } from "@/hooks/useChartAlgoFilter";
+import { AlgoFilterMenu } from "./AlgoFilterMenu";
 import { ChartCard, EmptyState, fmtBps, safeAvg } from "./dashboardUtils";
 
-interface VWAPDeviationProps {
+interface DeviationChartProps {
   trades: TradeRecord[];
   results: TCAResult[];
+  /** Stable key for this chart's stored algo selection. */
+  chartId: string;
+  title: string;
+  /** Short name used in the tooltip and the empty state, e.g. "VWAP". */
+  benchmark: string;
+  /** Which metric to plot. */
+  valueOf: (r: TCAResult) => number | null;
 }
 
 interface BarDatum {
@@ -31,7 +47,16 @@ interface BarDatum {
   count: number;
 }
 
-export function VWAPDeviation({ trades, results }: VWAPDeviationProps) {
+export function DeviationChart({
+  trades,
+  results,
+  chartId,
+  title,
+  benchmark,
+  valueOf,
+}: DeviationChartProps) {
+  const algoFilter = useChartAlgoFilter(chartId, trades);
+
   const tradeMap = useMemo(() => {
     const m = new Map<string, TradeRecord>();
     for (const t of trades) m.set(t.orderId, t);
@@ -41,15 +66,17 @@ export function VWAPDeviation({ trades, results }: VWAPDeviationProps) {
   const chartData = useMemo<BarDatum[]>(() => {
     const groups = new Map<string, number[]>();
     for (const r of results) {
-      if (r.VWAP_dev_bps === null) continue;
+      const v = valueOf(r);
+      if (v === null) continue;
       const trade = tradeMap.get(r.orderId);
       if (!trade) continue;
+      if (!algoFilter.includes(trade)) continue;
       const key = `${trade.symbol} ${trade.side}`;
       const bucket = groups.get(key);
       if (bucket) {
-        bucket.push(r.VWAP_dev_bps);
+        bucket.push(v);
       } else {
-        groups.set(key, [r.VWAP_dev_bps]);
+        groups.set(key, [v]);
       }
     }
     return [...groups.entries()]
@@ -59,23 +86,33 @@ export function VWAPDeviation({ trades, results }: VWAPDeviationProps) {
         count: vals.length,
       }))
       .sort((a, b) => a.avg - b.avg); // worst on right
-  }, [results, tradeMap]);
+  }, [results, tradeMap, valueOf, algoFilter]);
+
+  const actions = <AlgoFilterMenu filter={algoFilter} />;
 
   if (chartData.length === 0) {
     return (
       <ChartCard
-        title="VWAP Deviation"
-        subtitle="Avg deviation (bps) by symbol and side"
+        title={title}
+        subtitle={`Avg deviation (bps) by symbol and side`}
+        actions={actions}
       >
-        <EmptyState message="Bloomberg data required for VWAP deviation" />
+        <EmptyState
+          message={
+            algoFilter.isNarrowed
+              ? "No orders match the selected algos"
+              : `Bloomberg data required for ${benchmark} deviation`
+          }
+        />
       </ChartCard>
     );
   }
 
   return (
     <ChartCard
-      title="VWAP Deviation"
+      title={title}
       subtitle="Avg deviation (bps) by symbol and side — negative is favorable"
+      actions={actions}
     >
       <ResponsiveContainer width="100%" height={240}>
         <BarChart
@@ -101,8 +138,8 @@ export function VWAPDeviation({ trades, results }: VWAPDeviationProps) {
           <Tooltip
             formatter={(v: unknown) =>
               typeof v === "number"
-                ? [fmtBps(v), "Avg VWAP Dev"]
-                : [String(v), "Avg VWAP Dev"]
+                ? [fmtBps(v), `Avg ${benchmark} Dev`]
+                : [String(v), `Avg ${benchmark} Dev`]
             }
           />
           <ReferenceLine y={0} stroke="#94a3b8" />
