@@ -1,5 +1,5 @@
 /**
- * AggregationSection — renders the four aggregation tables between the charts
+ * AggregationSection — renders the aggregation tables between the charts
  * and the TradeTable in the Multi-order dashboard.
  *
  * Layout:
@@ -7,17 +7,21 @@
  *   By Symbol (full width)
  *   By Algo | By Symbol + Algo (2-col)
  *   By Symbol + Side (full width)
+ *   By Symbol + Algo + Side (full width)
  *
  * Clicking any row calls setAggregationFilter in the store; clicking the
  * active row again clears the filter.
  *
- * The three symbol-keyed tables group by generic ticker or specific expiry,
- * per the toggle in the header. Spread Savings is always generic.
+ * Every symbol-keyed table groups by generic ticker or specific expiry, per the
+ * toggle in the header. Spread Savings is always generic.
+ *
+ * Each table carries its own column selection, stored per grouping — By Algo can
+ * show a different set from By Symbol.
  */
 
 import { useTCAStore } from "@/store/useTCAStore";
-import type { AggregateRow, AggregationSet, SpreadSavingsRow } from "@/types";
-import { AggregateTable } from "./AggregateTable";
+import type { AggGroupType, AggregateRow, AggregationSet, SpreadSavingsRow } from "@/types";
+import { AggregateTable, type AggregateColumnId } from "./AggregateTable";
 import { SpreadSavingsTable, type SpreadSavingsColumnId } from "./SpreadSavingsTable";
 
 interface AggregationSectionProps {
@@ -26,6 +30,9 @@ interface AggregationSectionProps {
   /** Optional Spread Savings columns currently shown — also drives the print view. */
   spreadSavingsColumns: SpreadSavingsColumnId[];
   onSpreadSavingsColumnsChange: (ids: SpreadSavingsColumnId[]) => void;
+  /** Visible columns per grouping — also drives the print view. */
+  aggregateColumns: Record<AggGroupType, AggregateColumnId[]>;
+  onAggregateColumnsChange: (type: AggGroupType, ids: AggregateColumnId[]) => void;
   /** True = symbol tables keyed on generic ticker; false = on specific expiry. */
   groupGeneric: boolean;
   onGroupGenericChange: (v: boolean) => void;
@@ -36,13 +43,15 @@ export function AggregationSection({
   spreadSavings,
   spreadSavingsColumns,
   onSpreadSavingsColumnsChange,
+  aggregateColumns,
+  onAggregateColumnsChange,
   groupGeneric,
   onGroupGenericChange,
 }: AggregationSectionProps) {
   const aggregationFilter = useTCAStore((s) => s.aggregationFilter);
   const setAggregationFilter = useTCAStore((s) => s.setAggregationFilter);
 
-  function makeHandler(type: "symbol" | "algo" | "symbol+algo" | "symbol+side") {
+  function makeHandler(type: AggGroupType) {
     return (row: AggregateRow) => {
       // Toggle: clicking the active row clears the filter
       if (aggregationFilter?.type === type && aggregationFilter.key === row.groupKey) {
@@ -53,7 +62,7 @@ export function AggregationSection({
     };
   }
 
-  function activeKeyFor(type: "symbol" | "algo" | "symbol+algo" | "symbol+side"): string | null {
+  function activeKeyFor(type: AggGroupType): string | null {
     return aggregationFilter?.type === type ? (aggregationFilter.key ?? null) : null;
   }
 
@@ -93,6 +102,8 @@ export function AggregationSection({
         rows={aggregations.bySymbol}
         activeKey={activeKeyFor("symbol")}
         onRowClick={makeHandler("symbol")}
+        visibleColumns={aggregateColumns["symbol"]}
+        onVisibleColumnsChange={(ids) => onAggregateColumnsChange("symbol", ids)}
       />
 
       {/* By Algo + By Symbol+Algo — 2-col */}
@@ -102,12 +113,16 @@ export function AggregationSection({
           rows={aggregations.byAlgo}
           activeKey={activeKeyFor("algo")}
           onRowClick={makeHandler("algo")}
+          visibleColumns={aggregateColumns["algo"]}
+          onVisibleColumnsChange={(ids) => onAggregateColumnsChange("algo", ids)}
         />
         <AggregateTable
           title="By Symbol + Algo"
           rows={aggregations.bySymbolAlgo}
           activeKey={activeKeyFor("symbol+algo")}
           onRowClick={makeHandler("symbol+algo")}
+          visibleColumns={aggregateColumns["symbol+algo"]}
+          onVisibleColumnsChange={(ids) => onAggregateColumnsChange("symbol+algo", ids)}
         />
       </div>
 
@@ -117,6 +132,18 @@ export function AggregationSection({
         rows={aggregations.bySymbolSide}
         activeKey={activeKeyFor("symbol+side")}
         onRowClick={makeHandler("symbol+side")}
+        visibleColumns={aggregateColumns["symbol+side"]}
+        onVisibleColumnsChange={(ids) => onAggregateColumnsChange("symbol+side", ids)}
+      />
+
+      {/* By Symbol+Algo+Side — full width; the most granular, so the most rows */}
+      <AggregateTable
+        title="By Symbol + Algo + Side"
+        rows={aggregations.bySymbolAlgoSide}
+        activeKey={activeKeyFor("symbol+algo+side")}
+        onRowClick={makeHandler("symbol+algo+side")}
+        visibleColumns={aggregateColumns["symbol+algo+side"]}
+        onVisibleColumnsChange={(ids) => onAggregateColumnsChange("symbol+algo+side", ids)}
       />
     </div>
   );

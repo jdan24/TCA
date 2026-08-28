@@ -14,7 +14,7 @@
 import { useMemo, useState } from "react";
 import { toPng } from "html-to-image";
 import type { EnrichProgress } from "@/bloomberg/enrichmentService";
-import type { AggregationSet, DataFilter, TCAResult, TradeRecord } from "@/types";
+import type { AggGroupType, AggregationSet, DataFilter, TCAResult, TradeRecord } from "@/types";
 import { EMPTY_FILTER } from "@/types";
 import { buildAggregations, buildSpreadSavings } from "@/tca/aggregate";
 import { toGenericTicker } from "@/tca/genericTicker";
@@ -31,6 +31,11 @@ import {
   saveSpreadSavingsCols,
   type SpreadSavingsColumnId,
 } from "./SpreadSavingsTable";
+import {
+  loadAggregateCols,
+  saveAggregateCols,
+  type AggregateColumnId,
+} from "./AggregateTable";
 import { SummaryCards } from "./SummaryCards";
 import { VWAPDeviation } from "./VWAPDeviation";
 
@@ -58,6 +63,18 @@ function saveGroupGeneric(v: boolean): void {
   } catch {
     // localStorage unavailable (private browsing) — the setting just won't persist
   }
+}
+
+/** Every grouping that gets its own aggregation table and column preference. */
+const AGG_GROUP_TYPES: AggGroupType[] = [
+  "symbol", "algo", "symbol+algo", "symbol+side", "symbol+algo+side",
+];
+
+/** One stored column selection per grouping, loaded on first render. */
+function loadAllAggregateCols(): Record<AggGroupType, AggregateColumnId[]> {
+  return Object.fromEntries(
+    AGG_GROUP_TYPES.map((t) => [t, loadAggregateCols(t)]),
+  ) as Record<AggGroupType, AggregateColumnId[]>;
 }
 
 interface DashboardProps {
@@ -117,6 +134,15 @@ export function Dashboard({
   function changeSpreadSavingsColumns(ids: SpreadSavingsColumnId[]) {
     setSpreadSavingsColumns(ids);
     saveSpreadSavingsCols(ids);
+  }
+
+  // Column selection per aggregation table. Owned here rather than in each
+  // table because the print layout renders the same selections.
+  const [aggregateColumns, setAggregateColumns] =
+    useState<Record<AggGroupType, AggregateColumnId[]>>(loadAllAggregateCols);
+  function changeAggregateColumns(type: AggGroupType, ids: AggregateColumnId[]) {
+    setAggregateColumns((prev) => ({ ...prev, [type]: ids }));
+    saveAggregateCols(type, ids);
   }
 
   const [showPrintLayout, setShowPrintLayout]     = useState(false);
@@ -214,6 +240,7 @@ export function Dashboard({
         genericFor={genericFor}
         spreadSavings={spreadSavings}
         spreadSavingsColumns={spreadSavingsColumns}
+        aggregateColumns={aggregateColumns}
         charts={printCharts}
         onBack={() => { setShowPrintLayout(false); setPrintCharts(null); }}
       />
@@ -345,6 +372,8 @@ export function Dashboard({
         spreadSavings={spreadSavings}
         spreadSavingsColumns={spreadSavingsColumns}
         onSpreadSavingsColumnsChange={changeSpreadSavingsColumns}
+        aggregateColumns={aggregateColumns}
+        onAggregateColumnsChange={changeAggregateColumns}
         groupGeneric={groupGeneric}
         onGroupGenericChange={changeGroupGeneric}
       />

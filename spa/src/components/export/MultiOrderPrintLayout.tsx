@@ -12,9 +12,21 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AggregationSet, AggregateRow, SpreadSavingsRow, TCAResult, TradeRecord } from "@/types";
+import type {
+  AggGroupType,
+  AggregationSet,
+  AggregateRow,
+  SpreadSavingsRow,
+  TCAResult,
+  TradeRecord,
+} from "@/types";
 import { useCorporateTemplate, type BridgeStatus } from "@/hooks/useCorporateTemplate";
 import { fmtBps, fmtSigma, fmtTtf, safeAvg } from "@/components/dashboard/dashboardUtils";
+import {
+  AGGREGATE_COLUMNS,
+  renderAggregateCell,
+  type AggregateColumnId,
+} from "@/components/dashboard/AggregateTable";
 import {
   Legend as SpreadSavingsLegend,
   renderCell as renderSpreadSavingsCell,
@@ -34,13 +46,14 @@ export type SectionId =
   | "by_algo"
   | "by_symbol_algo"
   | "by_symbol_side"
+  | "by_symbol_algo_side"
   | "order_table";
 
 export const ALL_SECTIONS: SectionId[] = [
   "kpi",
   "slippage", "vwap_dev", "spread",
   "spread_savings",
-  "by_symbol", "by_algo", "by_symbol_algo", "by_symbol_side",
+  "by_symbol", "by_algo", "by_symbol_algo", "by_symbol_side", "by_symbol_algo_side",
   "order_table",
 ];
 
@@ -68,6 +81,7 @@ const SECTION_GROUPS: SectionGroup[] = [
       { id: "by_algo",        label: "By Algo"           },
       { id: "by_symbol_algo", label: "By Symbol + Algo"  },
       { id: "by_symbol_side", label: "By Symbol + Side"  },
+      { id: "by_symbol_algo_side", label: "By Symbol + Algo + Side" },
     ],
   },
   {
@@ -95,6 +109,8 @@ interface MultiOrderPrintLayoutProps {
   spreadSavings: SpreadSavingsRow[];
   /** The same column selection made on screen — the print view mirrors it. */
   spreadSavingsColumns: SpreadSavingsColumnId[];
+  /** Per-grouping column selection, mirrored from the screen the same way. */
+  aggregateColumns: Record<AggGroupType, AggregateColumnId[]>;
   charts:       MOChartImages;
   onBack:       () => void;
 }
@@ -136,8 +152,19 @@ function PrintKpiTile({
 }
 
 /** Static print-friendly aggregation table — no click handlers, no dark-mode classes. */
-function PrintAggTable({ title, rows }: { title: string; rows: AggregateRow[] }) {
+function PrintAggTable({
+  title,
+  rows,
+  visibleColumns,
+}: {
+  title: string;
+  rows: AggregateRow[];
+  visibleColumns: AggregateColumnId[];
+}) {
   if (rows.length === 0) return null;
+  // Columns mirror that table's on-screen selection, and the cells come from the
+  // same renderer the screen uses, so the two cannot drift apart.
+  const cols = AGGREGATE_COLUMNS.filter((c) => visibleColumns.includes(c.id));
   return (
     <div className="break-inside-avoid mb-5">
       <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-1.5">{title}</p>
@@ -145,8 +172,9 @@ function PrintAggTable({ title, rows }: { title: string; rows: AggregateRow[] })
         <table className="w-full text-[10px]">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 text-left">
-              {(["Group","# Orders","Total Qty","Avg IS","Vol-Adj IS","Avg VWAP Dev","Avg MI","Avg TWAS","Avg TTF","Win %"] as const).map((h, i) => (
-                <th key={h} className={`px-2 py-1.5 font-semibold ${i === 0 ? "text-left" : "text-right"}`}>{h}</th>
+              <th className="px-2 py-1.5 font-semibold text-left">Group</th>
+              {cols.map((c) => (
+                <th key={c.id} className="px-2 py-1.5 font-semibold text-right">{c.label}</th>
               ))}
             </tr>
           </thead>
@@ -154,17 +182,11 @@ function PrintAggTable({ title, rows }: { title: string; rows: AggregateRow[] })
             {rows.map((row, i) => (
               <tr key={row.groupKey} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
                 <td className="px-2 py-1.5 font-medium">{row.groupKey}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{row.count}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{row.totalQty.toLocaleString()}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums"><BpsPrint v={row.avgIS_bps} /></td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{fmtSigma(row.avgVolAdjIS)}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums"><BpsPrint v={row.avgVWAP_dev_bps} /></td>
-                <td className="px-2 py-1.5 text-right tabular-nums"><BpsPrint v={row.avgMI_bps} neutral /></td>
-                <td className="px-2 py-1.5 text-right tabular-nums"><BpsPrint v={row.avgTWAS_bps} neutral /></td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-gray-700">{fmtTtf(row.avgTTF_ms)}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">
-                  {row.winRate !== null ? `${Math.round(row.winRate * 100)}%` : "—"}
-                </td>
+                {cols.map((c) => (
+                  <td key={c.id} className="px-2 py-1.5 text-right tabular-nums">
+                    {renderAggregateCell(row, c.id)}
+                  </td>
+                ))}
               </tr>
             ))}
           </tbody>
@@ -231,7 +253,8 @@ function PrintSpreadSavingsTable({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function MultiOrderPrintLayout({
-  trades, results, aggregations, genericFor, spreadSavings, spreadSavingsColumns, charts, onBack,
+  trades, results, aggregations, genericFor, spreadSavings, spreadSavingsColumns,
+  aggregateColumns, charts, onBack,
 }: MultiOrderPrintLayoutProps) {
   const {
     logoDataUrl, disclaimerText, reportTitle, bridgeStatus,
@@ -323,10 +346,11 @@ export function MultiOrderPrintLayout({
 
   // ── Aggregation table defs ────────────────────────────────────────────────
   const AGG_DEFS = [
-    { id: "by_symbol"      as SectionId, label: "By Symbol",        rows: aggregations.bySymbol      },
-    { id: "by_algo"        as SectionId, label: "By Algo",          rows: aggregations.byAlgo        },
-    { id: "by_symbol_algo" as SectionId, label: "By Symbol + Algo", rows: aggregations.bySymbolAlgo  },
-    { id: "by_symbol_side" as SectionId, label: "By Symbol + Side", rows: aggregations.bySymbolSide  },
+    { id: "by_symbol"      as SectionId, label: "By Symbol",        rows: aggregations.bySymbol,     group: "symbol"      as AggGroupType },
+    { id: "by_algo"        as SectionId, label: "By Algo",          rows: aggregations.byAlgo,       group: "algo"        as AggGroupType },
+    { id: "by_symbol_algo" as SectionId, label: "By Symbol + Algo", rows: aggregations.bySymbolAlgo, group: "symbol+algo" as AggGroupType },
+    { id: "by_symbol_side" as SectionId, label: "By Symbol + Side", rows: aggregations.bySymbolSide, group: "symbol+side" as AggGroupType },
+    { id: "by_symbol_algo_side" as SectionId, label: "By Symbol + Algo + Side", rows: aggregations.bySymbolAlgoSide, group: "symbol+algo+side" as AggGroupType },
   ];
   const enabledAggs = AGG_DEFS.filter((a) => vis(a.id) && a.rows.length > 0);
 
@@ -453,7 +477,12 @@ export function MultiOrderPrintLayout({
             />
           )}
           {enabledAggs.map((a) => (
-            <PrintAggTable key={a.id} title={a.label} rows={a.rows} />
+            <PrintAggTable
+              key={a.id}
+              title={a.label}
+              rows={a.rows}
+              visibleColumns={aggregateColumns[a.group]}
+            />
           ))}
         </div>
       ),

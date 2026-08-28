@@ -76,6 +76,12 @@ function buildTradeRows(trades: TradeRecord[], results: TCAResult[]): ExportRow[
   });
 }
 
+/**
+ * NOTE: currently unreachable. ExportBar is only rendered by SingleOrderDashboard,
+ * which never passes `aggregations` — the multi-order export path is TradeTable's
+ * CSV (EXPORT_COLS) and MultiOrderPrintLayout. Kept in step with AggregateRow so
+ * it is correct if the Excel export is ever wired up for multi-order mode.
+ */
 function buildAggRows(rows: AggregateRow[]): ExportRow[] {
   const fmt = (v: number | null): number | "" => (v === null ? "" : v);
   return rows.map((r) => ({
@@ -83,7 +89,12 @@ function buildAggRows(rows: AggregateRow[]): ExportRow[] {
     "# Orders":           r.count,
     "Total Qty":          r.totalQty,
     "Avg IS (bps)":       fmt(r.avgIS_bps),
-    "Avg VWAP Dev (bps)": fmt(r.avgVWAP_dev_bps),
+    "vs Mkt VWAP (bps)":  fmt(r.avgVWAP_dev_bps),
+    "vs Mkt VWAP ($)":    fmt(r.totalVWAP_dev_usd),
+    "vs Mkt TWAP (bps)":  fmt(r.avgTWAP_dev_bps),
+    "vs Mkt TWAP ($)":    fmt(r.totalTWAP_dev_usd),
+    Currency:             r.currency ?? "",
+    "Vol-Adj IS (σ)":     fmt(r.avgVolAdjIS),
     "Avg MI (bps)":       fmt(r.avgMI_bps),
     "Avg TWAS (bps)":     fmt(r.avgTWAS_bps),
     "Avg TTF (ms)":       Math.round(r.avgTTF_ms),
@@ -107,10 +118,11 @@ function doExcelExport(tradeRows: ExportRow[], aggregations?: AggregationSet): v
       ["By Algo",        aggregations.byAlgo],
       ["By Symbol+Algo", aggregations.bySymbolAlgo],
       ["By Symbol+Side", aggregations.bySymbolSide],
+      ["By Sym+Algo+Side", aggregations.bySymbolAlgoSide],
     ] as const) {
       if (rows.length === 0) continue;
       const aggWs = XLSX.utils.json_to_sheet(buildAggRows(rows));
-      aggWs["!cols"] = [20, 8, 10, 12, 14, 12, 12, 12, 8, 12, 12].map((wch) => ({ wch }));
+      aggWs["!cols"] = [22, 8, 10, 12, 14, 14, 14, 14, 10, 12, 12, 12, 12, 8, 12, 12].map((wch) => ({ wch }));
       XLSX.utils.book_append_sheet(wb, aggWs, name);
     }
   }

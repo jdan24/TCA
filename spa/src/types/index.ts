@@ -151,7 +151,12 @@ export interface ParentOrderSummary {
 }
 
 // ── Multi-order aggregation types ─────────────────────────────────────────────
-export type AggGroupType = "symbol" | "algo" | "symbol+algo" | "symbol+side";
+export type AggGroupType =
+  | "symbol"
+  | "algo"
+  | "symbol+algo"
+  | "symbol+side"
+  | "symbol+algo+side";
 
 export interface AggregateRow {
   groupKey: string; // display label, e.g. "ESH5" or "ESH5 / VWAP"
@@ -159,6 +164,15 @@ export interface AggregateRow {
   totalQty: number;
   avgIS_bps: number | null;
   avgVWAP_dev_bps: number | null;
+  avgTWAP_dev_bps: number | null;
+  /** Group *total* cash slippage vs market VWAP, not a per-order average —
+   *  cash is additive and a total is the actionable figure. null when the group
+   *  spans more than one currency: there is no FX conversion in this app. */
+  totalVWAP_dev_usd: number | null;
+  totalTWAP_dev_usd: number | null;
+  /** The single currency the totals above are in, or null when the group mixes
+   *  currencies (in which case the totals are null too). */
+  currency: string | null;
   avgMI_bps: number | null;
   avgTWAS_bps: number | null;
   /** Simple mean of per-order volAdjIS — matches how avgIS_bps and the rest of
@@ -182,6 +196,7 @@ export interface AggregationSet {
   byAlgo: AggregateRow[];
   bySymbolAlgo: AggregateRow[];
   bySymbolSide: AggregateRow[];
+  bySymbolAlgoSide: AggregateRow[];
 }
 
 // ── Spread-savings aggregation (multi-order, grouped by generic ticker) ───────

@@ -55,6 +55,29 @@ function groupBy(
 
     const avgIS_bps = safeAvg(gResults.map((r) => r.IS_bps));
     const avgVWAP_dev_bps = safeAvg(gResults.map((r) => r.VWAP_dev_bps));
+    const avgTWAP_dev_bps = safeAvg(gResults.map((r) => r.TWAP_dev_bps));
+
+    // Cash figures are group totals rather than averages: they are additive, and
+    // the total cost of trading a symbol is what gets acted on. Summing across
+    // currencies would be meaningless — there is no FX conversion anywhere in
+    // this app — so a mixed-currency group reports null rather than a wrong
+    // number, the same call SummaryCards makes for its Total Cost tile.
+    const currencies = new Set(gResults.map((r) => r.currency));
+    const currency = currencies.size === 1 ? [...currencies][0] ?? null : null;
+    const sumUsd = (pick: (r: TCAResult) => number | null): number | null => {
+      if (currency === null) return null;
+      let sum = 0;
+      let seen = 0;
+      for (const r of gResults) {
+        const v = pick(r);
+        if (v === null || !isFinite(v)) continue;
+        sum += v;
+        seen += 1;
+      }
+      return seen > 0 ? sum : null;
+    };
+    const totalVWAP_dev_usd = sumUsd((r) => r.VWAP_dev_usd);
+    const totalTWAP_dev_usd = sumUsd((r) => r.TWAP_dev_usd);
     const avgMI_bps = safeAvg(gResults.map((r) => r.MI_bps));
     const avgTWAS_bps = safeAvg(gResults.map((r) => r.TWAS_bps));
     // Simple mean — matches avgIS_bps and the rest of this row. Orders with no
@@ -76,6 +99,10 @@ function groupBy(
       totalQty,
       avgIS_bps,
       avgVWAP_dev_bps,
+      avgTWAP_dev_bps,
+      totalVWAP_dev_usd,
+      totalTWAP_dev_usd,
+      currency,
       avgMI_bps,
       avgTWAS_bps,
       avgVolAdjIS,
@@ -113,6 +140,11 @@ export function buildAggregations(
       (t) => `${groupSymbol(t.symbol)} / ${t.algo ?? "(no algo)"}`,
     ),
     bySymbolSide: groupBy(trades, results, (t) => `${groupSymbol(t.symbol)} ${t.side}`),
+    bySymbolAlgoSide: groupBy(
+      trades,
+      results,
+      (t) => `${groupSymbol(t.symbol)} / ${t.algo ?? "(no algo)"} ${t.side}`,
+    ),
   };
 }
 
