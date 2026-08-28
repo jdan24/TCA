@@ -26,6 +26,8 @@ export interface SettleTableRow {
   orderQty: number;
   avgFillPrice: number;
   lastFillTime: Date;
+  /** Algo policy from the file; null when the column was not mapped. */
+  algo: string | null;
   result: SettleResult;
 }
 
@@ -47,6 +49,7 @@ export function buildSettleRows(
       orderQty: t.orderQty,
       avgFillPrice: t.avgFillPrice,
       lastFillTime: t.lastFillTime,
+      algo: t.algo,
       result,
     });
   }
@@ -60,9 +63,11 @@ export function buildSettleRows(
 export type SettleColumnId =
   | "window"
   | "nyDate"
+  | "algo"
   | "side"
   | "orderQty"
   | "avgFillPrice"
+  | "avgFillPriceDec"
   | "benchmark"
   | "source"
   | "slip_bps"
@@ -78,9 +83,11 @@ export const SETTLE_COLUMNS: ReadonlyArray<{
 }> = [
   { id: "window",       label: "Window" },
   { id: "nyDate",       label: "Settle Date", title: "NY calendar date of the last fill — the date the benchmark is taken from" },
+  { id: "algo",         label: "Algo", title: "Algo policy as it appeared in the imported file" },
   { id: "side",         label: "Side" },
   { id: "orderQty",     label: "Qty" },
-  { id: "avgFillPrice", label: "Fill Price" },
+  { id: "avgFillPrice", label: "Fill Price", title: "In the contract's own notation — 32nds for Treasuries, which rounds to the nearest tick" },
+  { id: "avgFillPriceDec", label: "Fill Price (dec)", title: "The average fill price exactly as imported, in decimal, unrounded" },
   { id: "benchmark",    label: "Benchmark" },
   { id: "source",       label: "Source", title: "Official settle, or the last print before 16:00:00 NY" },
   { id: "slip_bps",     label: "Slip (bps)", title: "Slippage vs the settle benchmark. Positive is a cost." },
@@ -146,6 +153,23 @@ function priceText(value: number, bbgSymbol: string): string {
     : value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
 }
 
+/**
+ * The price exactly as it came off the import, in decimal.
+ *
+ * priceText() above renders a Treasury in 32nds, which is what a trader reads —
+ * but 32nds notation is a grid, so a fill averaged across many prints snaps to
+ * the nearest tick and the sub-tick detail disappears. This column carries the
+ * unrounded number the slippage was actually computed from.
+ *
+ * toLocaleString would apply grouping separators and cap the fraction digits, so
+ * the value is stringified directly and only trailing zeros are trimmed.
+ */
+function rawDecimalText(value: number): string {
+  if (!isFinite(value)) return "N/A";
+  const s = String(value);
+  return s.includes("e") ? value.toFixed(10).replace(/0+$/, "").replace(/\.$/, "") : s;
+}
+
 /** Shared with the print layout so a column renders identically in both. */
 export function renderSettleCell(row: SettleTableRow, id: SettleColumnId) {
   const r = row.result;
@@ -166,6 +190,12 @@ export function renderSettleCell(row: SettleTableRow, id: SettleColumnId) {
       );
     case "nyDate":
       return <span className="tabular-nums text-gray-600 dark:text-gray-400">{r.nyDate}</span>;
+    case "algo":
+      return row.algo === null || row.algo.trim() === "" ? (
+        <span className="text-gray-300 dark:text-gray-600 select-none">&mdash;</span>
+      ) : (
+        <span className="text-gray-700 dark:text-gray-300 whitespace-nowrap">{row.algo}</span>
+      );
     case "side":
       return (
         <span
@@ -186,6 +216,12 @@ export function renderSettleCell(row: SettleTableRow, id: SettleColumnId) {
       return (
         <span className="tabular-nums font-mono text-gray-700 dark:text-gray-300">
           {priceText(row.avgFillPrice, row.bbgSymbol)}
+        </span>
+      );
+    case "avgFillPriceDec":
+      return (
+        <span className="tabular-nums font-mono text-gray-700 dark:text-gray-300">
+          {rawDecimalText(row.avgFillPrice)}
         </span>
       );
     case "benchmark":
@@ -259,9 +295,11 @@ export function settleCellText(row: SettleTableRow, id: SettleColumnId): string 
   switch (id) {
     case "window":       return settleWindowLabel(r.window);
     case "nyDate":       return r.nyDate;
+    case "algo":         return row.algo;
     case "side":         return row.side;
     case "orderQty":     return row.orderQty;
     case "avgFillPrice": return row.avgFillPrice;
+    case "avgFillPriceDec": return row.avgFillPrice;
     case "benchmark":    return r.benchmark;
     case "source":       return r.source === "settle" ? r.field ?? "settle" : r.source === "print" ? "16:00 print" : null;
     case "slip_bps":     return r.slip_bps;

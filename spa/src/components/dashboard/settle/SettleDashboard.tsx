@@ -14,8 +14,10 @@
  * Layout:
  *   Toolbar (counts, tolerance, fetch, print, reset)
  *   By Settle Window
- *   Slippage Distribution
+ *   3PM / 4PM Slippage by Algo
+ *   3PM / 4PM Spread Cost vs Slippage
  *   By Instrument
+ *   By Instrument & Algo
  *   Order Detail
  */
 
@@ -23,9 +25,14 @@ import { useMemo, useState } from "react";
 import type { SettleTolerance, TradeRecord } from "@/types";
 import type { SettleProgress } from "@/bloomberg/settleService";
 import { computeSettleResults, DEFAULT_SETTLE_TOLERANCE } from "@/tca/settle";
-import { buildSettleBySymbol, buildSettleWindowSummary } from "@/tca/settleAggregate";
+import {
+  buildSettleBySymbol,
+  buildSettleBySymbolAlgo,
+  buildSettleWindowSummary,
+} from "@/tca/settleAggregate";
 import { toGenericTicker } from "@/tca/genericTicker";
 import { buildPointValueResolver } from "@/tca/pointValue";
+import { buildTickSizeResolver } from "@/tca/tickSize";
 import {
   pointValueFromContractSize,
   pointValueFromValPt,
@@ -35,8 +42,9 @@ import { getTreasuryPrecision } from "@/tca/treasuryFrac";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { useTCAStore } from "@/store/useTCAStore";
 import { SettleWindowSummary } from "./SettleWindowSummary";
-import { SettleDistribution } from "./SettleDistribution";
-import { SettleBySymbol } from "./SettleBySymbol";
+import { SettleAlgoDistribution } from "./SettleAlgoDistribution";
+import { SettleSpreadScatter } from "./SettleSpreadScatter";
+import { SettleBySymbol, SettleBySymbolAlgo } from "./SettleBySymbol";
 import {
   buildSettleRows,
   loadSettleCols,
@@ -58,6 +66,9 @@ interface SettleDashboardProps {
 }
 
 const GROUP_GENERIC_KEY = "tca_settle_generic_v1";
+
+/** The two charted windows, in the order the report reads them. */
+const SETTLE_WINDOWS = ["3pm", "4pm"] as const;
 
 function loadGroupGeneric(): boolean {
   try {
@@ -158,6 +169,20 @@ export function SettleDashboard({
     [trades, results, symbolKeyFor],
   );
 
+  // The instrument+algo table follows the same Generic/Expiry toggle, so the two
+  // tables can never disagree about what counts as one instrument.
+  const bySymbolAlgo = useMemo(
+    () => buildSettleBySymbolAlgo(trades, results, symbolKeyFor),
+    [trades, results, symbolKeyFor],
+  );
+
+  // Tick size for the spread-cost charts: Bloomberg's FUT_TICK_SIZE from the
+  // fetch already made for point values, falling back to the built-in table.
+  const tickSizeFor = useMemo(
+    () => buildTickSizeResolver(settleReference),
+    [settleReference],
+  );
+
   const tableRows = useMemo(
     () => buildSettleRows(trades, results, resolveSymbol),
     [trades, results, resolveSymbol],
@@ -192,9 +217,14 @@ export function SettleDashboard({
       <SettlePrintLayout
         windowSummary={windowSummary}
         bySymbol={bySymbol}
+        bySymbolAlgo={bySymbolAlgo}
         rows={tableRows}
         visibleColumns={visibleColumns}
         tolerance={tolerance}
+        trades={trades}
+        results={results}
+        tickSizeFor={tickSizeFor}
+        resolveSymbol={resolveSymbol}
         onBack={() => setShowPrint(false)}
       />
     );
@@ -280,7 +310,20 @@ export function SettleDashboard({
 
       <SettleWindowSummary rows={windowSummary} />
 
-      <SettleDistribution trades={trades} results={results} />
+      {SETTLE_WINDOWS.map((w) => (
+        <SettleAlgoDistribution key={w} window={w} trades={trades} results={results} />
+      ))}
+
+      {SETTLE_WINDOWS.map((w) => (
+        <SettleSpreadScatter
+          key={w}
+          window={w}
+          trades={trades}
+          results={results}
+          tickSizeFor={tickSizeFor}
+          resolveSymbol={resolveSymbol}
+        />
+      ))}
 
       <SettleBySymbol
         rows={bySymbol}
@@ -304,6 +347,8 @@ export function SettleDashboard({
           </div>
         }
       />
+
+      <SettleBySymbolAlgo rows={bySymbolAlgo} />
 
       <SettleOrderTable
         rows={tableRows}

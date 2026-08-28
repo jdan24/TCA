@@ -16,8 +16,9 @@
  *   4PM — the last TRADE print strictly before 16:00:00 NY, taken from the
  *         existing /trade-ticks endpoint over a one-minute window.
  *
- * Reference data is fetched once per symbol rather than per order, purely to
- * supply the point value behind the cash figures.
+ * Reference data is fetched once per symbol rather than per order, to supply the
+ * point value behind the cash figures and the tick size behind the spread-cost
+ * chart.
  */
 
 import type {
@@ -121,6 +122,7 @@ export async function enrichSettleBenchmarks(
         "FUT_VAL_PT",      // preferred: already correct for the quote scale
         "FUT_CONT_SIZE",   // fallback, converted in tca/dollars.ts
         "CRNCY",           // "USd" means cents, not dollars
+        "FUT_TICK_SIZE",   // one tick, for the spread-cost chart (tca/tickSize.ts)
       ]);
       step();
     }),

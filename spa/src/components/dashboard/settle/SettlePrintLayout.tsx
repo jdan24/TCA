@@ -1,13 +1,17 @@
 /**
  * SettlePrintLayout — print/PDF view of the Target Settle report.
  *
- * Renders the same tables the screen shows, from the same shared column
- * definitions and cell renderers, so the two can never disagree about what a
- * column contains. Branding comes from the corporate template, as in the other
- * print layouts.
+ * Renders the same tables and charts the screen shows, from the same shared
+ * column definitions, cell renderers and chart components, so the two can never
+ * disagree about what a figure means. Branding comes from the corporate
+ * template, as in the other print layouts.
+ *
+ * The charts are the live components rather than captured images — this app
+ * never sets Tailwind's `dark` class, so they render light here without the
+ * PNG-capture step the multi-order layout needs.
  */
 
-import type { SettleTolerance } from "@/types";
+import type { SettleResult, SettleTolerance, SettleWindow, TradeRecord } from "@/types";
 import type { SettleGroupRow } from "@/tca/settleAggregate";
 import { settleWindowLabel } from "@/tca/settle";
 import { useCorporateTemplate } from "@/hooks/useCorporateTemplate";
@@ -18,22 +22,38 @@ import {
   type SettleColumnId,
   type SettleTableRow,
 } from "./SettleOrderTable";
+import { SettleAlgoDistribution } from "./SettleAlgoDistribution";
+import { SettleSpreadScatter } from "./SettleSpreadScatter";
+
+/** The two charted windows, in the order the report reads them. */
+const SETTLE_WINDOWS: ReadonlyArray<Exclude<SettleWindow, "unassigned">> = ["3pm", "4pm"];
 
 interface SettlePrintLayoutProps {
   windowSummary: SettleGroupRow[];
   bySymbol: SettleGroupRow[];
+  bySymbolAlgo: SettleGroupRow[];
   rows: SettleTableRow[];
   visibleColumns: SettleColumnId[];
   tolerance: SettleTolerance;
+  /** Chart inputs — the print view renders the live chart components. */
+  trades: TradeRecord[];
+  results: SettleResult[];
+  tickSizeFor: (bbgSymbol: string) => number | null;
+  resolveSymbol: (ric: string) => string;
   onBack: () => void;
 }
 
 export function SettlePrintLayout({
   windowSummary,
   bySymbol,
+  bySymbolAlgo,
   rows,
   visibleColumns,
   tolerance,
+  trades,
+  results,
+  tickSizeFor,
+  resolveSymbol,
   onBack,
 }: SettlePrintLayoutProps) {
   const { logoDataUrl, disclaimerText, reportTitle, contactName, contactEmail, contactPhone } =
@@ -115,7 +135,27 @@ export function SettlePrintLayout({
         </div>
 
         <PrintGroupTable title="By Settle Window" rows={windowSummary} showWindowColumn={false} />
+
+        {/* ── Charts ─────────────────────────────────────────────────────── */}
+        {SETTLE_WINDOWS.map((w) => (
+          <div key={`algo-${w}`} className="break-inside-avoid">
+            <SettleAlgoDistribution window={w} trades={trades} results={results} />
+          </div>
+        ))}
+        {SETTLE_WINDOWS.map((w) => (
+          <div key={`spread-${w}`} className="break-inside-avoid">
+            <SettleSpreadScatter
+              window={w}
+              trades={trades}
+              results={results}
+              tickSizeFor={tickSizeFor}
+              resolveSymbol={resolveSymbol}
+            />
+          </div>
+        ))}
+
         <PrintGroupTable title="By Instrument" rows={bySymbol} showWindowColumn />
+        <PrintGroupTable title="By Instrument & Algo" rows={bySymbolAlgo} showWindowColumn showAlgoColumn />
 
         {/* ── Order detail ───────────────────────────────────────────────── */}
         <div className="break-inside-avoid">
@@ -169,14 +209,24 @@ function PrintGroupTable({
   title,
   rows,
   showWindowColumn,
+  showAlgoColumn = false,
 }: {
   title: string;
   rows: SettleGroupRow[];
   showWindowColumn: boolean;
+  showAlgoColumn?: boolean;
 }) {
   if (rows.length === 0) return null;
   const headers = showWindowColumn
-    ? ["Window", "Instrument", "# Orders", "Total Qty", "Avg Slip (bps)", "Total Slip"]
+    ? [
+        "Window",
+        "Instrument",
+        ...(showAlgoColumn ? ["Algo"] : []),
+        "# Orders",
+        "Total Qty",
+        "Avg Slip (bps)",
+        "Total Slip",
+      ]
     : ["Window", "# Orders", "Total Qty", "Avg Slip (bps)", "Total Slip", "Benchmarked"];
 
   return (
@@ -201,7 +251,7 @@ function PrintGroupTable({
           <tbody className="divide-y divide-gray-100 text-gray-700">
             {rows.map((row, i) => (
               <tr
-                key={`${row.window}|${row.key}`}
+                key={`${row.window}|${row.key}|${row.algo ?? ""}`}
                 className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}
               >
                 <td className="px-2 py-1.5 font-medium whitespace-nowrap">
@@ -210,6 +260,11 @@ function PrintGroupTable({
                 {showWindowColumn && (
                   <td className="px-2 py-1.5 text-right font-medium whitespace-nowrap">
                     {row.key}
+                  </td>
+                )}
+                {showAlgoColumn && (
+                  <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                    {row.algo ?? "—"}
                   </td>
                 )}
                 <td className="px-2 py-1.5 text-right tabular-nums">{row.count}</td>
