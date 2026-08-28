@@ -11,7 +11,7 @@ export interface IntradayBar {
 }
 
 // ── Analysis mode ─────────────────────────────────────────────────────────────
-export type TCAMode = "multi" | "single";
+export type TCAMode = "multi" | "single" | "settle";
 
 // ── Raw normalized trade record ──────────────────────────────────────────────
 export interface TradeRecord {
@@ -148,6 +148,60 @@ export interface ParentOrderSummary {
   currency: string;
   /** Raw market price 1 minute after the parent order's last fill (from Bloomberg). */
   reversion1m_price: number | null;
+}
+
+// ── Target-settle report (Allianz) ────────────────────────────────────────────
+
+/** Which settlement print an order was working into. */
+export type SettleWindow = "3pm" | "4pm" | "unassigned";
+
+/** How near a settle instant an order's last fill must land to count. */
+export interface SettleTolerance {
+  /** Minutes before the settle instant that still qualify. */
+  beforeMin: number;
+  /** Minutes after. Smaller than beforeMin by default: orders finish into a
+   *  settle, and only rarely well past it. */
+  afterMin: number;
+}
+
+/** Where a benchmark price came from, for display and for caveating fallbacks. */
+export type SettleSource =
+  /** Official settle from PX_SETTLE_ACTUAL (or a named fallback field). */
+  | "settle"
+  /** Last TRADE print before 16:00:00 NY. */
+  | "print";
+
+/** One benchmark, shared by every order on the same symbol, date and window. */
+export interface SettleBenchmark {
+  price: number | null;
+  source: SettleSource;
+  /** Bloomberg field that answered, e.g. "PX_SETTLE_ACTUAL" — null for prints. */
+  field: string | null;
+  /** Timestamp of the print used; null for official settles. */
+  printTime: Date | null;
+}
+
+/** Per-order result for the target-settle report. */
+export interface SettleResult {
+  orderId: string;
+  window: SettleWindow;
+  /** NY calendar date of lastFillTime — the date the benchmark is taken from. */
+  nyDate: string;
+  benchmark: number | null;
+  source: SettleSource | null;
+  field: string | null;
+  /** Slippage vs the settle benchmark. Positive is a cost, as everywhere else. */
+  slip_bps: number | null;
+  slip_price: number | null;
+  slip_usd: number | null;
+  currency: string;
+  /**
+   * True when this order sits in the 3PM bucket but its contract does not settle
+   * at 15:00 ET — PX_SETTLE_ACTUAL returns that contract's own settle, which for
+   * ES is 16:00 and for CL is 14:30. The number is real; the heading would
+   * otherwise imply a 3PM print it is not.
+   */
+  settleTimeMismatch: boolean;
 }
 
 // ── Multi-order aggregation types ─────────────────────────────────────────────
@@ -343,6 +397,17 @@ export interface TCAStore {
   /** Multiplier applied to every fill price from the file before comparing with Bloomberg prices.
    *  null = 1 (no scaling). Use 0.01 if file prices are 100× Bloomberg, 100 for the reverse. */
   singleOrderPriceScale: number | null;
+  /** Benchmarks for the target-settle report, keyed "symbol|nyDate|window". */
+  settleBenchmarks: Record<string, SettleBenchmark>;
+  /** Raw reference fields per Bloomberg symbol, for point value and currency. */
+  settleReference: Record<string, Record<string, unknown>>;
+  setSettleData: (
+    benchmarks: Record<string, SettleBenchmark>,
+    reference: Record<string, Record<string, unknown>>,
+  ) => void;
+  /** Bucketing tolerance for the target-settle report. */
+  settleTolerance: SettleTolerance;
+  setSettleTolerance: (t: SettleTolerance) => void;
   /** True when symbol mappings changed since the last Bloomberg fetch — drives the
    *  "refresh data to pick up new mappings" banner on the dashboard. */
   symbolMapDirty: boolean;

@@ -67,7 +67,7 @@ const FIVE_MIN_MS = 5 * ONE_MIN_MS;
  *   Browser reads as: 14:40 EDT = 18:40 UTC  →  1 h behind actual UTC
  *   Correction: +1 h  →  "2026-05-28T19:40:00.000Z"  ✓
  */
-function shiftToUtc<T extends { time: string }>(
+export function shiftToUtc<T extends { time: string }>(
   items: T[],
   requestedStartUtcMs: number,
 ): T[] {

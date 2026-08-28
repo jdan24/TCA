@@ -11,6 +11,7 @@
  *   GET /intraday-bars     → IntradayBar[]
  *   GET /reference         → Record<string, unknown>
  *   GET /bid-ask-ticks     → { source, pairs: BridgeTick[] }
+ *   GET /settle            → { settle, field, date }
  */
 
 import type { BidAskSource, IntradayBar } from "@/types";
@@ -212,5 +213,34 @@ export async function fetchTradeTicks(
     "/trade-ticks",
     { security, start, end },
     [],
+  );
+}
+
+/** Raw /settle payload. */
+export interface SettleResponse {
+  settle: number | null;
+  /** Which Bloomberg field answered — PX_SETTLE_ACTUAL, or a named fallback. */
+  field: string | null;
+  date: string;
+}
+
+/**
+ * GET /settle — official settlement price for a security on a calendar date.
+ *
+ * Backs the 3PM window of the target-settle report. The bridge issues a
+ * HistoricalDataRequest, because PX_SETTLE_ACTUAL_RT on a reference request
+ * returns the latest settle whatever date is asked for.
+ *
+ * @param security  Full Bloomberg id, e.g. "FVU6 Comdty"
+ * @param date      "YYYY-MM-DD" — the NY calendar date of the order
+ */
+export async function fetchSettlePrice(
+  security: string,
+  date: string,
+): Promise<SettleResponse> {
+  return bridgeGet<SettleResponse>(
+    "/settle",
+    { security, date },
+    { settle: null, field: null, date },
   );
 }

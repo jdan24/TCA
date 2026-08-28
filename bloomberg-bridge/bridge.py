@@ -427,6 +427,64 @@ def _get_reference_data(ticker: str, fields: list[str]) -> dict[str, Any]:
         session.stop()
 
 
+def _get_historical_field(
+    ticker: str,
+    field: str,
+    date: str,
+) -> float | None:
+    """
+    HistoricalDataRequest for one field on one day.
+
+    This is how a *past* date's settle is obtained. PX_SETTLE_ACTUAL_RT on a
+    ReferenceDataRequest returns the latest settle regardless of the date asked
+    for, so a multi-day report would score every order against the same price.
+
+    `date` is YYYY-MM-DD; Bloomberg wants YYYYMMDD.
+    Returns None when the security did not trade that day (holiday, expired
+    contract) or the field is not valid for it — callers show N/A rather than
+    substituting a neighbouring day's price.
+    """
+    session = _create_session()
+    try:
+        svc = session.getService("//blp/refdata")
+        req = svc.createRequest("HistoricalDataRequest")
+        req.append("securities", ticker)
+        req.append("fields", field)
+        compact = date.replace("-", "")
+        req.set("startDate", compact)
+        req.set("endDate", compact)
+        req.set("periodicitySelection", "DAILY")
+        # Non-trading days must come back empty rather than being filled in with
+        # the previous close, which would silently become the benchmark.
+        req.set("nonTradingDayFillOption", "ACTIVE_DAYS_ONLY")
+        session.sendRequest(req)
+
+        for msg in _drain(session):
+            if not msg.hasElement("securityData"):
+                continue
+            sec = msg.getElement("securityData")
+
+            if sec.hasElement("securityError"):
+                err = sec.getElement("securityError").getElementAsString("message")
+                log.warning("Bloomberg security error for %s: %s", ticker, err)
+                return None
+
+            if not sec.hasElement("fieldData"):
+                continue
+            rows = sec.getElement("fieldData")
+            for i in range(rows.numValues()):
+                row = rows.getValueAsElement(i)
+                if not row.hasElement(field):
+                    continue
+                try:
+                    return float(row.getElement(field).getValue())
+                except Exception:
+                    return None
+        return None
+    finally:
+        session.stop()
+
+
 def _get_intraday_bars(
     ticker: str,
     start: datetime,
@@ -708,6 +766,37 @@ def reference(security: str, fields: str = "HIST_VOL_30D,VOLUME_AVG_30D,FUT_CONT
     ticker = resolve_ticker(security)
     field_list = [f.strip() for f in fields.split(",") if f.strip()]
     return _get_reference_data(ticker, field_list)
+
+
+@app.get("/settle")
+def settle(security: str, date: str):
+    """
+    Official settlement price for a security on a given date.
+
+    Backs the 3PM window of the target-settle report. Tries PX_SETTLE_ACTUAL
+    first and falls back through PX_SETTLE to PX_LAST, reporting which field
+    answered so the UI can caveat a fallback rather than presenting all three
+    as equivalent.
+
+    Note this returns the contract's *own* settle, at whatever time it settles:
+    15:00 ET for CME Treasuries, but 16:00 for ES and 14:30 for CL. The SPA
+    flags rows where that differs from the window they were bucketed into.
+
+    Query params:
+      security  bare ticker or full Bloomberg id, e.g. 'FVU6 Comdty'
+      date      YYYY-MM-DD
+
+    Returns {settle, field, date}; settle is null on a non-trading day or when
+    no field is available, which callers render as N/A.
+    """
+    _require_blpapi()
+    ticker = resolve_ticker(security)
+    for field in ("PX_SETTLE_ACTUAL", "PX_SETTLE", "PX_LAST"):
+        value = _get_historical_field(ticker, field, date)
+        if value is not None:
+            return {"settle": value, "field": field, "date": date}
+    log.info("No settle available for %s on %s", ticker, date)
+    return {"settle": None, "field": None, "date": date}
 
 
 def _infer_min_tick(bars: list[dict[str, Any]]) -> float | None:

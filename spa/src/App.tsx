@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { enrichAllTrades, enrichSingleOrder, type EnrichProgress } from "@/bloomberg/enrichmentService";
+import { enrichSettleBenchmarks } from "@/bloomberg/settleService";
 import { Header } from "@/components/layout/Header";
 import { SymbolRefreshBanner } from "@/components/layout/SymbolRefreshBanner";
 import { FileDropZone } from "@/components/upload/FileDropZone";
@@ -7,6 +8,7 @@ import { ImportWizardMulti } from "@/components/upload/ImportWizardMulti";
 import { ModeSelector } from "@/components/upload/ModeSelector";
 import { Dashboard } from "@/components/dashboard/Dashboard";
 import { SingleOrderDashboard } from "@/components/dashboard/single/SingleOrderDashboard";
+import { SettleDashboard } from "@/components/dashboard/settle/SettleDashboard";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { CorporateTemplateProvider } from "@/hooks/useCorporateTemplate";
 import { useTCAStore } from "@/store/useTCAStore";
@@ -25,6 +27,9 @@ function App() {
   const setResults = useTCAStore((s) => s.setResults);
   const setAllEnrichment        = useTCAStore((s) => s.setAllEnrichment);
   const setSingleOrderFetchWindow = useTCAStore((s) => s.setSingleOrderFetchWindow);
+  const settleBenchmarks  = useTCAStore((s) => s.settleBenchmarks);
+  const setSettleData     = useTCAStore((s) => s.setSettleData);
+  const settleTolerance   = useTCAStore((s) => s.settleTolerance);
   const symbolMapDirty = useTCAStore((s) => s.symbolMapDirty);
   const setSymbolMapDirty = useTCAStore((s) => s.setSymbolMapDirty);
   const reset = useTCAStore((s) => s.reset);
@@ -93,6 +98,20 @@ function App() {
     }
   }, [scaledTrades, enrichment, symbolMap.mappings, setResults]);
 
+  async function handleFetchSettle() {
+    if (rawTrades.length === 0 || !bloombergConnected || enrichProgress !== null) return;
+    setEnrichProgress({ done: 0, total: 1 });
+    const { benchmarks, reference } = await enrichSettleBenchmarks(
+      scaledTrades,
+      settleTolerance,
+      symbolMap.resolve,
+      setEnrichProgress,
+    );
+    setSettleData(benchmarks, reference);
+    setSymbolMapDirty(false);
+    setEnrichProgress(null);
+  }
+
   async function handleFetchBloomberg() {
     if (rawTrades.length === 0 || !bloombergConnected || enrichProgress !== null) return;
     setEnrichProgress({ done: 0, total: mode === "single" ? 1 : rawTrades.length });
@@ -127,9 +146,15 @@ function App() {
 
   const enrichedCount = Object.keys(enrichment).length;
 
-  /** FileDropZone callback: single-order → straight to store; multi → open wizard. */
+  /**
+   * FileDropZone callback: single-order goes straight to the store; the two
+   * portfolio modes open the import wizard first.
+   *
+   * Settle mode needs the wizard as much as multi does — resolving RICs to
+   * Bloomberg tickers is what makes the settle lookup possible at all.
+   */
   function handleFileComplete(trades: TradeRecord[]) {
-    if (mode === "multi") {
+    if (mode === "multi" || mode === "settle") {
       setWizardTrades(trades);
     } else {
       setRawTrades(trades);
@@ -144,7 +169,9 @@ function App() {
       {/* ── Refresh prompt after symbol mappings change ───────────────────── */}
       {symbolMapDirty && rawTrades.length > 0 && wizardTrades === null && (
         <SymbolRefreshBanner
-          onRefresh={() => { void handleFetchBloomberg(); }}
+          onRefresh={() => {
+            void (mode === "settle" ? handleFetchSettle() : handleFetchBloomberg());
+          }}
           onDismiss={() => setSymbolMapDirty(false)}
           disabled={!bloombergConnected || enrichProgress !== null}
           busy={enrichProgress !== null}
@@ -171,6 +198,17 @@ function App() {
           <p className="text-sm text-gray-400 dark:text-gray-600">
             Upload a CSV, XLSX, or FIX execution report to begin analysis
           </p>
+        </main>
+      ) : mode === "settle" ? (
+        <main className="flex-1 overflow-auto">
+          <SettleDashboard
+            trades={scaledTrades}
+            bloombergConnected={bloombergConnected}
+            benchmarkCount={Object.keys(settleBenchmarks).length}
+            progress={enrichProgress}
+            onFetch={() => { void handleFetchSettle(); }}
+            onReset={reset}
+          />
         </main>
       ) : mode === "single" ? (
         <main className="flex-1 overflow-auto">

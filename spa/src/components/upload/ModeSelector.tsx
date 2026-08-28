@@ -1,9 +1,10 @@
 /**
- * ModeSelector — two-card landing screen shown before file upload.
+ * ModeSelector — landing screen shown before file upload.
  *
  * Lets the user choose between:
  *   • Multi-order TCA (aggregate analytics across a portfolio of orders)
  *   • Single-order TCA (slice-level analysis for one parent order)
+ *   • Allianz Target Settle (orders measured against the 3PM / 4PM prints)
  *
  * The selected card gains a blue ring; the choice is persisted in the store.
  */
@@ -16,11 +17,11 @@ export function ModeSelector() {
   const setMode = useTCAStore((s) => s.setMode);
 
   return (
-    <div className="w-full max-w-xl">
+    <div className="w-full max-w-3xl">
       <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-3">
         Select analysis mode
       </p>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <ModeCard
           mode="single"
           active={mode === "single"}
@@ -44,6 +45,19 @@ export function ModeSelector() {
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round"
                 d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h1.5C5.496 19.5 6 18.996 6 18.375m-3.75.125A1.125 1.125 0 012.25 18.375V15m0 3.375v-3.375m0 0a1.125 1.125 0 011.125-1.125h1.5c.621 0 1.125.504 1.125 1.125M2.25 15V6.75m0 0A1.125 1.125 0 013.375 5.625h1.5C5.496 5.625 6 6.129 6 6.75m-3.75 0v8.25M6 6.75h12M6 6.75V18.375M18 6.75v11.625M18 6.75A1.125 1.125 0 0116.875 5.625h-1.5C14.754 5.625 14.25 6.129 14.25 6.75M18 18.375c0 .621-.504 1.125-1.125 1.125h-1.5A1.125 1.125 0 0114.25 18.375V6.75" />
+            </svg>
+          }
+        />
+        <ModeCard
+          mode="settle"
+          active={mode === "settle"}
+          onSelect={setMode}
+          title="Allianz — Target Settle"
+          subtitle="Orders measured against the 3PM and 4PM settlement prints"
+          icon={
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           }
         />
