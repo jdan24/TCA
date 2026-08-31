@@ -64,6 +64,22 @@ export function fmtUsd(
   return `${v > 0 ? "+" : v < 0 ? "-" : ""}${body}`;
 }
 
+/**
+ * Colour class for a signed slippage figure — bps or cash.
+ *
+ * Positive is a cost everywhere in this app, so favourable (<= 0) is green and a
+ * cost is red. Shared rather than written out at each call site because the
+ * screen tables and the print layouts had drifted apart once already: print was
+ * rendering these figures as plain black text.
+ *
+ * `dark` adds the dark-mode variants the screen tables use. The print layouts
+ * pass false — they render for paper and deliberately carry no dark: classes.
+ */
+export function slipToneClass(v: number, dark = true): string {
+  if (v <= 0) return dark ? "text-green-600 dark:text-green-400" : "text-green-600";
+  return dark ? "text-red-500 dark:text-red-400" : "text-red-500";
+}
+
 /** Format a nullable vol-adjusted IS, e.g. "+0.27σ" / "-1.40σ" / "N/A". */
 export function fmtSigma(v: number | null | undefined, decimals = 2): string {
   if (v === null || v === undefined || !isFinite(v)) return "N/A";

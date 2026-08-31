@@ -14,7 +14,13 @@ import type { SettleResult, TradeRecord } from "@/types";
 import { settleWindowLabel } from "@/tca/settle";
 import { getTreasuryPrecision, decToTreasuryFrac } from "@/tca/treasuryFrac";
 import { usePortalMenu } from "@/hooks/usePortalMenu";
-import { ChartCard, EmptyState, fmtBps, fmtUsd } from "@/components/dashboard/dashboardUtils";
+import {
+  ChartCard,
+  EmptyState,
+  fmtBps,
+  fmtUsd,
+  slipToneClass,
+} from "@/components/dashboard/dashboardUtils";
 
 // ── Row shape ─────────────────────────────────────────────────────────────────
 
@@ -135,13 +141,7 @@ function NaCell() {
 function SignedBps({ v }: { v: number | null }) {
   if (v === null) return <NaCell />;
   return (
-    <span
-      className={`tabular-nums font-medium ${
-        v <= 0 ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400"
-      }`}
-    >
-      {fmtBps(v)}
-    </span>
+    <span className={`tabular-nums font-medium ${slipToneClass(v)}`}>{fmtBps(v)}</span>
   );
 }
 
@@ -249,13 +249,7 @@ export function renderSettleCell(row: SettleTableRow, id: SettleColumnId) {
       return r.slip_price === null ? (
         <NaCell />
       ) : (
-        <span
-          className={`tabular-nums font-mono ${
-            r.slip_price <= 0
-              ? "text-green-600 dark:text-green-400"
-              : "text-red-500 dark:text-red-400"
-          }`}
-        >
+        <span className={`tabular-nums font-mono ${slipToneClass(r.slip_price)}`}>
           {r.slip_price > 0 ? "+" : ""}
           {r.slip_price.toFixed(6).replace(/0+$/, "").replace(/\.$/, "")}
         </span>
@@ -265,11 +259,7 @@ export function renderSettleCell(row: SettleTableRow, id: SettleColumnId) {
         <NaCell />
       ) : (
         <span
-          className={`tabular-nums font-medium whitespace-nowrap ${
-            r.slip_usd <= 0
-              ? "text-green-600 dark:text-green-400"
-              : "text-red-500 dark:text-red-400"
-          }`}
+          className={`tabular-nums font-medium whitespace-nowrap ${slipToneClass(r.slip_usd)}`}
         >
           {fmtUsd(r.slip_usd, r.currency)}
         </span>

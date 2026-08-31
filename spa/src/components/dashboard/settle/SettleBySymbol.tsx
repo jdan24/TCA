@@ -12,7 +12,13 @@
 
 import type { SettleGroupRow } from "@/tca/settleAggregate";
 import { settleWindowLabel } from "@/tca/settle";
-import { ChartCard, EmptyState, fmtBps, fmtUsd } from "@/components/dashboard/dashboardUtils";
+import {
+  ChartCard,
+  EmptyState,
+  fmtBps,
+  fmtUsd,
+  slipToneClass,
+} from "@/components/dashboard/dashboardUtils";
 
 interface SettleGroupTableProps {
   rows: SettleGroupRow[];
@@ -133,13 +139,7 @@ function SettleGroupTable({
                   {row.avgSlip_bps === null ? (
                     <NaCell />
                   ) : (
-                    <span
-                      className={`tabular-nums font-medium ${
-                        row.avgSlip_bps <= 0
-                          ? "text-green-600 dark:text-green-400"
-                          : "text-red-500 dark:text-red-400"
-                      }`}
-                    >
+                    <span className={`tabular-nums font-medium ${slipToneClass(row.avgSlip_bps)}`}>
                       {fmtBps(row.avgSlip_bps)}
                     </span>
                   )}
@@ -149,11 +149,7 @@ function SettleGroupTable({
                     <NaCell />
                   ) : (
                     <span
-                      className={`tabular-nums font-medium whitespace-nowrap ${
-                        row.totalSlip_usd <= 0
-                          ? "text-green-600 dark:text-green-400"
-                          : "text-red-500 dark:text-red-400"
-                      }`}
+                      className={`tabular-nums font-medium whitespace-nowrap ${slipToneClass(row.totalSlip_usd)}`}
                     >
                       {fmtUsd(row.totalSlip_usd, row.currency ?? "USD")}
                     </span>

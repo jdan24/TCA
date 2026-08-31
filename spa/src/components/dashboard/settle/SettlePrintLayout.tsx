@@ -22,7 +22,7 @@ import type { SettleResult, SettleTolerance, SettleWindow, TradeRecord } from "@
 import type { SettleGroupRow } from "@/tca/settleAggregate";
 import { settleWindowLabel } from "@/tca/settle";
 import { useCorporateTemplate } from "@/hooks/useCorporateTemplate";
-import { fmtBps, fmtUsd } from "@/components/dashboard/dashboardUtils";
+import { fmtBps, fmtUsd, slipToneClass } from "@/components/dashboard/dashboardUtils";
 import {
   renderSettleCell,
   SETTLE_COLUMNS,
@@ -244,7 +244,14 @@ export function SettlePrintLayout({
   );
 }
 
-/** Print-friendly rendering of either grouping — no dark-mode classes. */
+/**
+ * Print-friendly rendering of any of the three groupings — no dark-mode classes.
+ *
+ * Cells mirror the screen tables exactly: the same green/red tone on the signed
+ * figures via slipToneClass, the same amber marker on a contract that does not
+ * settle at 15:00 ET, and the same suppression of Avg Slip on the Unassigned
+ * row, whose orders have no benchmark to be measured against.
+ */
 function PrintGroupTable({
   title,
   rows,
@@ -296,10 +303,20 @@ function PrintGroupTable({
               >
                 <td className="px-2 py-1.5 font-medium whitespace-nowrap">
                   {settleWindowLabel(row.window)}
+                  {/* The window summary carries the count; the per-instrument
+                      tables mark the row, matching each screen table. */}
+                  {!showWindowColumn && row.flagged > 0 && (
+                    <span className="ml-1.5 text-[9px] text-amber-600">
+                      &#9888; {row.flagged}
+                    </span>
+                  )}
                 </td>
                 {showWindowColumn && (
                   <td className="px-2 py-1.5 text-right font-medium whitespace-nowrap">
                     {row.key}
+                    {row.flagged > 0 && (
+                      <span className="ml-1 text-amber-600">&#9888;</span>
+                    )}
                   </td>
                 )}
                 {showAlgoColumn && (
@@ -312,12 +329,22 @@ function PrintGroupTable({
                   {row.totalQty.toLocaleString()}
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums">
-                  {row.avgSlip_bps === null ? "—" : fmtBps(row.avgSlip_bps)}
+                  {row.window === "unassigned" || row.avgSlip_bps === null ? (
+                    "—"
+                  ) : (
+                    <span className={`font-medium ${slipToneClass(row.avgSlip_bps, false)}`}>
+                      {fmtBps(row.avgSlip_bps)}
+                    </span>
+                  )}
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">
-                  {row.totalSlip_usd === null
-                    ? "—"
-                    : fmtUsd(row.totalSlip_usd, row.currency ?? "USD")}
+                  {row.totalSlip_usd === null ? (
+                    "—"
+                  ) : (
+                    <span className={`font-medium ${slipToneClass(row.totalSlip_usd, false)}`}>
+                      {fmtUsd(row.totalSlip_usd, row.currency ?? "USD")}
+                    </span>
+                  )}
                 </td>
                 {!showWindowColumn && (
                   <td className="px-2 py-1.5 text-right tabular-nums">
