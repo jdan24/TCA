@@ -14,7 +14,7 @@
  * Layout:
  *   Toolbar (counts, tolerance, fetch, print, reset)
  *   By Settle Window
- *   3PM / 4PM Slippage by Algo
+ *   3PM / 4PM Slippage by Spread Cost & Algo
  *   3PM / 4PM Spread Cost vs Slippage
  *   By Instrument
  *   By Instrument & Algo
@@ -311,7 +311,14 @@ export function SettleDashboard({
       <SettleWindowSummary rows={windowSummary} />
 
       {SETTLE_WINDOWS.map((w) => (
-        <SettleAlgoDistribution key={w} window={w} trades={trades} results={results} />
+        <SettleAlgoDistribution
+          key={w}
+          window={w}
+          trades={trades}
+          results={results}
+          tickSizeFor={tickSizeFor}
+          resolveSymbol={resolveSymbol}
+        />
       ))}
 
       {SETTLE_WINDOWS.map((w) => (

@@ -139,7 +139,13 @@ export function SettlePrintLayout({
         {/* ── Charts ─────────────────────────────────────────────────────── */}
         {SETTLE_WINDOWS.map((w) => (
           <div key={`algo-${w}`} className="break-inside-avoid">
-            <SettleAlgoDistribution window={w} trades={trades} results={results} />
+            <SettleAlgoDistribution
+              window={w}
+              trades={trades}
+              results={results}
+              tickSizeFor={tickSizeFor}
+              resolveSymbol={resolveSymbol}
+            />
           </div>
         ))}
         {SETTLE_WINDOWS.map((w) => (
