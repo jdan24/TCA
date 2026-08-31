@@ -15,7 +15,6 @@
  *   Toolbar (counts, tolerance, fetch, print, reset)
  *   By Settle Window
  *   3PM / 4PM Slippage by Spread Cost & Algo
- *   3PM / 4PM Spread Cost vs Slippage
  *   By Instrument
  *   By Instrument & Algo
  *   Order Detail
@@ -43,7 +42,6 @@ import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { useTCAStore } from "@/store/useTCAStore";
 import { SettleWindowSummary } from "./SettleWindowSummary";
 import { SettleAlgoDistribution } from "./SettleAlgoDistribution";
-import { SettleSpreadScatter } from "./SettleSpreadScatter";
 import { SettleBySymbol, SettleBySymbolAlgo } from "./SettleBySymbol";
 import {
   buildSettleRows,
@@ -312,17 +310,6 @@ export function SettleDashboard({
 
       {SETTLE_WINDOWS.map((w) => (
         <SettleAlgoDistribution
-          key={w}
-          window={w}
-          trades={trades}
-          results={results}
-          tickSizeFor={tickSizeFor}
-          resolveSymbol={resolveSymbol}
-        />
-      ))}
-
-      {SETTLE_WINDOWS.map((w) => (
-        <SettleSpreadScatter
           key={w}
           window={w}
           trades={trades}

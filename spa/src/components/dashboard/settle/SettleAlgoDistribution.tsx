@@ -18,6 +18,16 @@
  * comparison and the "was working it worth it" reading at once, and the per-algo
  * averages sit in the legend rather than as marks on a busy plot.
  *
+ * A dashed grey line spans each product's block at that product's spread cost.
+ * It does two jobs: it shows where the red/green boundary sits, and its start
+ * and stop mark where one product's columns give way to the next.
+ *
+ * The line is drawn at the block's *mean* spread cost, since a product's spread
+ * cost drifts slightly day to day as the benchmark price moves under a fixed
+ * tick. Each dot is still coloured against its own order's spread, so an order
+ * inside that drift can sit a hair the wrong side of the line — exact per order
+ * was preferred to a line that is cosmetically always right.
+ *
  * Orders on a contract with no known tick size have no spread cost and so cannot
  * be placed; they are excluded and counted in the subtitle rather than dropped
  * silently.
@@ -42,12 +52,15 @@ import { settleWindowLabel } from "@/tca/settle";
 import { toGenericTicker } from "@/tca/genericTicker";
 import { tickSpreadBps } from "@/tca/tickSize";
 import { NO_ALGO_LABEL } from "@/tca/settleAggregate";
+import { useChartAlgoFilter } from "@/hooks/useChartAlgoFilter";
+import { AlgoFilterMenu } from "@/components/dashboard/AlgoFilterMenu";
 import { ChartCard, EmptyState, fmtBps, safeAvg } from "@/components/dashboard/dashboardUtils";
 
 type SettledWindow = Exclude<SettleWindow, "unassigned">;
 
 const BEAT_COLOR = "#10b981"; // emerald — slippage under the full spread cost
 const MISS_COLOR = "#ef4444"; // red     — paid more than a full tick
+const SPREAD_LINE_COLOR = "#94a3b8"; // slate — the product's full spread cost
 
 /**
  * Marker shapes, one per algo, assigned in the order the algos appear on the
@@ -115,7 +128,8 @@ interface ProductBlock {
   spread: number;
   /** How many algo columns the block covers — its width in the band row. */
   span: number;
-  /** Right-hand edge, for the divider between blocks. */
+  /** First and last column index, for the spread line and the divider. */
+  start: number;
   end: number;
 }
 
@@ -194,6 +208,10 @@ export function SettleAlgoDistribution({
   tickSizeFor,
   resolveSymbol,
 }: SettleAlgoDistributionProps) {
+  // Each window's chart keeps its own algo selection — the two prints are read
+  // separately, so narrowing one should not silently narrow the other.
+  const algoFilter = useChartAlgoFilter(`settle-algo-${window}`, trades);
+
   const { pointsByAlgo, columns, blocks, legend, excluded, total } = useMemo(() => {
     const tradeById = new Map(trades.map((t) => [t.orderId, t]));
 
@@ -212,7 +230,7 @@ export function SettleAlgoDistribution({
     for (const r of results) {
       if (r.window !== window || r.slip_bps === null) continue;
       const trade = tradeById.get(r.orderId);
-      if (!trade) continue;
+      if (!trade || !algoFilter.includes(trade)) continue;
 
       const bbgSymbol = resolveSymbol(trade.symbol);
       const spread = tickSpreadBps(tickSizeFor(bbgSymbol), r.benchmark);
@@ -285,6 +303,7 @@ export function SettleAlgoDistribution({
         product,
         spread,
         span: end - start + 1,
+        start,
         end,
       });
     }
@@ -322,21 +341,26 @@ export function SettleAlgoDistribution({
       excluded: skipped,
       total: pts.length,
     };
-  }, [window, trades, results, tickSizeFor, resolveSymbol]);
+  }, [window, trades, results, tickSizeFor, resolveSymbol, algoFilter]);
 
   const title = `${settleWindowLabel(window)} — Slippage by Spread Cost & Algo`;
+
+  const actions = <AlgoFilterMenu filter={algoFilter} />;
 
   if (total === 0) {
     return (
       <ChartCard
         title={title}
         subtitle="Slippage vs the settle benchmark, by product spread cost then algo"
+        actions={actions}
       >
         <EmptyState
           message={
-            excluded > 0
-              ? `No tick size known for the ${excluded} benchmarked order${excluded !== 1 ? "s" : ""} in this window`
-              : `No benchmarked orders in the ${settleWindowLabel(window)} window`
+            algoFilter.isNarrowed
+              ? "No orders match the selected algos"
+              : excluded > 0
+                ? `No tick size known for the ${excluded} benchmarked order${excluded !== 1 ? "s" : ""} in this window`
+                : `No benchmarked orders in the ${settleWindowLabel(window)} window`
           }
         />
       </ChartCard>
@@ -355,6 +379,7 @@ export function SettleAlgoDistribution({
         `${beatCount} of ${total} beat the full cost of their product's spread` +
         (excluded > 0 ? ` — ${excluded} excluded, no tick size known` : "")
       }
+      actions={actions}
     >
       <ResponsiveContainer width="100%" height={280}>
         <ScatterChart margin={{ top: 8, right: RIGHT_MARGIN, bottom: 8, left: 0 }}>
@@ -410,6 +435,21 @@ export function SettleAlgoDistribution({
             />
           ))}
 
+          {/* The product's full spread cost, spanning its block edge to edge:
+              the red/green boundary, and the extent of the product's columns. */}
+          {blocks.map((b) => (
+            <ReferenceLine
+              key={`spread-${b.product}`}
+              segment={[
+                { x: b.start - 0.5, y: b.spread },
+                { x: b.end + 0.5, y: b.spread },
+              ]}
+              stroke={SPREAD_LINE_COLOR}
+              strokeWidth={1.5}
+              strokeDasharray="4 3"
+            />
+          ))}
+
           {pointsByAlgo.map((g) => (
             <Scatter
               key={g.algo}
@@ -454,6 +494,20 @@ export function SettleAlgoDistribution({
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-full" style={{ background: MISS_COLOR }} />
           paid more than the spread
+        </span>
+        <span className="flex items-center gap-1.5">
+          <svg width="18" height="6" aria-hidden>
+            <line
+              x1="0"
+              y1="3"
+              x2="18"
+              y2="3"
+              stroke={SPREAD_LINE_COLOR}
+              strokeWidth="1.5"
+              strokeDasharray="4 3"
+            />
+          </svg>
+          that product&rsquo;s full 1-tick spread cost
         </span>
       </div>
     </ChartCard>

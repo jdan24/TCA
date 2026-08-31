@@ -9,6 +9,9 @@
  * The charts are the live components rather than captured images — this app
  * never sets Tailwind's `dark` class, so they render light here without the
  * PNG-capture step the multi-order layout needs.
+ *
+ * The root carries `settle-print`, which is what keeps colour on paper; see the
+ * note on the element itself.
  */
 
 import type { SettleResult, SettleTolerance, SettleWindow, TradeRecord } from "@/types";
@@ -23,7 +26,6 @@ import {
   type SettleTableRow,
 } from "./SettleOrderTable";
 import { SettleAlgoDistribution } from "./SettleAlgoDistribution";
-import { SettleSpreadScatter } from "./SettleSpreadScatter";
 
 /** The two charted windows, in the order the report reads them. */
 const SETTLE_WINDOWS: ReadonlyArray<Exclude<SettleWindow, "unassigned">> = ["3pm", "4pm"];
@@ -69,7 +71,11 @@ export function SettlePrintLayout({
         : `${dates[0]} to ${dates[dates.length - 1]}`;
 
   return (
-    <div className="bg-white text-gray-900">
+    // settle-print: forces background colours through to paper — see index.css.
+    // Without it the browser drops every CSS background when printing, which
+    // takes the chart legends' colour swatches, the striped table rows and the
+    // grey panels with it.
+    <div className="settle-print bg-white text-gray-900">
       {/* ── Screen-only controls ─────────────────────────────────────────── */}
       <div className="print:hidden sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-gray-200 bg-white px-6 py-3">
         <p className="text-sm font-semibold">Print Layout — Target Settle</p>
@@ -148,18 +154,6 @@ export function SettlePrintLayout({
             />
           </div>
         ))}
-        {SETTLE_WINDOWS.map((w) => (
-          <div key={`spread-${w}`} className="break-inside-avoid">
-            <SettleSpreadScatter
-              window={w}
-              trades={trades}
-              results={results}
-              tickSizeFor={tickSizeFor}
-              resolveSymbol={resolveSymbol}
-            />
-          </div>
-        ))}
-
         <PrintGroupTable title="By Instrument" rows={bySymbol} showWindowColumn />
         <PrintGroupTable title="By Instrument & Algo" rows={bySymbolAlgo} showWindowColumn showAlgoColumn />
 
