@@ -2,9 +2,13 @@
  * ExecutionTimeline — fill prices overlaid on the continuous market last price.
  *
  * Gray line:   Bloomberg last-traded price tick stream over [orderTime, lastFillTime]
- * Colored dots: individual fill prices (blue=BUY, red=SELL), size ∝ qty
+ * Colored dots: fill prices (blue=BUY, red=SELL), size ∝ qty
  * Gray dashed:  arrival price reference line
  * Clickable legend to mute/unmute each series.
+ *
+ * Above BIN_THRESHOLD fills the dots are time-binned (see tca/fillBins.ts):
+ * several hundred markers overlap into a solid band that shows trading happened
+ * but not where the weight was. Below it, one dot per fill as before.
  */
 
 import { useState } from "react";
@@ -20,6 +24,7 @@ import {
   YAxis,
 } from "recharts";
 import type { TradeRecord } from "@/types";
+import { binFills, binSubtitleNote, shouldBinFills } from "@/tca/fillBins";
 import { ChartCard, EmptyState } from "@/components/dashboard/dashboardUtils";
 
 interface ExecutionTimelineProps {
@@ -39,6 +44,10 @@ interface FillPoint {
   fillPrice: number;
   qty: number;
   label: string;
+  /** Set on a binned marker: how many fills it stands for, and the slice it covers. */
+  binCount?: number;
+  binStart?: number;
+  binEnd?: number;
 }
 
 /**
@@ -53,6 +62,9 @@ interface ChartRow {
   fillPrice?: number;
   qty?: number;
   label?: string;
+  binCount?: number;
+  binStart?: number;
+  binEnd?: number;
 }
 
 function fmtTime(ms: number): string {
@@ -90,12 +102,27 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime
     });
   }
 
-  const fillPoints: FillPoint[] = trades.map((t) => ({
-    t:         t.lastFillTime.getTime(),
-    fillPrice: t.avgFillPrice,
-    qty:       t.orderQty,
-    label:     t.orderId,
-  }));
+  // Bin only when the dots would otherwise overlap into a band; a smaller order
+  // keeps every fill individually addressable.
+  const binned = shouldBinFills(trades.length);
+  const bins = binned ? binFills(trades) : [];
+
+  const fillPoints: FillPoint[] = binned
+    ? bins.map((b) => ({
+        t:         b.t,
+        fillPrice: b.price,
+        qty:       b.qty,
+        label:     `${b.count} fill${b.count !== 1 ? "s" : ""}`,
+        binCount:  b.count,
+        binStart:  b.tStart,
+        binEnd:    b.tEnd,
+      }))
+    : trades.map((t) => ({
+        t:         t.lastFillTime.getTime(),
+        fillPrice: t.avgFillPrice,
+        qty:       t.orderQty,
+        label:     t.orderId,
+      }));
 
   const maxQty = Math.max(...fillPoints.map((p) => p.qty));
 
@@ -139,12 +166,25 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime
   // Single, time-sorted data array shared by both series (see ChartRow).
   const chartRows: ChartRow[] = [
     ...(marketTicks ?? []).map((mt): ChartRow => ({ t: mt.t, price: mt.price })),
-    ...fillPoints.map((fp): ChartRow => ({ t: fp.t, fillPrice: fp.fillPrice, qty: fp.qty, label: fp.label })),
+    ...fillPoints.map((fp): ChartRow => ({
+      t: fp.t,
+      fillPrice: fp.fillPrice,
+      qty: fp.qty,
+      label: fp.label,
+      ...(fp.binCount !== undefined && {
+        binCount: fp.binCount,
+        binStart: fp.binStart,
+        binEnd: fp.binEnd,
+      }),
+    })),
   ].sort((a, b) => a.t - b.t);
 
-  const subtitle = hasMarket
+  const base = hasMarket
     ? "Fill prices vs market last (BBG)"
     : `Fill price vs time — ${side} · fetch Bloomberg to add market line`;
+  const subtitle = binned
+    ? `${base} · ${binSubtitleNote(trades.length, bins.length)}`
+    : base;
 
   const renderFillDot = (dotProps: unknown) => {
     const { cx, cy, payload } = dotProps as { cx?: number; cy?: number; payload?: FillPoint };
@@ -162,7 +202,7 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime
 
   return (
     <ChartCard id="so-chart-timeline" title="Execution Timeline" subtitle={subtitle}>
-      <ResponsiveContainer width="100%" height={260}>
+      <ResponsiveContainer width="100%" height={340}>
         <ComposedChart data={chartRows} margin={{ top: 8, right: 20, bottom: 8, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
           <XAxis
@@ -241,12 +281,19 @@ export function ExecutionTimeline({ trades, arrivalPrice, marketTicks, orderTime
                   <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
                     <p className="font-mono text-gray-400 dark:text-gray-500 mb-1">{d.label}</p>
                     <p className="text-gray-800 dark:text-gray-200">
-                      Fill: <span className="font-semibold tabular-nums">{fmtPrice(d.fillPrice)}</span>
+                      {d.binCount === undefined ? "Fill" : "Avg fill"}:{" "}
+                      <span className="font-semibold tabular-nums">{fmtPrice(d.fillPrice)}</span>
                     </p>
                     <p className="text-gray-800 dark:text-gray-200">
                       Qty: <span className="font-semibold tabular-nums">{(d.qty ?? 0).toLocaleString()}</span>
                     </p>
-                    <p className="text-gray-500 dark:text-gray-400 font-mono mt-0.5">{fmtTime(d.t)}</p>
+                    {/* A binned marker covers a slice of time, so name the slice
+                        rather than implying the whole bin traded at one instant. */}
+                    <p className="text-gray-500 dark:text-gray-400 font-mono mt-0.5">
+                      {d.binStart !== undefined && d.binEnd !== undefined
+                        ? `${fmtTime(d.binStart)} – ${fmtTime(d.binEnd)}`
+                        : fmtTime(d.t)}
+                    </p>
                   </div>
                 );
               }

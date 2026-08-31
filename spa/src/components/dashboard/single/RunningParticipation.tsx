@@ -4,6 +4,13 @@
  * Left Y-axis (orange):  participation(t) = Σ(our qty to t) / Σ(mkt tick sizes to t) × 100
  * Right Y-axis (gray):   Bloomberg last-traded price (same tick stream as ExecutionTimeline)
  * Clickable legend to mute/unmute each series.
+ *
+ * The ratio is cumulative from the order start, so it opens enormous: at the
+ * first fill the numerator is a whole child order and the denominator a handful
+ * of ticks. A 2% order can start above 15% and decay for ten minutes. Scaling
+ * the axis to that opening artefact flattens the entire rest of the chart into a
+ * line along the bottom, so the axis is fitted to the settled range instead and
+ * the opening runs off the top — see AXIS_WARMUP_FRACTION.
  */
 
 import { useState } from "react";
@@ -74,6 +81,39 @@ function fmtUtc(ms: number): string {
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
 }
 
+/**
+ * Fraction of the fill window treated as warm-up when fitting the axis.
+ *
+ * Every point is still plotted; this only decides what the axis is scaled to.
+ * A tenth is enough for the cumulative ratio to have come down to the same order
+ * of magnitude as its final value, while leaving any genuine participation spike
+ * later in the order fully in view — which a blunter rule, like clipping at a
+ * percentile of all points, would not.
+ */
+const AXIS_WARMUP_FRACTION = 0.1;
+
+/**
+ * Top of the participation axis: the largest value after the warm-up, padded.
+ *
+ * Falls back to the full range when the warm-up would leave nothing to measure
+ * — a handful of fills, or every fill at the same instant — since an axis fitted
+ * to no points is worse than one skewed by the opening.
+ */
+function settledAxisMax(points: PartPoint[]): number {
+  const first = points[0];
+  const last = points[points.length - 1];
+  let considered = points;
+
+  if (first !== undefined && last !== undefined) {
+    const cutoff = first.t + (last.t - first.t) * AXIS_WARMUP_FRACTION;
+    const settled = points.filter((p) => p.t >= cutoff);
+    if (settled.length > 0) considered = settled;
+  }
+
+  const max = Math.max(...considered.map((p) => p.pct));
+  return Math.max(max * 1.15, 1);
+}
+
 function buildPartData(
   trades: TradeRecord[],
   marketVolTicks: Array<{ t: number; size: number }>,
@@ -125,8 +165,7 @@ export function RunningParticipation({ trades, marketVolTicks, marketTicks, orde
   }
 
   const finalPct = partData[partData.length - 1]?.pct ?? null;
-  const maxPct   = Math.max(...partData.map((d) => d.pct));
-  const yPctMax  = Math.max(maxPct * 1.15, 1);
+  const yPctMax  = settledAxisMax(partData);
 
   // Price axis domain
   const priceValues = (marketTicks ?? []).map((t) => t.price);
@@ -168,12 +207,15 @@ export function RunningParticipation({ trades, marketVolTicks, marketTicks, orde
       id="so-chart-participation"
       title="Running Participation Rate"
       subtitle={
-        finalPct !== null
+        (finalPct !== null
           ? `Final: ${finalPct.toFixed(2)}%`
-          : "our cumulative qty / Σ market prints"
+          : "our cumulative qty / Σ market prints") +
+        // Only worth saying when something is actually off-scale, which is the
+        // usual case but not every case.
+        (partData.some((p) => p.pct > yPctMax) ? " · axis fitted past the opening" : "")
       }
     >
-      <ResponsiveContainer width="100%" height={260}>
+      <ResponsiveContainer width="100%" height={340}>
         {/* Both series read from one unified, time-sorted array (chartRows). */}
         <ComposedChart data={chartRows} margin={{ top: 8, right: 56, bottom: 8, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
@@ -188,6 +230,9 @@ export function RunningParticipation({ trades, marketVolTicks, marketTicks, orde
           <YAxis
             yAxisId="pct" orientation="left"
             domain={[0, yPctMax]}
+            // Required, or Recharts widens the domain back out to fit the
+            // opening spike and the clamp does nothing.
+            allowDataOverflow
             tick={{ fontSize: 10, fill: "#f97316" }}
             tickLine={false} axisLine={false}
             tickFormatter={(v: number) => `${v.toFixed(1)}%`}

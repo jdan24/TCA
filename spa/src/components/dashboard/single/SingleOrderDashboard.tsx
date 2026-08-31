@@ -5,8 +5,10 @@
  *   ┌─ Toolbar ──────────────────────────────────────────────────────────┐
  *   ├─ Algo selector ────────────────────────────────────────────────────┤
  *   ├─ ParentSummaryCard (full width) ───────────────────────────────────┤
- *   ├─ CumulativeTWAP ──────── CumulativeVWAP ──────────────────────────┤
- *   ├─ ExecutionTimeline ───── RunningParticipation ────────────────────┤
+ *   ├─ CumulativeTWAP (full width) ─────────────────────────────────────┤
+ *   ├─ CumulativeVWAP (full width) ─────────────────────────────────────┤
+ *   ├─ ExecutionTimeline (full width) ──────────────────────────────────┤
+ *   ├─ RunningParticipation (full width) ───────────────────────────────┤
  *   ├─ VwapVolumeProfile (full width, VWAP algo only) ──────────────────┤
  *   └─ TradeTable (fill detail, full width) ─────────────────────────────┘
  */
@@ -616,8 +618,10 @@ export function SingleOrderDashboard({
         </div>
       )}
 
-      {/* ── Cumulative TWAP + Cumulative VWAP ──────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* ── Charts, stacked full width ──────────────────────────────────────
+          Two-up put a five-hour order's time axis into half a page, which
+          crushed the fills together; the page scrolls, the axis cannot. */}
+      <div className="space-y-4">
         <CumulativeTWAP
           trades={scaledTrades}
           arrivalPrice={summary?.arrivalPrice ?? null}
@@ -638,10 +642,6 @@ export function SingleOrderDashboard({
           {...(priceFormatter  && { priceFormatter  })}
           {...(yTicksForRange  && { yTicksForRange  })}
         />
-      </div>
-
-      {/* ── Execution timeline + Running participation rate ──────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ExecutionTimeline
           trades={scaledTrades}
           arrivalPrice={summary?.arrivalPrice ?? null}

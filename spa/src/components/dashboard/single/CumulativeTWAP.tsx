@@ -23,6 +23,7 @@ import {
   YAxis,
 } from "recharts";
 import type { TradeRecord } from "@/types";
+import { binFills, binSubtitleNote, shouldBinFills } from "@/tca/fillBins";
 import { ChartCard, EmptyState } from "@/components/dashboard/dashboardUtils";
 
 interface CumulativeTWAPProps {
@@ -47,6 +48,11 @@ interface DataPoint {
   /** null on the orderTime anchor point (before any fill) — creates a line break for fill series */
   runningFillAvg: number | null;
   fillPrice: number | null;
+  /** Set on a binned marker: what it stands for, and the slice it covers. */
+  binQty?: number;
+  binCount?: number;
+  binStart?: number;
+  binEnd?: number;
   marketTwapLine?: number;
   cumQty: number;
 }
@@ -140,6 +146,30 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, market
     ? { t: lastFillTime.getTime(), value: marketTwap! }
     : null;
   const data = buildData(trades, twapByTime, orderAnchor, endAnchor);
+
+  // Bin the fill markers when there are too many to read individually. Only the
+  // fillPrice series is thinned — the running-average and market TWAP lines keep
+  // every row and lose no resolution. Every bin sits on a real fill time (see
+  // tca/fillBins.ts), so each one finds the row it belongs to.
+  const binned = shouldBinFills(trades.length);
+  const bins = binned ? binFills(trades) : [];
+  if (binned) {
+    const byTime = new Map(bins.map((b) => [b.t, b]));
+    for (const row of data) {
+      const bin = byTime.get(row.t);
+      if (bin === undefined) {
+        row.fillPrice = null;
+        continue;
+      }
+      row.fillPrice = bin.price;
+      row.binQty = bin.qty;
+      row.binCount = bin.count;
+      row.binStart = bin.tStart;
+      row.binEnd = bin.tEnd;
+    }
+  }
+  const maxBinQty = bins.length > 0 ? Math.max(...bins.map((b) => b.qty)) : 0;
+
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
   if (data.length === 0) {
@@ -184,6 +214,35 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, market
   const rightPad = tSpan * 0.02 || 30_000;
   const xDomain: [number, number] = [tMin - leftPad, tMax + rightPad];
 
+  /**
+   * Fill marker. A binned marker is sized by the quantity that filled in its
+   * slice, so the weight of the order is visible; an unbinned one is a plain dot
+   * because a single fill's size is already in the fill-detail table.
+   */
+  const renderFillDot = (dotProps: unknown) => {
+    const { cx, cy, payload } = dotProps as {
+      cx?: number;
+      cy?: number;
+      payload?: DataPoint;
+    };
+    if (cx === undefined || cy === undefined) return <g />;
+    if (payload === undefined || payload.fillPrice === null) return <g />;
+    const r =
+      payload.binQty === undefined || maxBinQty <= 0
+        ? 3
+        : 2.5 + (payload.binQty / maxBinQty) * 3.5;
+    return (
+      <circle
+        key={`fill-${payload.t}`}
+        cx={cx}
+        cy={cy}
+        r={r}
+        fill="#8b5cf6"
+        fillOpacity={0.85}
+      />
+    );
+  };
+
   function toggleSeries(key: string) {
     setHidden((prev) => {
       const next = new Set(prev);
@@ -196,9 +255,12 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, market
     <ChartCard
       id="so-chart-twap"
       title="Cumulative Fill TWAP"
-      subtitle="Running avg fill · market TWAP · fill prices"
+      subtitle={
+        `Running avg fill · market TWAP · fill prices` +
+        (binned ? ` · ${binSubtitleNote(trades.length, bins.length)}` : "")
+      }
     >
-      <ResponsiveContainer width="100%" height={260}>
+      <ResponsiveContainer width="100%" height={340}>
         <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" />
           <XAxis
@@ -239,9 +301,25 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, market
                     </p>
                   )}
                   {!hidden.has("fillPrice") && d.fillPrice !== null && (
-                    <p className="text-violet-600 dark:text-violet-400">
-                      Fill: <span className="font-semibold tabular-nums">{fmtPrice(d.fillPrice)}</span>
-                    </p>
+                    <>
+                      <p className="text-violet-600 dark:text-violet-400">
+                        {d.binCount === undefined ? "Fill" : "Avg fill"}:{" "}
+                        <span className="font-semibold tabular-nums">{fmtPrice(d.fillPrice)}</span>
+                      </p>
+                      {/* A binned marker covers a slice of time and several
+                          fills — say so rather than implying one print. */}
+                      {d.binCount !== undefined && (
+                        <p className="text-gray-400 dark:text-gray-500">
+                          {d.binCount} fill{d.binCount !== 1 ? "s" : ""} ·{" "}
+                          <span className="tabular-nums">{(d.binQty ?? 0).toLocaleString()}</span> qty
+                          {d.binStart !== undefined && d.binEnd !== undefined && (
+                            <span className="block font-mono">
+                              {fmtUtc(d.binStart)} – {fmtUtc(d.binEnd)}
+                            </span>
+                          )}
+                        </p>
+                      )}
+                    </>
                   )}
                   <p className="text-gray-400 dark:text-gray-500 mt-0.5">
                     Cum Qty: <span className="tabular-nums">{d.cumQty.toLocaleString()}</span>
@@ -307,14 +385,18 @@ export function CumulativeTWAP({ trades, arrivalPrice, runningMarketTwap, market
               hide={hidden.has("marketTwapLine")}
             />
           )}
+          {/* Binned markers are aggregates, not a path through time: a line
+              joining them would read as a price series that does not exist. */}
           <Line
             type="monotone"
             dataKey="fillPrice"
-            stroke="#8b5cf6"
-            strokeWidth={1}
-            strokeDasharray="4 2"
-            dot={{ r: 3, fill: "#8b5cf6" }}
+            stroke={binned ? "transparent" : "#8b5cf6"}
+            strokeWidth={binned ? 0 : 1}
+            {...(binned ? {} : { strokeDasharray: "4 2" })}
+            dot={renderFillDot}
             activeDot={{ r: 5 }}
+            isAnimationActive={false}
+            connectNulls={false}
             hide={hidden.has("fillPrice")}
           />
         </LineChart>
