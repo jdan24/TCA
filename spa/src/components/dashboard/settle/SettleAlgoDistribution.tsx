@@ -102,6 +102,17 @@ const JITTER_SPREAD = 0.26;
 const Y_AXIS_WIDTH = 44;
 const RIGHT_MARGIN = 16;
 
+/**
+ * Height reserved for the algo tick row, and the chart height that goes with
+ * it. Angled labels need the taller row; the chart grows by the same amount so
+ * the plot area itself is unchanged either way.
+ */
+const AXIS_HEIGHT = { flat: 20, angled: 64 } as const;
+const CHART_HEIGHT = { flat: 280, angled: 324 } as const;
+
+/** Angle for the algo labels when they are rotated to fit. */
+const LABEL_ANGLE = -40;
+
 interface Point {
   /** Column index, plus the dot's own jitter. */
   x: number;
@@ -199,6 +210,14 @@ interface SettleAlgoDistributionProps {
   /** Decimal tick size for a Bloomberg symbol; null when unknown. */
   tickSizeFor: (bbgSymbol: string) => number | null;
   resolveSymbol: (ric: string) => string;
+  /**
+   * Angle the algo tick labels and show them in full instead of truncating.
+   *
+   * Set by the print layout: a printed page is narrower than the screen card,
+   * so columns are tighter there and a horizontal label would have to be cut
+   * back to fit. Angling buys the room to keep the whole algo name.
+   */
+  rotateAlgoLabels?: boolean;
 }
 
 export function SettleAlgoDistribution({
@@ -207,6 +226,7 @@ export function SettleAlgoDistribution({
   results,
   tickSizeFor,
   resolveSymbol,
+  rotateAlgoLabels = false,
 }: SettleAlgoDistributionProps) {
   // Each window's chart keeps its own algo selection — the two prints are read
   // separately, so narrowing one should not silently narrow the other.
@@ -381,7 +401,10 @@ export function SettleAlgoDistribution({
       }
       actions={actions}
     >
-      <ResponsiveContainer width="100%" height={280}>
+      <ResponsiveContainer
+        width="100%"
+        height={rotateAlgoLabels ? CHART_HEIGHT.angled : CHART_HEIGHT.flat}
+      >
         <ScatterChart margin={{ top: 8, right: RIGHT_MARGIN, bottom: 8, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
 
@@ -394,12 +417,18 @@ export function SettleAlgoDistribution({
             // not clipped by the axis.
             domain={[-0.5, columns.length - 0.5]}
             ticks={columns.map((c) => c.index)}
-            tick={{ fontSize: 9 }}
-            tickFormatter={(v: unknown) =>
-              typeof v === "number" ? truncate(columns[Math.round(v)]?.algo ?? "") : ""
+            tick={
+              rotateAlgoLabels
+                ? { fontSize: 9, angle: LABEL_ANGLE, textAnchor: "end" }
+                : { fontSize: 9 }
             }
+            tickFormatter={(v: unknown) => {
+              if (typeof v !== "number") return "";
+              const algo = columns[Math.round(v)]?.algo ?? "";
+              return rotateAlgoLabels ? algo : truncate(algo);
+            }}
             interval={0}
-            height={20}
+            height={rotateAlgoLabels ? AXIS_HEIGHT.angled : AXIS_HEIGHT.flat}
           />
 
           <YAxis

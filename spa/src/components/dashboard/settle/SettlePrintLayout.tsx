@@ -12,7 +12,9 @@
  *
  * The root carries `settle-print`, which is what keeps colour on paper; see the
  * note on the element itself. Page size comes from an injected @page rule, the
- * same one and the same way the other two print layouts use.
+ * same way the other two print layouts do it — but landscape rather than
+ * portrait, this report's charts needing the width. See PRINT_PAGE_WIDTH_PX for
+ * why the body is pinned to the page width instead of left fluid.
  */
 
 import { useEffect } from "react";
@@ -31,6 +33,27 @@ import { SettleAlgoDistribution } from "./SettleAlgoDistribution";
 
 /** The two charted windows, in the order the report reads them. */
 const SETTLE_WINDOWS: ReadonlyArray<Exclude<SettleWindow, "unassigned">> = ["3pm", "4pm"];
+
+/**
+ * Printable width of one page, in CSS px, and the width this view lays out at.
+ *
+ * Letter landscape is 11in = 1056px at 96 CSS px/in; the @page rule takes 18mm
+ * off each side, or 136px, leaving 920px.
+ *
+ * The body is pinned to exactly that rather than left fluid, because Recharts'
+ * ResponsiveContainer measures its parent once during screen layout and writes
+ * a fixed pixel width onto the SVG — it never re-measures for the print layout.
+ * A body wider than the page therefore produces a chart wider than the page,
+ * chopped off at the right edge, and an HTML product band that reflows to the
+ * paper while the SVG above it does not, so the two stop lining up. Laying out
+ * at the printed width is what keeps the chart honest: nothing is scaled and no
+ * aspect ratio changes.
+ *
+ * A window narrower than this scrolls rather than shrinking the body — a print
+ * preview that silently laid out at the wrong width would print a chart smaller
+ * than the page and misalign the band all over again.
+ */
+const PRINT_PAGE_WIDTH_PX = 920;
 
 interface SettlePrintLayoutProps {
   windowSummary: SettleGroupRow[];
@@ -69,7 +92,7 @@ export function SettlePrintLayout({
   useEffect(() => {
     const style = document.createElement("style");
     style.id    = "settle-print-layout-page";
-    style.textContent = "@media print { @page { size: letter portrait; margin: 15mm 18mm; } }";
+    style.textContent = "@media print { @page { size: letter landscape; margin: 15mm 18mm; } }";
     document.head.appendChild(style);
     return () => { document.getElementById("settle-print-layout-page")?.remove(); };
   }, []);
@@ -110,7 +133,10 @@ export function SettlePrintLayout({
         </div>
       </div>
 
-      <div className="mx-auto max-w-5xl px-8 py-6 space-y-6">
+      <div
+        className="mx-auto px-8 py-6 space-y-6"
+        style={{ width: PRINT_PAGE_WIDTH_PX }}
+      >
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <div className="flex items-start justify-between gap-6 border-b border-gray-200 pb-4">
           <div>
@@ -164,6 +190,7 @@ export function SettlePrintLayout({
               results={results}
               tickSizeFor={tickSizeFor}
               resolveSymbol={resolveSymbol}
+              rotateAlgoLabels
             />
           </div>
         ))}
