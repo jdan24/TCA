@@ -49,12 +49,27 @@ export interface BridgeTradeTick {
 
 // ── Internal fetch helper ─────────────────────────────────────────────────────
 
-async function bridgeGet<T>(
+/**
+ * A bridge call's outcome, keeping "the request failed" separate from "the
+ * bridge answered, and the answer was empty".
+ *
+ * Collapsing the two is how a timed-out settle request came to render as a
+ * plain N/A, indistinguishable from a contract that genuinely has no settle for
+ * the date. Callers that care ask for the outcome; the rest keep using
+ * bridgeGet and get the fallback as before.
+ */
+export interface BridgeOutcome<T> {
+  data: T;
+  /** True when the request never produced an answer — timeout, network or 5xx. */
+  failed: boolean;
+}
+
+async function bridgeGetOutcome<T>(
   path: string,
   params: Record<string, string>,
   fallback: T,
   timeoutMs = TIMEOUT_MS,
-): Promise<T> {
+): Promise<BridgeOutcome<T>> {
   try {
     const url = new URL(`${BRIDGE_BASE}${path}`);
     for (const [k, v] of Object.entries(params)) {
@@ -63,11 +78,20 @@ async function bridgeGet<T>(
     const res = await fetch(url.toString(), {
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!res.ok) return fallback;
-    return (await res.json()) as T;
+    if (!res.ok) return { data: fallback, failed: true };
+    return { data: (await res.json()) as T, failed: false };
   } catch {
-    return fallback;
+    return { data: fallback, failed: true };
   }
+}
+
+async function bridgeGet<T>(
+  path: string,
+  params: Record<string, string>,
+  fallback: T,
+  timeoutMs = TIMEOUT_MS,
+): Promise<T> {
+  return (await bridgeGetOutcome(path, params, fallback, timeoutMs)).data;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -216,6 +240,19 @@ export async function fetchTradeTicks(
   );
 }
 
+/** As fetchTradeTicks, but reporting whether the request itself failed. */
+export async function fetchTradeTicksOutcome(
+  security: string,
+  start: string,
+  end: string,
+): Promise<BridgeOutcome<BridgeTradeTick[]>> {
+  return bridgeGetOutcome<BridgeTradeTick[]>(
+    "/trade-ticks",
+    { security, start, end },
+    [],
+  );
+}
+
 /** Raw /settle payload. */
 export interface SettleResponse {
   settle: number | null;
@@ -239,6 +276,18 @@ export async function fetchSettlePrice(
   date: string,
 ): Promise<SettleResponse> {
   return bridgeGet<SettleResponse>(
+    "/settle",
+    { security, date },
+    { settle: null, field: null, date },
+  );
+}
+
+/** As fetchSettlePrice, but reporting whether the request itself failed. */
+export async function fetchSettlePriceOutcome(
+  security: string,
+  date: string,
+): Promise<BridgeOutcome<SettleResponse>> {
+  return bridgeGetOutcome<SettleResponse>(
     "/settle",
     { security, date },
     { settle: null, field: null, date },

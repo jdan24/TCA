@@ -225,8 +225,20 @@ export function renderSettleCell(row: SettleTableRow, id: SettleColumnId) {
         </span>
       );
     case "benchmark":
+      // A failed fetch is not the same as "no such price", and must not read as
+      // one — that conflation is what made a queue of timed-out requests look
+      // like missing Bloomberg history.
       return r.benchmark === null ? (
-        <NaCell />
+        r.benchmarkFailed ? (
+          <span
+            className="whitespace-nowrap text-amber-600 dark:text-amber-400"
+            title="The benchmark request failed twice — it timed out or the bridge errored. This is not Bloomberg reporting no settle. Re-fetch to try again."
+          >
+            &#9888; failed
+          </span>
+        ) : (
+          <NaCell />
+        )
       ) : (
         <span className="tabular-nums font-mono text-gray-700 dark:text-gray-300">
           {priceText(r.benchmark, row.bbgSymbol)}
@@ -290,7 +302,7 @@ export function settleCellText(row: SettleTableRow, id: SettleColumnId): string 
     case "orderQty":     return row.orderQty;
     case "avgFillPrice": return row.avgFillPrice;
     case "avgFillPriceDec": return row.avgFillPrice;
-    case "benchmark":    return r.benchmark;
+    case "benchmark":    return r.benchmark === null && r.benchmarkFailed ? "FETCH FAILED" : r.benchmark;
     case "source":       return r.source === "settle" ? r.field ?? "settle" : r.source === "print" ? "16:00 print" : null;
     case "slip_bps":     return r.slip_bps;
     case "slip_price":   return r.slip_price;

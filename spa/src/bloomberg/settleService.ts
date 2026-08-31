@@ -19,6 +19,15 @@
  * Reference data is fetched once per symbol rather than per order, to supply the
  * point value behind the cash figures and the tick size behind the spread-cost
  * chart.
+ *
+ * Everything here is paced through a small worker pool rather than fired at
+ * once. The reason is not politeness to Bloomberg: the browser caps HTTP/1.1 at
+ * six connections per host, and the fetch timeout starts when fetch() is called,
+ * not when the request is dispatched. Firing forty requests together therefore
+ * left most of them ageing in a browser queue until they aborted — which, since
+ * a failed call returned the same empty value as a genuine "no such price",
+ * showed up as N/A benchmarks that looked exactly like missing Bloomberg data.
+ * The bridge compounds it by opening a fresh blpapi session per request.
  */
 
 import type {
@@ -26,10 +35,48 @@ import type {
   SettleTolerance,
   TradeRecord,
 } from "@/types";
-import { benchmarkKey, requiredBenchmarks } from "@/tca/settle";
+import { benchmarkKey, requiredBenchmarks, type BenchmarkRequest } from "@/tca/settle";
 import { nyWallClockToUtc } from "@/tca/nyTime";
-import { fetchReference, fetchSettlePrice, fetchTradeTicks } from "./bloombergClient";
+import {
+  fetchReference,
+  fetchSettlePriceOutcome,
+  fetchTradeTicksOutcome,
+} from "./bloombergClient";
 import { shiftToUtc } from "./enrichmentService";
+
+/**
+ * How many bridge calls may be in flight at once.
+ *
+ * Four, against the browser's per-host limit of six: the headroom means a
+ * benchmark request is never stuck behind an unrelated call to the bridge (the
+ * /health poll, say) and so never spends its timeout waiting to be sent.
+ */
+const MAX_IN_FLIGHT = 4;
+
+/**
+ * Run an async job over every item, at most `limit` at a time.
+ *
+ * Workers pull from a shared cursor rather than the list being pre-sliced into
+ * chunks, so one slow request cannot idle the others behind it.
+ */
+async function mapPooled<T>(
+  items: readonly T[],
+  limit: number,
+  job: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = next++;
+      const item = items[i];
+      if (i >= items.length || item === undefined) return;
+      await job(item);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker()),
+  );
+}
 
 /**
  * How far back from 16:00:00 NY to look for the closing print.
@@ -61,13 +108,18 @@ export interface SettleEnrichment {
 async function fetchClosingPrint(
   bbgSymbol: string,
   nyDate: string,
-): Promise<{ price: number; time: Date } | null> {
+): Promise<{ print: { price: number; time: Date } | null; failed: boolean }> {
   const closeAt = nyWallClockToUtc(nyDate, 16, 0);
-  if (closeAt === null) return null;
+  // An unparseable date is our problem, not a failed request — nothing to retry.
+  if (closeAt === null) return { print: null, failed: false };
   const from = new Date(closeAt.getTime() - CLOSE_LOOKBACK_MIN * 60_000);
 
-  const raw = await fetchTradeTicks(bbgSymbol, from.toISOString(), closeAt.toISOString());
-  if (raw.length === 0) return null;
+  const { data: raw, failed } = await fetchTradeTicksOutcome(
+    bbgSymbol,
+    from.toISOString(),
+    closeAt.toISOString(),
+  );
+  if (raw.length === 0) return { print: null, failed };
 
   // Bloomberg returns naive exchange-local timestamps; the same correction the
   // main enrichment path applies is needed before comparing against a UTC bound.
@@ -81,7 +133,7 @@ async function fetchClosingPrint(
       best = { price: t.price, time };
     }
   }
-  return best;
+  return { print: best, failed: false };
 }
 
 /**
@@ -116,42 +168,61 @@ export async function enrichSettleBenchmarks(
   onProgress?.({ done: 0, total });
 
   // ── Reference data: once per symbol, for the cash point value ──────────────
-  await Promise.all(
-    symbols.map(async (sym) => {
-      reference[sym] = await fetchReference(sym, [
-        "FUT_VAL_PT",      // preferred: already correct for the quote scale
-        "FUT_CONT_SIZE",   // fallback, converted in tca/dollars.ts
-        "CRNCY",           // "USd" means cents, not dollars
-        "FUT_TICK_SIZE",   // one tick, for the spread-cost chart (tca/tickSize.ts)
-      ]);
-      step();
-    }),
-  );
+  await mapPooled(symbols, MAX_IN_FLIGHT, async (sym) => {
+    reference[sym] = await fetchReference(sym, [
+      "FUT_VAL_PT",      // preferred: already correct for the quote scale
+      "FUT_CONT_SIZE",   // fallback, converted in tca/dollars.ts
+      "CRNCY",           // "USd" means cents, not dollars
+      "FUT_TICK_SIZE",   // one tick, for the spread-cost chart (tca/tickSize.ts)
+    ]);
+    step();
+  });
 
   // ── One benchmark per (symbol, date, window) ───────────────────────────────
-  await Promise.all(
-    needed.map(async ({ bbgSymbol, nyDate, window }) => {
-      const key = benchmarkKey(bbgSymbol, nyDate, window);
-      if (window === "3pm") {
-        const res = await fetchSettlePrice(bbgSymbol, nyDate);
-        benchmarks[key] = {
-          price: res.settle,
-          source: "settle",
-          field: res.field,
-          printTime: null,
-        };
-      } else {
-        const print = await fetchClosingPrint(bbgSymbol, nyDate);
-        benchmarks[key] = {
-          price: print?.price ?? null,
-          source: "print",
-          field: null,
-          printTime: print?.time ?? null,
-        };
-      }
-      step();
-    }),
+  const fetchOne = async ({ bbgSymbol, nyDate, window }: BenchmarkRequest) => {
+    const key = benchmarkKey(bbgSymbol, nyDate, window);
+    if (window === "3pm") {
+      const { data: res, failed } = await fetchSettlePriceOutcome(bbgSymbol, nyDate);
+      benchmarks[key] = {
+        price: res.settle,
+        source: "settle",
+        field: res.field,
+        printTime: null,
+        failed,
+      };
+    } else {
+      const { print, failed } = await fetchClosingPrint(bbgSymbol, nyDate);
+      benchmarks[key] = {
+        price: print?.price ?? null,
+        source: "print",
+        field: null,
+        printTime: print?.time ?? null,
+        failed,
+      };
+    }
+  };
+
+  await mapPooled(needed, MAX_IN_FLIGHT, async (req) => {
+    await fetchOne(req);
+    step();
+  });
+
+  // ── One retry for anything that came back without a price ─────────────────
+  //
+  // Covers a transient hiccup — a request that timed out behind a slow one, or a
+  // momentary blpapi refusal — without re-fetching the whole report. Keys that
+  // genuinely have no settle are retried too and simply come back empty again,
+  // which costs one extra call each and keeps the rule simple: retry what has no
+  // answer, not what we guess might be retryable.
+  //
+  // Progress is not stepped here: the bar has already reached its total, and
+  // winding it backwards would read as the fetch having restarted.
+  const missing = needed.filter(
+    (req) => benchmarks[benchmarkKey(req.bbgSymbol, req.nyDate, req.window)]?.price == null,
   );
+  if (missing.length > 0) {
+    await mapPooled(missing, MAX_IN_FLIGHT, fetchOne);
+  }
 
   return { benchmarks, reference };
 }

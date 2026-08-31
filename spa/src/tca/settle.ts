@@ -164,18 +164,21 @@ export function benchmarkKey(
   return `${bbgSymbol}|${nyDate}|${window}`;
 }
 
+/** One benchmark to fetch: an instrument, a date and which settle. */
+export interface BenchmarkRequest {
+  bbgSymbol: string;
+  nyDate: string;
+  window: Exclude<SettleWindow, "unassigned">;
+}
+
 /** The distinct (symbol, date, window) triples a set of trades needs fetched. */
 export function requiredBenchmarks(
   trades: TradeRecord[],
   resolveSymbol: (ric: string) => string,
   tol: SettleTolerance,
-): Array<{ bbgSymbol: string; nyDate: string; window: Exclude<SettleWindow, "unassigned"> }> {
+): BenchmarkRequest[] {
   const seen = new Set<string>();
-  const out: Array<{
-    bbgSymbol: string;
-    nyDate: string;
-    window: Exclude<SettleWindow, "unassigned">;
-  }> = [];
+  const out: BenchmarkRequest[] = [];
   for (const t of trades) {
     const { window, nyDate } = assignSettleWindow(t.lastFillTime, tol);
     if (window === "unassigned") continue;
@@ -230,6 +233,7 @@ export function computeSettleResults(
       benchmark,
       source: bench?.source ?? null,
       field: bench?.field ?? null,
+      benchmarkFailed: bench?.failed === true,
       slip_bps: slip.bps,
       slip_price: slip.price,
       slip_usd: slip.usd,

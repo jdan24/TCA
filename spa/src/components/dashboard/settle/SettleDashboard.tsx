@@ -234,6 +234,10 @@ export function SettleDashboard({
     : 0;
 
   const unassigned = windowSummary.find((r) => r.window === "unassigned")?.count ?? 0;
+  // Orders whose benchmark request failed rather than reporting no such price.
+  // Surfaced next to the counts because the difference decides what to do about
+  // it: a failure is worth re-fetching, a genuine absence is not.
+  const failed = results.filter((r) => r.benchmarkFailed).length;
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 py-6 space-y-4">
@@ -246,6 +250,14 @@ export function SettleDashboard({
           {benchmarkCount > 0 && (
             <span className="text-gray-400 dark:text-gray-500">
               &middot; {benchmarkCount} benchmark{benchmarkCount !== 1 ? "s" : ""} fetched
+            </span>
+          )}
+          {failed > 0 && (
+            <span
+              className="text-amber-600 dark:text-amber-400"
+              title="These benchmark requests failed twice — they timed out or the bridge errored. Bloomberg has not said there is no settle. Re-fetch to try again."
+            >
+              &middot; {failed} fetch failed
             </span>
           )}
           {unassigned > 0 && (

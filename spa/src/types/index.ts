@@ -179,6 +179,15 @@ export interface SettleBenchmark {
   field: string | null;
   /** Timestamp of the print used; null for official settles. */
   printTime: Date | null;
+  /**
+   * True when the request never produced an answer — it timed out, or the
+   * bridge errored — as opposed to answering that there is no such price.
+   *
+   * Both leave price null, and conflating them is what made a queue of timed-out
+   * requests look like missing Bloomberg history. Retried once before this is
+   * reported, so a set flag means it failed twice.
+   */
+  failed: boolean;
 }
 
 /** Per-order result for the target-settle report. */
@@ -190,6 +199,8 @@ export interface SettleResult {
   benchmark: number | null;
   source: SettleSource | null;
   field: string | null;
+  /** The benchmark fetch failed rather than reporting no such price. */
+  benchmarkFailed: boolean;
   /** Slippage vs the settle benchmark. Positive is a cost, as everywhere else. */
   slip_bps: number | null;
   slip_price: number | null;
