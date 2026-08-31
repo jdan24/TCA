@@ -1,5 +1,5 @@
 /**
- * SettleAlgoDistribution — slippage vs settle, by spread cost then by algo.
+ * SettleAlgoDistribution — slippage vs settle, by mid-point cost then by algo.
  *
  * One chart per settle window, because the two benchmarks are different things:
  * 3PM is the contract's own official settle, 4PM the last print before the
@@ -7,28 +7,33 @@
  * actually good into.
  *
  * The x-axis is categorical, in two tiers. Products are laid out left to right
- * by their 1-tick spread cost, cheapest first, so the eye moves from the tight
+ * by their mid-point cost, cheapest first, so the eye moves from the tight
  * instruments to the wide ones; inside each product there is one column per algo
- * that traded it. Evenly spaced rather than plotted at true spread cost, because
- * a product's spread cost is essentially one value — orders on it would pile
- * into a single vertical line and the algos could not be told apart.
+ * that traded it. Evenly spaced rather than plotted at true cost, because a
+ * product's is essentially one value — orders on it would pile into a single
+ * vertical line and the algos could not be told apart.
+ *
+ * The benchmark for "was working it worth it" is the mid-point cost: half a
+ * tick. The book is one tick wide, the mid sits in the middle of it, so an order
+ * that simply crossed would pay half the width against a mid-based benchmark.
+ * Beating the full width is a low bar; beating mid is the real one.
  *
  * Every order is a dot in its column: shape says which algo, colour says whether
- * it beat the full cost of that product's spread. So the chart carries the algo
+ * it came in under that product's mid-point cost. So the chart carries the algo
  * comparison and the "was working it worth it" reading at once, and the per-algo
  * averages sit in the legend rather than as marks on a busy plot.
  *
- * A dashed grey line spans each product's block at that product's spread cost.
- * It does two jobs: it shows where the red/green boundary sits, and its start
- * and stop mark where one product's columns give way to the next.
+ * A dashed grey line spans each product's block at its mid-point cost. It does
+ * two jobs: it shows where the red/green boundary sits, and its start and stop
+ * mark where one product's columns give way to the next.
  *
- * The line is drawn at the block's *mean* spread cost, since a product's spread
- * cost drifts slightly day to day as the benchmark price moves under a fixed
- * tick. Each dot is still coloured against its own order's spread, so an order
- * inside that drift can sit a hair the wrong side of the line — exact per order
- * was preferred to a line that is cosmetically always right.
+ * The line is drawn at the block's *mean* cost, since it drifts slightly day to
+ * day as the benchmark price moves under a fixed tick. Each dot is still
+ * coloured against its own order's cost, so an order inside that drift can sit a
+ * hair the wrong side of the line — exact per order was preferred to a line that
+ * is cosmetically always right.
  *
- * Orders on a contract with no known tick size have no spread cost and so cannot
+ * Orders on a contract with no known tick size have no mid-point cost and cannot
  * be placed; they are excluded and counted in the subtitle rather than dropped
  * silently.
  *
@@ -50,7 +55,7 @@ import {
 import type { SettleResult, SettleWindow, TradeRecord } from "@/types";
 import { settleWindowLabel } from "@/tca/settle";
 import { toGenericTicker } from "@/tca/genericTicker";
-import { tickSpreadBps } from "@/tca/tickSize";
+import { midSpreadBps } from "@/tca/tickSize";
 import { NO_ALGO_LABEL } from "@/tca/settleAggregate";
 import { useChartAlgoFilter } from "@/hooks/useChartAlgoFilter";
 import { AlgoFilterMenu } from "@/components/dashboard/AlgoFilterMenu";
@@ -58,9 +63,9 @@ import { ChartCard, EmptyState, fmtBps, safeAvg } from "@/components/dashboard/d
 
 type SettledWindow = Exclude<SettleWindow, "unassigned">;
 
-const BEAT_COLOR = "#10b981"; // emerald — slippage under the full spread cost
-const MISS_COLOR = "#ef4444"; // red     — paid more than a full tick
-const SPREAD_LINE_COLOR = "#94a3b8"; // slate — the product's full spread cost
+const BEAT_COLOR = "#10b981"; // emerald — slippage under the mid-point cost
+const MISS_COLOR = "#ef4444"; // red     — paid more than half a tick
+const MID_LINE_COLOR = "#94a3b8"; // slate — the product's mid-point cost
 
 /**
  * Marker shapes, one per algo, assigned in the order the algos appear on the
@@ -117,9 +122,9 @@ interface Point {
   /** Column index, plus the dot's own jitter. */
   x: number;
   slip: number;
-  /** This order's own 1-tick spread cost, in bps. */
-  spread: number;
-  /** Slippage came in under the full cost of the spread. */
+  /** This order's own mid-point cost — half a tick, in bps. */
+  mid: number;
+  /** Slippage came in under the mid-point cost. */
   beat: boolean;
   algo: string;
   product: string;
@@ -133,13 +138,14 @@ interface Column {
   algo: string;
 }
 
-/** A product's block of columns, and the spread cost that positions it. */
+/** A product's block of columns, and the mid-point cost that positions it. */
 interface ProductBlock {
   product: string;
-  spread: number;
+  /** Mean mid-point cost across the block's orders, in bps. */
+  mid: number;
   /** How many algo columns the block covers — its width in the band row. */
   span: number;
-  /** First and last column index, for the spread line and the divider. */
+  /** First and last column index, for the mid line and the divider. */
   start: number;
   end: number;
 }
@@ -167,7 +173,7 @@ function PointTooltip(props: unknown) {
         {fmtBps(point.slip)} vs settle
       </p>
       <p className="tabular-nums text-gray-500 dark:text-gray-400">
-        {fmtBps(point.spread)} full spread &middot;{" "}
+        {fmtBps(point.mid)} mid cost &middot;{" "}
         <span className={point.beat ? "text-green-600" : "text-red-500"}>
           {point.beat ? "beat it" : "paid more"}
         </span>
@@ -241,7 +247,7 @@ export function SettleAlgoDistribution({
       product: string;
       algo: string;
       slip: number;
-      spread: number;
+      mid: number;
     }
 
     const orders: Order[] = [];
@@ -253,8 +259,8 @@ export function SettleAlgoDistribution({
       if (!trade || !algoFilter.includes(trade)) continue;
 
       const bbgSymbol = resolveSymbol(trade.symbol);
-      const spread = tickSpreadBps(tickSizeFor(bbgSymbol), r.benchmark);
-      if (spread === null) {
+      const mid = midSpreadBps(tickSizeFor(bbgSymbol), r.benchmark);
+      if (mid === null) {
         skipped += 1;
         continue;
       }
@@ -262,21 +268,21 @@ export function SettleAlgoDistribution({
       orders.push({
         orderId: trade.orderId,
         symbol: bbgSymbol,
-        // Expiries collapse onto the instrument: the spread cost is a property
+        // Expiries collapse onto the instrument: the cost is a property
         // of the product, and FVU6 beside FVZ6 would be two blocks at the same
         // place on the axis.
         product: toGenericTicker(bbgSymbol),
         algo: trade.algo?.trim() || NO_ALGO_LABEL,
         slip: r.slip_bps,
-        spread,
+        mid,
       });
     }
 
-    // ── Products, ordered by spread cost ───────────────────────────────────
+    // ── Products, ordered by mid-point cost ────────────────────────────────
     //
-    // A product's spread cost varies slightly across days, since the benchmark
-    // price moves under a fixed tick. The block is positioned and labelled by
-    // the mean; each dot is still coloured against its own order's spread.
+    // A product's cost varies slightly across days, since the benchmark price
+    // moves under a fixed tick. The block is positioned and labelled by the
+    // mean; each dot is still coloured against its own order's cost.
     const byProduct = new Map<string, Order[]>();
     for (const o of orders) {
       const list = byProduct.get(o.product);
@@ -287,17 +293,17 @@ export function SettleAlgoDistribution({
     const productOrder = [...byProduct.entries()]
       .map(([product, os]) => ({
         product,
-        spread: safeAvg(os.map((o) => o.spread)) ?? 0,
+        mid: safeAvg(os.map((o) => o.mid)) ?? 0,
         orders: os,
       }))
-      .sort((a, b) => (a.spread !== b.spread ? a.spread - b.spread : a.product.localeCompare(b.product)));
+      .sort((a, b) => (a.mid !== b.mid ? a.mid - b.mid : a.product.localeCompare(b.product)));
 
     // ── Columns: one per (product, algo) ───────────────────────────────────
     const cols: Column[] = [];
     const productBlocks: ProductBlock[] = [];
     const pts: Point[] = [];
 
-    for (const { product, spread, orders: os } of productOrder) {
+    for (const { product, mid, orders: os } of productOrder) {
       const algos = [...new Set(os.map((o) => o.algo))].sort(compareAlgo);
       const start = cols.length;
 
@@ -309,8 +315,8 @@ export function SettleAlgoDistribution({
           pts.push({
             x: index + jitterOf(o.orderId) * JITTER_SPREAD,
             slip: o.slip,
-            spread: o.spread,
-            beat: o.slip < o.spread,
+            mid: o.mid,
+            beat: o.slip < o.mid,
             algo,
             product,
             symbol: o.symbol,
@@ -321,7 +327,7 @@ export function SettleAlgoDistribution({
       const end = cols.length - 1;
       productBlocks.push({
         product,
-        spread,
+        mid,
         span: end - start + 1,
         start,
         end,
@@ -371,7 +377,7 @@ export function SettleAlgoDistribution({
     return (
       <ChartCard
         title={title}
-        subtitle="Slippage vs the settle benchmark, by product spread cost then algo"
+        subtitle="Slippage vs the settle benchmark, by product mid-point cost then algo"
         actions={actions}
       >
         <EmptyState
@@ -396,7 +402,7 @@ export function SettleAlgoDistribution({
     <ChartCard
       title={title}
       subtitle={
-        `${beatCount} of ${total} beat the full cost of their product's spread` +
+        `${beatCount} of ${total} beat the mid-point cost of their product's spread` +
         (excluded > 0 ? ` — ${excluded} excluded, no tick size known` : "")
       }
       actions={actions}
@@ -464,16 +470,16 @@ export function SettleAlgoDistribution({
             />
           ))}
 
-          {/* The product's full spread cost, spanning its block edge to edge:
+          {/* The product's mid-point cost, spanning its block edge to edge:
               the red/green boundary, and the extent of the product's columns. */}
           {blocks.map((b) => (
             <ReferenceLine
-              key={`spread-${b.product}`}
+              key={`mid-${b.product}`}
               segment={[
-                { x: b.start - 0.5, y: b.spread },
-                { x: b.end + 0.5, y: b.spread },
+                { x: b.start - 0.5, y: b.mid },
+                { x: b.end + 0.5, y: b.mid },
               ]}
-              stroke={SPREAD_LINE_COLOR}
+              stroke={MID_LINE_COLOR}
               strokeWidth={1.5}
               strokeDasharray="4 3"
             />
@@ -495,7 +501,8 @@ export function SettleAlgoDistribution({
       </ResponsiveContainer>
 
       {/* Product band: the lower tier of the x-axis, laid out to match the
-          columns exactly (see Y_AXIS_WIDTH above). */}
+          columns exactly (see Y_AXIS_WIDTH above). The figure is the block's
+          mid-point cost — the same value its dashed line sits at. */}
       <div
         className="flex"
         style={{ paddingLeft: Y_AXIS_WIDTH, paddingRight: RIGHT_MARGIN }}
@@ -503,7 +510,7 @@ export function SettleAlgoDistribution({
         {blocks.map((b) => (
           <div key={b.product} className="min-w-0 px-1" style={{ flexGrow: b.span, flexBasis: 0 }}>
             <div className="truncate border-t border-gray-200 pt-1 text-center text-[10px] text-gray-600 dark:border-gray-700 dark:text-gray-400">
-              {b.product} &middot; {b.spread.toFixed(2)} bps
+              {b.product} &middot; {b.mid.toFixed(2)} bps
             </div>
           </div>
         ))}
@@ -518,11 +525,11 @@ export function SettleAlgoDistribution({
         ))}
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-full" style={{ background: BEAT_COLOR }} />
-          beat the spread
+          beat mid
         </span>
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-full" style={{ background: MISS_COLOR }} />
-          paid more than the spread
+          paid more than mid
         </span>
         <span className="flex items-center gap-1.5">
           <svg width="18" height="6" aria-hidden>
@@ -531,12 +538,12 @@ export function SettleAlgoDistribution({
               y1="3"
               x2="18"
               y2="3"
-              stroke={SPREAD_LINE_COLOR}
+              stroke={MID_LINE_COLOR}
               strokeWidth="1.5"
               strokeDasharray="4 3"
             />
           </svg>
-          that product&rsquo;s full 1-tick spread cost
+          that product&rsquo;s mid-point cost (half a tick)
         </span>
       </div>
     </ChartCard>

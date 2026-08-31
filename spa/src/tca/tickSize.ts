@@ -3,9 +3,9 @@
  *
  * The target-settle report uses this to answer a question the client actually
  * asks: the order slipped X bps against the settle, but what would it have cost
- * simply to cross the spread and be done? On a liquid future the book is one
- * tick wide nearly all the time, so one tick is the honest stand-in for "the
- * full cost of the spread without working the order".
+ * simply to cross and be done? On a liquid future the book is one tick wide
+ * nearly all the time, so one tick is the honest stand-in for the quoted width —
+ * and half of it, the mid-point cost, is what crossing from the mid costs.
  *
  * Two sources, in priority order:
  *   1. Bloomberg's FUT_TICK_SIZE, from the per-symbol reference call the settle
@@ -139,11 +139,30 @@ export function buildTickSizeResolver(
 }
 
 /**
+ * Half a one-tick spread, in bps of the benchmark — the mid-point cost.
+ *
+ * This is what an order that simply crossed would pay against a mid-based
+ * benchmark: the book is one tick wide, the mid sits in the middle of it, so
+ * lifting the offer costs half the width from there. It is the reference the
+ * settle report judges execution against.
+ */
+export function midSpreadBps(
+  tickSize: number | null,
+  benchmark: number | null,
+): number | null {
+  const full = tickSpreadBps(tickSize, benchmark);
+  return full === null ? null : full / 2;
+}
+
+/**
  * The cost of crossing a one-tick-wide spread, in bps of the benchmark.
  *
  * Measured against the settle benchmark itself rather than the fill, so two
  * orders on the same contract and day share one x-coordinate and the chart
  * reads as "this product's spread cost" rather than as noise.
+ *
+ * Note the *full* width. What the settle report actually plots is half of it —
+ * see midSpreadBps above.
  */
 export function tickSpreadBps(
   tickSize: number | null,
