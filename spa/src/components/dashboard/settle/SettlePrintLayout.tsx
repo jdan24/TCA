@@ -11,9 +11,11 @@
  * PNG-capture step the multi-order layout needs.
  *
  * The root carries `settle-print`, which is what keeps colour on paper; see the
- * note on the element itself.
+ * note on the element itself. Page size comes from an injected @page rule, the
+ * same one and the same way the other two print layouts use.
  */
 
+import { useEffect } from "react";
 import type { SettleResult, SettleTolerance, SettleWindow, TradeRecord } from "@/types";
 import type { SettleGroupRow } from "@/tca/settleAggregate";
 import { settleWindowLabel } from "@/tca/settle";
@@ -60,6 +62,17 @@ export function SettlePrintLayout({
 }: SettlePrintLayoutProps) {
   const { logoDataUrl, disclaimerText, reportTitle, contactName, contactEmail, contactPhone } =
     useCorporateTemplate();
+
+  // ── @page CSS injection ───────────────────────────────────────────────────
+  // Tailwind can't express @page, so it goes into <head> while this view is
+  // mounted — matching PrintLayout and MultiOrderPrintLayout.
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.id    = "settle-print-layout-page";
+    style.textContent = "@media print { @page { size: letter portrait; margin: 15mm 18mm; } }";
+    document.head.appendChild(style);
+    return () => { document.getElementById("settle-print-layout-page")?.remove(); };
+  }, []);
 
   const cols = SETTLE_COLUMNS.filter((c) => visibleColumns.includes(c.id));
   const dates = [...new Set(rows.map((r) => r.result.nyDate))].sort();
