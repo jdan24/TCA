@@ -249,16 +249,6 @@ export function FAQModal({ onClose }: FAQModalProps) {
               <p>The one-standard-deviation price range of the market during the execution window. High vol during a low-IS order indicates good execution in a turbulent environment.</p>
             </Entry>
 
-            <Entry name="Vol-Adj IS — volatility-normalized slippage" tag="σ · sigmas">
-              <Formula>Vol-Adj IS = IS_bps / σ_bps</Formula>
-              <Row label="Denominator" value="1σ Volatility (bps) over that order's own window — see the entry above" />
-              <Row label="Guard" value="σ below 0.1 bps is treated as unusable and the result is N/A: two near-identical bar midpoints produce a near-zero σ that would otherwise yield a thousand-sigma reading" />
-              <Row label="Bands" value="within ±1σ normal noise · ±1–2σ notable · beyond ±2σ well outside normal. Positive is a cost." />
-              <p>The same miss means different things in different markets: 8 bps of slippage is a serious failure in a quiet session and unremarkable on a turbulent one. Dividing by the volatility actually realized during the order separates the two.</p>
-              <p>Because both σ and a drift-driven IS grow with √time, the ratio is duration-invariant — a 30-second order and a two-hour order produce directly comparable figures, which the raw bps columns cannot.</p>
-              <p className="text-gray-400 dark:text-gray-500 text-[11px] italic">Aggregation: the By-Symbol/Algo tables use a simple mean (matching Avg IS beside it); the Spread Savings table weights by quantity (matching its Wtd Avg IS).</p>
-            </Entry>
-
             <Entry name="TWAS — Time-Weighted Average Spread" tag="bps · price">
               <Formula>TWAS = Σ( spreadᵢ_bps × Δtᵢ ) / totalDuration</Formula>
               <Formula>spreadᵢ_bps = (askᵢ − bidᵢ) / |midᵢ| × 10,000</Formula>
@@ -334,7 +324,7 @@ export function FAQModal({ onClose }: FAQModalProps) {
             <Entry name="Parent Order Summary — column layout">
               <p>The Parent Order Summary card is divided into three columns:</p>
               <Row label="Order Details" value="Total Qty, Order Avg. Price (fillVWAP), Duration, Participation Rate, Order Start (UTC), Order End Time (UTC)" />
-              <Row label="Market Conditions" value="1σ Vol (bps), 1σ Vol (price), Vol-Adj IS (σ), Impact (bps), Reversion 1m (bps), TWAS (bps), Trend Cost (bps)" />
+              <Row label="Market Conditions" value="1σ Vol (bps), 1σ Vol (price), Impact (bps), Reversion 1m (bps), TWAS (bps), Trend Cost (bps)" />
               <Row label="Benchmark Performance" value="Arrival Price with IS (bps) · Market VWAP with VWAP Slippage · Market TWAP with TWAP Slippage — the card corresponding to the selected Execution Algo is highlighted" />
               <p className="text-gray-400 dark:text-gray-500 text-[11px] italic">Market Conditions metrics are computed at the parent order level across the full [orderTime, lastFillTime] window — see individual metric entries for details.</p>
             </Entry>
@@ -382,7 +372,6 @@ export function FAQModal({ onClose }: FAQModalProps) {
                     ["Trend Cost (bps)", "negative", "positive"],
                     ["Reversion +30s / +1m (bps)", "positive (price reverts)", "negative (price persists)"],
                     ["TWAS (bps)", "context only", "context only"],
-                    ["Vol-Adj IS (σ)", "negative (beyond −1σ)", "positive (beyond +1σ)"],
                     ["Volatility", "context only", "context only"],
                     ["Participation Rate", "context only", "context only"],
                   ].map(([metric, fav, adv]) => (

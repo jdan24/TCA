@@ -435,17 +435,6 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
                   <p className="text-xs text-gray-600 leading-relaxed">The one-standard-deviation price range of the market during the execution window. High volatility during a low-IS order indicates strong execution quality in a turbulent environment. It is a contextual measure of market conditions, not a direct cost metric.</p>
                 </div>
 
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <p className="text-sm font-semibold text-gray-900">Vol-Adj IS — volatility-normalized slippage</p>
-                    <NotesPill type="gray">sigmas</NotesPill>
-                  </div>
-                  <div className="flex gap-3 mb-1.5 text-xs">
-                    <span className="text-gray-500">Favorable:</span><NotesPill type="green">negative</NotesPill>
-                    <span className="text-gray-500">Adverse:</span><NotesPill type="red">positive</NotesPill>
-                  </div>
-                  <p className="text-xs text-gray-600 leading-relaxed">Implementation shortfall divided by one standard deviation of the market&rsquo;s own movement during the order. The same miss means different things in different markets &mdash; 8 bps is a serious failure in a quiet session and unremarkable on a turbulent one. Within &plusmn;1&sigma; is normal noise, &plusmn;1&ndash;2&sigma; is notable, and beyond &plusmn;2&sigma; is well outside normal. Because both volatility and drift-driven slippage grow with the square root of time, the figure is comparable across orders of very different durations.</p>
-                </div>
 
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                   <div className="flex items-center gap-2 mb-1.5">
@@ -512,7 +501,6 @@ export function PrintLayout({ summary, charts, onBack, resolveSymbol, highlighte
                       ["TWAP Deviation (bps)",        "green", "negative",               "red",  "positive"],
                       ["Market Impact (bps)",         "gray",  "— (always a cost)",      "red",  "positive"],
                       ["Trend Cost (bps)",            "green", "negative",               "red",  "positive"],
-                      ["Vol-Adj IS (σ)",              "green", "negative (beyond -1σ)",  "red",  "positive (beyond +1σ)"],
                       ["Reversion +30s / +1m (bps)", "green", "positive (reverts)",     "red",  "negative (persists)"],
                       ["TWAS (bps)",                 "gray",  "context only",            "gray", "context only"],
                       ["Volatility",                 "gray",  "context only",            "gray", "context only"],

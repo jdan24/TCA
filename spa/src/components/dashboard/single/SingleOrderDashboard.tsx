@@ -15,8 +15,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { EnrichProgress } from "@/bloomberg/enrichmentService";
-import type { BenchmarkKind, BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
-import { computeParentOrderSummary } from "@/tca/compute";
+import type { BenchmarkKind, BloombergEnrichment, TradeRecord } from "@/types";
+import { computeAll, computeParentOrderSummary } from "@/tca/compute";
 import { buildPointValueResolver } from "@/tca/pointValue";
 import { resolveBenchmark } from "@/hooks/useAlgoMap";
 import { useTCAStore } from "@/store/useTCAStore";
@@ -50,7 +50,9 @@ function highlightedBenchmark(algo: AlgoOption | null): BenchmarkKind {
 
 interface SingleOrderDashboardProps {
   trades: TradeRecord[];
-  results: TCAResult[];
+  // No `results` prop by design: this page owns the Fill Price Scale, so App's
+  // results are on the wrong price basis. Everything here works from
+  // scaledResults, computed below — see the note on it.
   enrichment: Record<string, BloombergEnrichment>;
   bloombergConnected: boolean;
   enrichedCount: number;
@@ -61,7 +63,6 @@ interface SingleOrderDashboardProps {
 
 export function SingleOrderDashboard({
   trades,
-  results,
   enrichment,
   bloombergConnected,
   enrichedCount,
@@ -220,6 +221,22 @@ export function SingleOrderDashboard({
     [symbolMap.mappings, scaledTrades, enrichment],
   );
 
+  /**
+   * Per-fill metrics recomputed against the *scaled* prices.
+   *
+   * The `results` prop cannot be used for the fill table. App.tsx returns
+   * rawTrades unscaled in single-order mode, because the Fill Price Scale is a
+   * control on this page rather than a symbol-map setting, so the results it
+   * computes are against unscaled fills. The summary card and charts already
+   * work from scaledTrades; the fill table was reading the prop, which put its
+   * bps and cash columns on a different price basis to the card directly above
+   * them — a 100x scale showed the card at $25.20 and the table at $2,520.
+   */
+  const scaledResults = useMemo(
+    () => computeAll(scaledTrades, enrichment, pointValueFor),
+    [scaledTrades, enrichment, pointValueFor],
+  );
+
   const summary = useMemo(
     () => computeParentOrderSummary(
       scaledTrades, enrichment, singleOrderTimeOverride ?? undefined, pointValueFor,
@@ -329,7 +346,7 @@ export function SingleOrderDashboard({
 
           <ExportBar
                   trades={scaledTrades}
-                  results={results}
+                  results={scaledResults}
                   summary={summary ?? undefined}
                   onPrintLayout={(charts) => {
                     setPrintCharts(charts);
@@ -672,7 +689,7 @@ export function SingleOrderDashboard({
       )}
 
       {/* ── Fill detail table ────────────────────────────────────────────── */}
-      <TradeTable trades={scaledTrades} results={results} title="Fill Detail" hideMetrics showExcelExport resolveSymbol={resolveSymbol} />
+      <TradeTable trades={scaledTrades} results={scaledResults} title="Fill Detail" hideMetrics showExcelExport resolveSymbol={resolveSymbol} />
     </div>
   );
 }

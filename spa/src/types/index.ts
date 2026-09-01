@@ -60,10 +60,6 @@ export interface TCAResult {
   TWAS_price: number | null;
   vol_during_order_price: number | null; // 1σ price std-dev during order window
   vol_during_order_bps: number | null;   // same expressed in bps
-  /** IS_bps ÷ vol_during_order_bps — slippage in standard deviations of the
-   *  market's own movement during the order. Duration-invariant, so orders of
-   *  very different lengths compare directly. See tca/volatility.ts. */
-  volAdjIS: number | null;
   TWAP_dev_bps: number | null;           // slippage vs market TWAP during [orderTime, lastFillTime]
   marketVWAP_price: number | null;       // raw market VWAP price during [orderTime, lastFillTime]
   marketTWAP_price: number | null;       // raw market TWAP price during [orderTime, lastFillTime]
@@ -122,8 +118,6 @@ export interface ParentOrderSummary {
   duration_ms: number;
   vol_during_order_price: number | null;
   vol_during_order_bps: number | null;
-  /** Parent-level IS_bps ÷ vol_during_order_bps — see TCAResult.volAdjIS. */
-  volAdjIS: number | null;
   participationRate: number | null; // totalQty / exchange volume during [orderTime, lastFillTime]
   marketVwap: number | null;        // Bloomberg market VWAP over the full order window
   marketTwap: number | null;        // Bloomberg market TWAP over the full order window
@@ -242,9 +236,6 @@ export interface AggregateRow {
   currency: string | null;
   avgMI_bps: number | null;
   avgTWAS_bps: number | null;
-  /** Simple mean of per-order volAdjIS — matches how avgIS_bps and the rest of
-   *  this row are built. Spread Savings weights its own copy by quantity. */
-  avgVolAdjIS: number | null;
   avgTTF_ms: number;
   winRate: number | null; // fraction [0,1] of orders where IS_bps <= 0
   bestIS_bps: number | null; // most favourable (min) IS in group
@@ -292,9 +283,6 @@ export interface SpreadSavingsRow {
    *  wAvgIS_bps, which is weighted: a gap between the two exposes an outlier
    *  order or a single large one carrying the group. */
   medianIS_bps: number | null;
-  /** Quantity-weighted mean of per-order volAdjIS, weighted like wAvgIS_bps
-   *  above rather than as a simple mean — this table weights its IS figures. */
-  wAvgVolAdjIS: number | null;
   /** Simple mean of per-order vol_during_order_bps — 1σ of market price over
    *  each order's own window. The drift the orders were actually exposed to,
    *  and the context that makes a large negative savingsPct legible. */

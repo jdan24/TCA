@@ -18,7 +18,7 @@ import { computeSlippage } from "./slippage";
 import { dollarSlippage } from "./dollars";
 import { computeTWAS, MIN_ABS_MID } from "./spread";
 import { computeTimeToFill } from "./timing";
-import { computeOrderVol, volAdjustedIS } from "./volatility";
+import { computeOrderVol } from "./volatility";
 import { computeMarketTWAP, computeTWAPDeviation, computeVWAPDeviation } from "./vwapTwap";
 import { sideSign } from "./tcaUtils";
 
@@ -89,7 +89,6 @@ export function computeAll(
       TWAS_price: twas.price,
       vol_during_order_price: vol.price,
       vol_during_order_bps: vol.bps,
-      volAdjIS: volAdjustedIS(IS_bps, vol.bps),
       TWAP_dev_bps: computeTWAPDeviation(trade, marketTWAPFinal),
       // Market VWAP price: Bloomberg scalar, then file VWAP as offline fallback
       marketVWAP_price,
@@ -465,7 +464,6 @@ export function computeParentOrderSummary(
     duration_ms,
     vol_during_order_price,
     vol_during_order_bps,
-    volAdjIS: volAdjustedIS(IS_bps, vol_during_order_bps),
     participationRate,
     marketVwap,
     marketTwap,

@@ -94,7 +94,6 @@ function buildAggRows(rows: AggregateRow[]): ExportRow[] {
     "vs Mkt TWAP (bps)":  fmt(r.avgTWAP_dev_bps),
     "vs Mkt TWAP ($)":    fmt(r.totalTWAP_dev_usd),
     Currency:             r.currency ?? "",
-    "Vol-Adj IS (σ)":     fmt(r.avgVolAdjIS),
     "Avg MI (bps)":       fmt(r.avgMI_bps),
     "Avg TWAS (bps)":     fmt(r.avgTWAS_bps),
     "Avg TTF (ms)":       Math.round(r.avgTTF_ms),

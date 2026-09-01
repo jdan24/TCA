@@ -17,7 +17,7 @@
 import { useState } from "react";
 import type { TCAResult, TradeRecord } from "@/types";
 import { resolveBenchmark } from "@/hooks/useAlgoMap";
-import { fmtBps, fmtSigma, fmtTtf, fmtUsd, safeAvg, SIGMA_TOOLTIP } from "./dashboardUtils";
+import { fmtBps, fmtTtf, fmtUsd, safeAvg } from "./dashboardUtils";
 import { useCashDisplay } from "@/hooks/useCashDisplay";
 
 interface SummaryCardsProps {
@@ -122,17 +122,6 @@ function saveHiddenKpis(ids: string[]): void {
   }
 }
 
-/**
- * Unlike the bps tiles, sign alone is not enough here: everything inside ±1σ is
- * normal noise and should read as neutral rather than as a win or a loss.
- */
-function volAdjSentiment(v: number | null): Sentiment {
-  if (v === null || !isFinite(v)) return "neutral";
-  if (v > 1) return "bad";
-  if (v < -1) return "good";
-  return "neutral";
-}
-
 function bpsSentiment(v: number | null): Sentiment {
   if (v === null) return "neutral";
   return v <= 0 ? "good" : "bad";
@@ -161,10 +150,6 @@ export function SummaryCards({ results, trades }: SummaryCardsProps) {
   const vwapVals = results.map((r) => r.VWAP_dev_bps);
   const avgVwap = safeAvg(vwapVals);
   const vwapCount = vwapVals.filter((v) => v !== null).length;
-
-  const volAdjVals = results.map((r) => r.volAdjIS);
-  const avgVolAdj = safeAvg(volAdjVals);
-  const volAdjCount = volAdjVals.filter((v) => v !== null).length;
 
   const twasVals = results.map((r) => r.TWAS_bps);
   const avgTwas = safeAvg(twasVals);
@@ -245,13 +230,6 @@ export function SummaryCards({ results, trades }: SummaryCardsProps) {
         value={fmtBps(avgIS)}
         sub={subOf(isCount)}
         sentiment={bpsSentiment(avgIS)}
-      />
-      <KpiCard
-        label="Vol-Adj IS"
-        value={fmtSigma(avgVolAdj)}
-        sub={subOf(volAdjCount)}
-        sentiment={volAdjSentiment(avgVolAdj)}
-        title={SIGMA_TOOLTIP}
       />
       <KpiCard
         label="Avg VWAP Dev"

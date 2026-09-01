@@ -21,7 +21,7 @@ import type {
   TradeRecord,
 } from "@/types";
 import { useCorporateTemplate, type BridgeStatus } from "@/hooks/useCorporateTemplate";
-import { fmtBps, fmtSigma, fmtTtf, safeAvg } from "@/components/dashboard/dashboardUtils";
+import { fmtBps, fmtTtf, safeAvg } from "@/components/dashboard/dashboardUtils";
 import {
   AGGREGATE_COLUMNS,
   renderAggregateCell,
@@ -508,7 +508,7 @@ export function MultiOrderPrintLayout({
                 <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 text-left">
                   {[
                     "Order Time (UTC)", "Symbol", "Generic", "Side", "Qty", "Fill Price",
-                    "Algo", "IS (bps)", "Vol-Adj IS", "VWAP Dev (bps)", "TWAS (bps)", "TTF", "1σ Vol (bps)",
+                    "Algo", "IS (bps)", "VWAP Dev (bps)", "TWAS (bps)", "TTF", "1σ Vol (bps)",
                   ].map((h) => (
                     <th key={h} className="px-1.5 py-1.5 font-semibold whitespace-nowrap">{h}</th>
                   ))}
@@ -533,7 +533,6 @@ export function MultiOrderPrintLayout({
                       </td>
                       <td className="px-1.5 py-1">{t.algo ?? "—"}</td>
                       <td className="px-1.5 py-1 tabular-nums"><BpsPrint v={r?.IS_bps ?? null} /></td>
-                      <td className="px-1.5 py-1 tabular-nums">{fmtSigma(r?.volAdjIS ?? null)}</td>
                       <td className="px-1.5 py-1 tabular-nums"><BpsPrint v={r?.VWAP_dev_bps ?? null} /></td>
                       <td className="px-1.5 py-1 tabular-nums"><BpsPrint v={r?.TWAS_bps ?? null} neutral /></td>
                       <td className="px-1.5 py-1 tabular-nums text-gray-700">{r ? fmtTtf(r.timeToFill_ms) : "—"}</td>

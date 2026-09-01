@@ -241,7 +241,6 @@ function App() {
         <main className="flex-1 overflow-auto">
           <SingleOrderDashboard
             trades={rawTrades}
-            results={results}
             enrichment={enrichment}
             bloombergConnected={bloombergConnected}
             enrichedCount={enrichedCount}

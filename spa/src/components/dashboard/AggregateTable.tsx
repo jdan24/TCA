@@ -18,11 +18,8 @@ import { usePortalMenu } from "@/hooks/usePortalMenu";
 import {
   ChartCard,
   fmtBps,
-  fmtSigma,
   fmtTtf,
   FxNote,
-  sigmaBandClass,
-  SIGMA_TOOLTIP,
   UnconvertedMark,
 } from "./dashboardUtils";
 import { useCashDisplay } from "@/hooks/useCashDisplay";
@@ -38,7 +35,6 @@ export type AggregateColumnId =
   | "count"
   | "totalQty"
   | "avgIS_bps"
-  | "avgVolAdjIS"
   | "avgVWAP_dev_bps"
   | "totalVWAP_dev_usd"
   | "avgTWAP_dev_bps"
@@ -59,7 +55,6 @@ export const AGGREGATE_COLUMNS: ReadonlyArray<{
   { id: "count",             label: "Orders"          },
   { id: "totalQty",          label: "Total Qty"       },
   { id: "avgIS_bps",         label: "Avg IS"          },
-  { id: "avgVolAdjIS",       label: "Vol-Adj IS",       title: SIGMA_TOOLTIP },
   { id: "avgVWAP_dev_bps",   label: "vs Mkt VWAP"     },
   {
     id: "totalVWAP_dev_usd",
@@ -131,15 +126,6 @@ export function renderAggregateCell(row: AggregateRow, id: AggregateColumnId) {
       );
     case "avgIS_bps":
       return <BpsCell value={row.avgIS_bps} />;
-    case "avgVolAdjIS":
-      return (
-        <span
-          className={`tabular-nums font-medium ${sigmaBandClass(row.avgVolAdjIS)}`}
-          title={SIGMA_TOOLTIP}
-        >
-          {fmtSigma(row.avgVolAdjIS)}
-        </span>
-      );
     case "avgVWAP_dev_bps":
       return <BpsCell value={row.avgVWAP_dev_bps} />;
     case "totalVWAP_dev_usd":
