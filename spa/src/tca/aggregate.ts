@@ -7,6 +7,7 @@
  * Each row includes orderIds for TradeTable pre-filtering.
  */
 
+import { NATIVE_TOTALLER, type CashTotaller } from "./fx";
 import type {
   AggregateRow,
   AggregationSet,
@@ -29,6 +30,7 @@ function groupBy(
   trades: TradeRecord[],
   results: TCAResult[],
   keyFn: (t: TradeRecord) => string,
+  cash: CashTotaller = NATIVE_TOTALLER,
 ): AggregateRow[] {
   const resultMap = new Map<string, TCAResult>();
   for (const r of results) resultMap.set(r.orderId, r);
@@ -58,20 +60,27 @@ function groupBy(
     const avgTWAP_dev_bps = safeAvg(gResults.map((r) => r.TWAP_dev_bps));
 
     // Cash figures are group totals rather than averages: they are additive, and
-    // the total cost of trading a symbol is what gets acted on. Summing across
-    // currencies would be meaningless — there is no FX conversion anywhere in
-    // this app — so a mixed-currency group reports null rather than a wrong
-    // number, the same call SummaryCards makes for its Total Cost tile.
-    const currencies = new Set(gResults.map((r) => r.currency));
-    const currency = currencies.size === 1 ? [...currencies][0] ?? null : null;
+    // the total cost of trading a symbol is what gets acted on.
+    //
+    // Whether a group can be totalled at all is the totaller's call. In native
+    // mode that means one currency, as it always did — summing across currencies
+    // without converting is meaningless. In USD mode every member is converted
+    // first, so a group spanning Bund and Treasury futures gains a real total.
+    // A group with one unconvertible member still reports none, rather than a
+    // sum that quietly omits it.
+    const currencyList = [...new Set(gResults.map((r) => r.currency))];
+    const currency = cash.totalCurrency(currencyList);
+    const canSum = cash.canTotal(currencyList);
     const sumUsd = (pick: (r: TCAResult) => number | null): number | null => {
-      if (currency === null) return null;
+      if (!canSum) return null;
       let sum = 0;
       let seen = 0;
       for (const r of gResults) {
         const v = pick(r);
         if (v === null || !isFinite(v)) continue;
-        sum += v;
+        const converted = cash.toDisplay(v, r.currency);
+        if (converted === null) return null;
+        sum += converted;
         seen += 1;
       }
       return seen > 0 ? sum : null;
@@ -130,20 +139,29 @@ export function buildAggregations(
    * byAlgo is unaffected either way — it never keys on the symbol.
    */
   groupSymbol: (ric: string) => string = (s) => s,
+  /**
+   * How cash totals are formed. Omitted, groups total only within one currency —
+   * the behaviour from before FX existed. The dashboard passes useCashDisplay,
+   * so USD mode converts each member before adding and cross-currency groups
+   * gain a real total.
+   */
+  cash: CashTotaller = NATIVE_TOTALLER,
 ): AggregationSet {
   return {
-    bySymbol: groupBy(trades, results, (t) => groupSymbol(t.symbol)),
-    byAlgo: groupBy(trades, results, (t) => t.algo ?? "(no algo)"),
+    bySymbol: groupBy(trades, results, (t) => groupSymbol(t.symbol), cash),
+    byAlgo: groupBy(trades, results, (t) => t.algo ?? "(no algo)", cash),
     bySymbolAlgo: groupBy(
       trades,
       results,
       (t) => `${groupSymbol(t.symbol)} / ${t.algo ?? "(no algo)"}`,
+      cash,
     ),
-    bySymbolSide: groupBy(trades, results, (t) => `${groupSymbol(t.symbol)} ${t.side}`),
+    bySymbolSide: groupBy(trades, results, (t) => `${groupSymbol(t.symbol)} ${t.side}`, cash),
     bySymbolAlgoSide: groupBy(
       trades,
       results,
       (t) => `${groupSymbol(t.symbol)} / ${t.algo ?? "(no algo)"} ${t.side}`,
+      cash,
     ),
   };
 }

@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { useFxSettings } from "@/hooks/useFxSettings";
 import { AlgoMappingModal } from "@/components/settings/AlgoMappingModal";
 import { SymbolMappingModal } from "@/components/settings/SymbolMappingModal";
 import { FAQModal } from "./FAQModal";
 import { BloombergStatus } from "./BloombergStatus";
 
 export function Header() {
+  const { display, setDisplay } = useFxSettings();
   const [showMapping, setShowMapping] = useState(false);
   const [showAlgos, setShowAlgos] = useState(false);
   const [showFAQ, setShowFAQ] = useState(false);
@@ -22,6 +24,26 @@ export function Header() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Display currency — global, so a report can never mix the two and a
+              printed page is unambiguous about which it is. */}
+          <div
+            className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
+            role="group"
+            aria-label="Display currency"
+          >
+            <CurrencyButton
+              label="USD"
+              title="Convert every cash figure to USD at the current Bloomberg rate. Rates and overrides are set in Symbols."
+              active={display === "usd"}
+              onClick={() => setDisplay("usd")}
+            />
+            <CurrencyButton
+              label="Native"
+              title="Show each cash figure in the contract's own currency. No conversion; groups spanning more than one currency report no total."
+              active={display === "native"}
+              onClick={() => setDisplay("native")}
+            />
+          </div>
           <button
             type="button"
             onClick={() => setShowFAQ(true)}
@@ -67,5 +89,34 @@ export function Header() {
       {showAlgos && <AlgoMappingModal onClose={() => setShowAlgos(false)} />}
       {showFAQ && <FAQModal onClose={() => setShowFAQ(false)} />}
     </>
+  );
+}
+
+function CurrencyButton({
+  label,
+  title,
+  active,
+  onClick,
+}: {
+  label: string;
+  title: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-pressed={active}
+      className={[
+        "px-2.5 py-1.5 text-xs font-medium transition-colors",
+        active
+          ? "bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300"
+          : "bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700",
+      ].join(" ")}
+    >
+      {label}
+    </button>
   );
 }

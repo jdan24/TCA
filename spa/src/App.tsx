@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { enrichAllTrades, enrichSingleOrder, type EnrichProgress } from "@/bloomberg/enrichmentService";
 import { enrichSettleBenchmarks } from "@/bloomberg/settleService";
+import { fetchFxRates } from "@/bloomberg/fxService";
+import { toMajorCurrency } from "@/tca/dollars";
 import { Header } from "@/components/layout/Header";
 import { SymbolRefreshBanner } from "@/components/layout/SymbolRefreshBanner";
 import { FileDropZone } from "@/components/upload/FileDropZone";
@@ -29,6 +31,7 @@ function App() {
   const setSingleOrderFetchWindow = useTCAStore((s) => s.setSingleOrderFetchWindow);
   const settleBenchmarks  = useTCAStore((s) => s.settleBenchmarks);
   const setSettleData     = useTCAStore((s) => s.setSettleData);
+  const setFxRates        = useTCAStore((s) => s.setFxRates);
   const settleTolerance   = useTCAStore((s) => s.settleTolerance);
   const symbolMapDirty = useTCAStore((s) => s.symbolMapDirty);
   const setSymbolMapDirty = useTCAStore((s) => s.setSymbolMapDirty);
@@ -98,6 +101,22 @@ function App() {
     }
   }, [scaledTrades, enrichment, symbolMap.mappings, setResults]);
 
+  /**
+   * Pull a USD rate for every currency the report touches.
+   *
+   * Run after enrichment rather than alongside it: the contract's currency comes
+   * from Bloomberg's CRNCY, so which rates are needed is not known until the
+   * reference data is in. The file's own currency column is included as well,
+   * since it is what the display falls back to when Bloomberg says nothing.
+   *
+   * Failures are silent by design — a missing rate shows the figure natively and
+   * marked, which is the same outcome as never having fetched.
+   */
+  async function refreshFxRates(currencies: Iterable<string>) {
+    const rates = await fetchFxRates(currencies);
+    setFxRates(rates);
+  }
+
   async function handleFetchSettle() {
     if (rawTrades.length === 0 || !bloombergConnected || enrichProgress !== null) return;
     setEnrichProgress({ done: 0, total: 1 });
@@ -108,6 +127,10 @@ function App() {
       setEnrichProgress,
     );
     setSettleData(benchmarks, reference);
+    await refreshFxRates([
+      ...Object.values(reference).map((r) => toMajorCurrency(r["CRNCY"]) ?? ""),
+      ...scaledTrades.map((t) => t.currency),
+    ]);
     setSymbolMapDirty(false);
     setEnrichProgress(null);
   }
@@ -130,6 +153,10 @@ function App() {
       // as reversion that never happened.
       : await enrichAllTrades(scaledTrades, setEnrichProgress, symbolMap.resolve);
     setAllEnrichment(result);
+    await refreshFxRates([
+      ...Object.values(result).map((e) => e.currency ?? ""),
+      ...scaledTrades.map((t) => t.currency),
+    ]);
     // Record the exact time window used for this fetch so the stale indicator
     // can accurately detect when the override has moved outside the fetched range.
     if (mode === "single") {

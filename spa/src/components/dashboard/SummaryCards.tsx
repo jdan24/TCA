@@ -18,6 +18,7 @@ import { useState } from "react";
 import type { TCAResult, TradeRecord } from "@/types";
 import { resolveBenchmark } from "@/hooks/useAlgoMap";
 import { fmtBps, fmtSigma, fmtTtf, fmtUsd, safeAvg, SIGMA_TOOLTIP } from "./dashboardUtils";
+import { useCashDisplay } from "@/hooks/useCashDisplay";
 
 interface SummaryCardsProps {
   results: TCAResult[];
@@ -37,9 +38,11 @@ interface KpiCardProps {
   title?: string;
   /** When provided, a dismiss control appears on hover/focus. */
   onHide?: () => void;
+  /** FX disclosure, when this tile is showing a converted figure. */
+  note?: string;
 }
 
-function KpiCard({ label, value, sub, sentiment = "neutral", title, onHide }: KpiCardProps) {
+function KpiCard({ label, value, sub, sentiment = "neutral", title, onHide, note }: KpiCardProps) {
   const valueClass =
     sentiment === "good"
       ? "text-green-600 dark:text-green-400"
@@ -70,6 +73,11 @@ function KpiCard({ label, value, sub, sentiment = "neutral", title, onHide }: Kp
       </p>
       <p className={`text-2xl font-semibold tabular-nums ${valueClass}`}>{value}</p>
       <p className="text-xs text-gray-400 dark:text-gray-600">{sub}</p>
+      {/* The rate behind a converted figure travels with the figure, so the
+          tile cannot be screenshotted without it. */}
+      {note !== undefined && note.trim() !== "" && (
+        <p className="mt-1 text-[10px] leading-tight text-gray-400 dark:text-gray-500">{note}</p>
+      )}
     </div>
   );
 }
@@ -135,6 +143,7 @@ function bpsSentiment(v: number | null): Sentiment {
 export function SummaryCards({ results, trades }: SummaryCardsProps) {
   const n = results.length;
 
+  const cash = useCashDisplay();
   const [hiddenKpis, setHiddenKpis] = useState<string[]>(loadHiddenKpis);
   const setHidden = (id: string, hidden: boolean) => {
     setHiddenKpis((prev) => {
@@ -164,11 +173,15 @@ export function SummaryCards({ results, trades }: SummaryCardsProps) {
   const avgTtf = safeAvg(results.map((r) => r.timeToFill_ms));
 
   // ── Total cost, each order against its own algo's benchmark ───────────────
+  //
+  // In USD mode each order is converted before it is added, so a book spanning
+  // several currencies gets a real total. In native mode a mixed book still
+  // reports none — adding across currencies without converting was, and remains,
+  // meaningless.
   const totalCost = (() => {
     const resultById = new Map(results.map((r) => [r.orderId, r]));
     const currencies = new Set<string>();
-    let sum = 0;
-    let priced = 0;
+    const parts: Array<{ usd: number; ccy: string }> = [];
 
     for (const trade of trades) {
       const r = resultById.get(trade.orderId);
@@ -179,27 +192,43 @@ export function SummaryCards({ results, trades }: SummaryCardsProps) {
         benchmark === "twap" ? r.TWAP_dev_usd :
         r.IS_usd;
       if (usd === null) continue;
-      sum += usd;
-      priced += 1;
+      parts.push({ usd, ccy: r.currency });
       // r.currency is Bloomberg's quote currency when known, so a USd-quoted
       // contract lands in the USD bucket rather than splitting the total.
       currencies.add(r.currency);
     }
 
-    if (priced === 0) {
+    if (parts.length === 0) {
       return { value: null, sub: "needs point value", currency: "USD" };
     }
-    // No FX conversion anywhere in the app, so a total across currencies would
-    // be meaningless. Report the gap instead of a wrong number.
-    if (currencies.size > 1) {
-      return { value: null, sub: "mixed currencies", currency: "USD" };
+
+    const ccyList = [...currencies];
+    if (!cash.canTotal(ccyList)) {
+      return {
+        value: null,
+        sub: cash.display === "usd" ? "no FX rate" : "mixed currencies",
+        currency: "USD",
+      };
     }
+
+    let sum = 0;
+    for (const p of parts) {
+      const v = cash.toDisplay(p.usd, p.ccy);
+      // canTotal already established every currency converts; this is belt and
+      // braces so a total can never silently omit a member.
+      if (v === null) return { value: null, sub: "no FX rate", currency: "USD" };
+      sum += v;
+    }
+
     return {
       value: sum,
-      sub: subOf(priced),
-      currency: [...currencies][0] ?? "USD",
+      sub: subOf(parts.length),
+      currency: cash.totalCurrency(ccyList) ?? "USD",
     };
   })();
+
+  /** Every currency on the page, for the disclosure line under the tiles. */
+  const allCurrencies = [...new Set(results.map((r) => r.currency))];
 
   const uniqueOrderCount = new Set(results.map((r) => r.orderId)).size;
 
@@ -242,6 +271,7 @@ export function SummaryCards({ results, trades }: SummaryCardsProps) {
         <KpiCard
           label="Total Cost"
           value={fmtUsd(totalCost.value, totalCost.currency)}
+          note={cash.disclosureFor(allCurrencies)}
           sub={totalCost.sub}
           sentiment={totalCost.value === null ? "neutral" : totalCost.value <= 0 ? "good" : "bad"}
           onHide={() => setHidden("totalCost", true)}

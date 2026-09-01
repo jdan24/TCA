@@ -23,6 +23,7 @@ import type { SettleGroupRow } from "@/tca/settleAggregate";
 import { settleWindowLabel } from "@/tca/settle";
 import { useCorporateTemplate } from "@/hooks/useCorporateTemplate";
 import { fmtBps, fmtUsd, slipToneClass } from "@/components/dashboard/dashboardUtils";
+import { useCashDisplay } from "@/hooks/useCashDisplay";
 import {
   renderSettleCell,
   SETTLE_COLUMNS,
@@ -263,6 +264,7 @@ function PrintGroupTable({
   showWindowColumn: boolean;
   showAlgoColumn?: boolean;
 }) {
+  const cash = useCashDisplay();
   if (rows.length === 0) return null;
   const headers = showWindowColumn
     ? [
@@ -356,6 +358,15 @@ function PrintGroupTable({
           </tbody>
         </table>
       </div>
+      {/* The rate a printed figure was converted at travels with the table, so a
+          saved PDF is self-contained. */}
+      <FxPrintNote text={cash.disclosureFor(rows.map((r) => r.currency ?? "USD"))} />
     </div>
   );
+}
+
+/** Print-side FX disclosure — no dark-mode classes, like everything else here. */
+function FxPrintNote({ text }: { text: string }) {
+  if (text.trim() === "") return null;
+  return <p className="mt-1 text-[9px] text-gray-500">{text}</p>;
 }

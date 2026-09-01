@@ -8,7 +8,14 @@
 
 import type { SettleGroupRow } from "@/tca/settleAggregate";
 import { settleWindowLabel } from "@/tca/settle";
-import { ChartCard, fmtBps, fmtUsd, slipToneClass } from "@/components/dashboard/dashboardUtils";
+import {
+  ChartCard,
+  fmtBps,
+  fmtUsd,
+  FxNote,
+  slipToneClass,
+} from "@/components/dashboard/dashboardUtils";
+import { useCashDisplay } from "@/hooks/useCashDisplay";
 
 const HEADERS = [
   "Window",
@@ -20,6 +27,7 @@ const HEADERS = [
 ] as const;
 
 export function SettleWindowSummary({ rows }: { rows: SettleGroupRow[] }) {
+  const cash = useCashDisplay();
   return (
     <ChartCard
       title="By Settle Window"
@@ -117,6 +125,7 @@ export function SettleWindowSummary({ rows }: { rows: SettleGroupRow[] }) {
         </span>
         <span>Positive slippage is a cost.</span>
       </div>
+      <FxNote text={cash.disclosureFor(rows.map((r) => r.currency ?? "USD"))} />
     </ChartCard>
   );
 }

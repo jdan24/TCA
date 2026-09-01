@@ -1,3 +1,5 @@
+import type { FxRateMap } from "@/tca/fx";
+
 // ── Intraday bar (also re-exported from bloombergClient) ─────────────────────
 export interface IntradayBar {
   /** ISO-8601 string: bar open time (UTC implied). */
@@ -344,6 +346,9 @@ export interface SymbolMapping {
   pointValue?: number;
 }
 
+// ── FX ────────────────────────────────────────────────────────────────────────
+export type { DisplayCurrency, FxRate, FxRateMap } from "@/tca/fx";
+
 // ── Algo → benchmark mapping ──────────────────────────────────────────────────
 /** Which benchmark an order should be measured against. */
 export type BenchmarkKind = "arrival" | "vwap" | "twap";
@@ -419,6 +424,10 @@ export interface TCAStore {
   /** Bucketing tolerance for the target-settle report. */
   settleTolerance: SettleTolerance;
   setSettleTolerance: (t: SettleTolerance) => void;
+  /** USD rates per currency, as fetched from Bloomberg. Overrides are merged on
+   *  read from useFxSettings, so this holds only what the bridge answered. */
+  fxRates: FxRateMap;
+  setFxRates: (r: FxRateMap) => void;
   /** True when symbol mappings changed since the last Bloomberg fetch — drives the
    *  "refresh data to pick up new mappings" banner on the dashboard. */
   symbolMapDirty: boolean;

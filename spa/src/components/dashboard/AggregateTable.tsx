@@ -20,10 +20,12 @@ import {
   fmtBps,
   fmtSigma,
   fmtTtf,
-  fmtUsd,
+  FxNote,
   sigmaBandClass,
   SIGMA_TOOLTIP,
+  UnconvertedMark,
 } from "./dashboardUtils";
+import { useCashDisplay } from "@/hooks/useCashDisplay";
 
 // ── Columns ───────────────────────────────────────────────────────────────────
 //
@@ -203,6 +205,7 @@ export function AggregateTable({
   onVisibleColumnsChange,
 }: AggregateTableProps) {
   const { open, btnRef, menuRef, pos, toggle } = usePortalMenu("right");
+  const cash = useCashDisplay();
 
   // Render in canonical order regardless of the order ids were toggled in.
   const cols = AGGREGATE_COLUMNS.filter((c) => visibleColumns.includes(c.id));
@@ -318,6 +321,7 @@ export function AggregateTable({
           </tbody>
         </table>
       </div>
+      <FxNote text={cash.disclosureFor(rows.map((r) => r.currency ?? "USD"))} />
     </ChartCard>
   );
 }
@@ -343,15 +347,22 @@ function BpsCell({ value, neutral = false }: { value: number | null; neutral?: b
   );
 }
 
-/** Group total in cash. null means either no data or a mixed-currency group. */
+/**
+ * Group total in cash. null means either no data or a group that cannot be
+ * totalled — mixed currencies in native mode, or an unconvertible member in USD
+ * mode. Formats through useCashDisplay so the global toggle reaches it.
+ */
 function UsdCell({ value, currency }: { value: number | null; currency: string | null }) {
+  const cash = useCashDisplay();
   if (value === null) return <NaCell />;
+  const ccy = currency ?? "USD";
   const cls = value <= 0
     ? "text-green-600 dark:text-green-400"
     : "text-red-500 dark:text-red-400";
   return (
     <span className={`tabular-nums font-medium whitespace-nowrap ${cls}`}>
-      {fmtUsd(value, currency ?? "USD")}
+      {cash.formatCash(value, ccy)}
+      {cash.isUnconverted(value, ccy) && <UnconvertedMark />}
     </span>
   );
 }

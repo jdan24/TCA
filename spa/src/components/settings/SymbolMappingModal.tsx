@@ -6,12 +6,18 @@
  * All changes persist to localStorage immediately via useSymbolMap().
  *
  * The modal shows which symbols in the current dataset are mapped / unmapped.
+ *
+ * It also carries the FX rate overrides, in a section below the table — see
+ * FxRatesSection for why those are keyed by currency rather than by contract.
  */
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
+import { useFxSettings } from "@/hooks/useFxSettings";
 import { parseSymbolMapCsv } from "@/parsers/symbolMapCsv";
 import { useTCAStore } from "@/store/useTCAStore";
+import { toMajorCurrency } from "@/tca/dollars";
+import { currenciesNeedingRates, formatRate } from "@/tca/fx";
 import type { SymbolMapping } from "@/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -452,6 +458,8 @@ export function SymbolMappingModal({ onClose }: SymbolMappingModalProps) {
           </table>
         </div>
 
+        <FxRatesSection />
+
         {/* Footer */}
         <div className="px-6 py-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-3">
           <span className="text-[11px] text-gray-400 dark:text-gray-500">
@@ -615,5 +623,125 @@ function YellowKeySelect({ value, onChange }: YellowKeySelectProps) {
         <option key={k} value={k}>{k}</option>
       ))}
     </select>
+  );
+}
+
+// ── FX rates ──────────────────────────────────────────────────────────────────
+
+/**
+ * USD rates for the currencies the loaded report actually uses.
+ *
+ * Keyed by currency rather than by contract: a rate belongs to a currency, and
+ * every EUR product shares one EURUSD. Per-row rates would let two contracts
+ * disagree about the same number and leave the report with nothing single to
+ * disclose.
+ *
+ * Only currencies present in the loaded data are listed. A rate for something
+ * not in the file is not wrong, just noise — and the empty state is a more
+ * useful message than a table of currencies nobody traded.
+ */
+function FxRatesSection() {
+  const rawTrades = useTCAStore((s) => s.rawTrades);
+  const enrichment = useTCAStore((s) => s.enrichment);
+  const settleReference = useTCAStore((s) => s.settleReference);
+  const fetched = useTCAStore((s) => s.fxRates);
+  const { overrides, setOverride } = useFxSettings();
+
+  // Currencies in play: Bloomberg's where it answered, the file's otherwise —
+  // the same precedence the cash figures themselves use.
+  const currencies = useMemo(() => {
+    const all: string[] = [
+      ...rawTrades.map((t) => t.currency),
+      ...Object.values(enrichment).map((e) => e.currency ?? ""),
+      ...Object.values(settleReference).map((r) => toMajorCurrency(r["CRNCY"]) ?? ""),
+    ];
+    return currenciesNeedingRates(all);
+  }, [rawTrades, enrichment, settleReference]);
+
+  if (currencies.length === 0) {
+    return (
+      <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-800">
+        <SectionHeading />
+        <p className="text-[11px] text-gray-400 dark:text-gray-500">
+          Every contract in this report is USD-denominated &mdash; no conversion needed.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-6 py-4 border-t border-gray-100 dark:border-gray-800">
+      <SectionHeading />
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+            <th className="pb-2 pr-4">Currency</th>
+            <th className="pb-2 pr-4">Bloomberg</th>
+            <th className="pb-2 pr-4">Override</th>
+            <th className="pb-2">In use</th>
+          </tr>
+        </thead>
+        <tbody>
+          {currencies.map((ccy) => {
+            const bbg = fetched[ccy];
+            const override = overrides[ccy];
+            const inUse = override ?? bbg?.rate ?? null;
+            return (
+              <tr key={ccy} className="border-t border-gray-50 dark:border-gray-800/50">
+                <td className="py-2 pr-4 font-semibold text-gray-800 dark:text-gray-200">
+                  {ccy}USD
+                </td>
+                <td className="py-2 pr-4 tabular-nums text-gray-500 dark:text-gray-400">
+                  {bbg === undefined ? (
+                    <span className="text-gray-300 dark:text-gray-600">not fetched</span>
+                  ) : (
+                    formatRate(bbg.rate)
+                  )}
+                </td>
+                <td className="py-2 pr-4">
+                  <input
+                    type="number"
+                    step="any"
+                    min={0}
+                    value={override ?? ""}
+                    placeholder="—"
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      setOverride(ccy, v === "" ? null : Number(v));
+                    }}
+                    className="w-28 px-2 py-1 text-xs rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </td>
+                <td className="py-2 tabular-nums">
+                  {inUse === null ? (
+                    <span className="text-amber-600 dark:text-amber-400">none</span>
+                  ) : (
+                    <span className="text-gray-800 dark:text-gray-200">
+                      {formatRate(inUse)}
+                      {override !== undefined && (
+                        <span className="ml-1 text-[10px] text-blue-500">override</span>
+                      )}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <p className="mt-2 text-[11px] text-gray-400 dark:text-gray-500">
+        USD per 1 unit &mdash; EUR 1.0842, JPY 0.0068. Fetched with the rest of the
+        Bloomberg data; an override wins and is labelled as such wherever the rate is
+        disclosed. Clear the box to go back to Bloomberg&rsquo;s rate.
+      </p>
+    </div>
+  );
+}
+
+function SectionHeading() {
+  return (
+    <h3 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-blue-500">
+      FX Rates (to USD)
+    </h3>
   );
 }

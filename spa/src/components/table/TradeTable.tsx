@@ -31,7 +31,14 @@ import type { BloombergEnrichment, TCAResult, TradeRecord } from "@/types";
 import { useTCAStore } from "@/store/useTCAStore";
 import { resolveBenchmark } from "@/hooks/useAlgoMap";
 import { usePortalMenu } from "@/hooks/usePortalMenu";
-import { fmtSigma, fmtUsd, sigmaBandClass, SIGMA_TOOLTIP } from "@/components/dashboard/dashboardUtils";
+import {
+  fmtSigma,
+  FxNote,
+  sigmaBandClass,
+  SIGMA_TOOLTIP,
+  UnconvertedMark,
+} from "@/components/dashboard/dashboardUtils";
+import { useCashDisplay } from "@/hooks/useCashDisplay";
 import { toGenericTicker } from "@/tca/genericTicker";
 
 // ── Merged row type ───────────────────────────────────────────────────────────
@@ -417,8 +424,15 @@ function BpsCell({
   );
 }
 
-/** Cash slippage cell — same red/green cost convention as BpsCell. */
+/**
+ * Cash slippage cell — same red/green cost convention as BpsCell.
+ *
+ * Formats through useCashDisplay rather than fmtUsd directly, so the global
+ * USD/native toggle reaches it without every caller having to pass the mode
+ * down. A figure USD mode could not convert stays native and is marked.
+ */
 function UsdCell({ value, currency }: { value: number | null; currency: string }) {
+  const cash = useCashDisplay();
   if (value === null) {
     return <span className="text-gray-300 dark:text-gray-600 text-xs select-none">N/A</span>;
   }
@@ -427,7 +441,8 @@ function UsdCell({ value, currency }: { value: number | null; currency: string }
     : "text-red-500 dark:text-red-400";
   return (
     <span className={`tabular-nums text-xs font-medium ${cls}`}>
-      {fmtUsd(value, currency)}
+      {cash.formatCash(value, currency)}
+      {cash.isUnconverted(value, currency) && <UnconvertedMark />}
     </span>
   );
 }
@@ -759,6 +774,7 @@ const METRIC_COLUMN_IDS = new Set([
 ]);
 
 export function TradeTable({ trades, results, title = "Trade Detail", hideMetrics = false, resolveSymbol, priceFormatterForSymbol, showExcelExport = false, onDeleteOrder, genericFor }: TradeTableProps) {
+  const cash = useCashDisplay();
   const aggregationFilter = useTCAStore((s) => s.aggregationFilter);
   const setAggregationFilter = useTCAStore((s) => s.setAggregationFilter);
   const rawTrades   = useTCAStore((s) => s.rawTrades);
@@ -1203,6 +1219,10 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="px-4">
+        <FxNote text={cash.disclosureFor(results.map((r) => r.currency))} />
       </div>
 
       {/* ── Pagination ────────────────────────────────────────────────── */}

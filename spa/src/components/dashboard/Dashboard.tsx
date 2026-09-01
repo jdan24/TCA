@@ -21,6 +21,7 @@ import { buildAggregations, buildSpreadSavings } from "@/tca/aggregate";
 import { toGenericTicker } from "@/tca/genericTicker";
 import { decToTreasuryFrac, getTreasuryPrecision } from "@/tca/treasuryFrac";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
+import { useCashDisplay } from "@/hooks/useCashDisplay";
 import { MultiOrderPrintLayout, type MOChartImages } from "@/components/export/MultiOrderPrintLayout";
 import { TradeTable } from "@/components/table/TradeTable";
 import { AggregationSection } from "./AggregationSection";
@@ -97,6 +98,10 @@ export function Dashboard({
   onFetchBloomberg,
   onReset,
 }: DashboardProps) {
+  // Cash display mode + FX rates. Passed into buildAggregations so group totals
+  // are formed in whatever currency the report is being read in.
+  const cash = useCashDisplay();
+
   // Per-row price formatter for the table's TWAS (price) column: Treasury
   // futures show 32nds, everything else falls back to plain decimals.
   const { resolve: resolveSymbol } = useSymbolMap();
@@ -220,8 +225,9 @@ export function Dashboard({
       filteredTrades,
       filteredResults,
       groupGeneric ? genericFor : undefined,
+      cash,
     ),
-    [filteredTrades, filteredResults, groupGeneric, genericFor],
+    [filteredTrades, filteredResults, groupGeneric, genericFor, cash],
   );
 
   // Always by generic ticker — collapsing expiries onto the instrument is the

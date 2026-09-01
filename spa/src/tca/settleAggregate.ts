@@ -9,6 +9,7 @@
  */
 
 import type { SettleResult, SettleWindow, TradeRecord } from "@/types";
+import { NATIVE_TOTALLER, type CashTotaller } from "./fx";
 import { safeAvg } from "@/components/dashboard/dashboardUtils";
 
 export interface SettleGroupRow {
@@ -38,21 +39,25 @@ function summarise(
   window: SettleWindow,
   algo: string | null,
   rows: Array<{ result: SettleResult; qty: number }>,
+  cash: CashTotaller,
 ): SettleGroupRow {
   const results = rows.map((r) => r.result);
 
-  const currencies = new Set(results.map((r) => r.currency));
-  const currency = currencies.size === 1 ? [...currencies][0] ?? null : null;
+  const currencyList = [...new Set(results.map((r) => r.currency))];
+  const currency = cash.totalCurrency(currencyList);
 
-  // Cash only totals within one currency — there is no FX conversion anywhere
-  // in this app, so a mixed group reports null instead of a wrong number.
+  // Whether a group totals at all is the totaller's call: one currency in native
+  // mode, every currency convertible in USD mode. A group with an unconvertible
+  // member reports null rather than a sum that quietly omits it.
   let totalSlip_usd: number | null = null;
-  if (currency !== null) {
+  if (cash.canTotal(currencyList)) {
     let sum = 0;
     let seen = 0;
     for (const r of results) {
       if (r.slip_usd === null || !isFinite(r.slip_usd)) continue;
-      sum += r.slip_usd;
+      const converted = cash.toDisplay(r.slip_usd, r.currency);
+      if (converted === null) { seen = 0; break; }
+      sum += converted;
       seen += 1;
     }
     totalSlip_usd = seen > 0 ? sum : null;
@@ -80,6 +85,7 @@ function summarise(
 export function buildSettleWindowSummary(
   trades: TradeRecord[],
   results: SettleResult[],
+  cash: CashTotaller = NATIVE_TOTALLER,
 ): SettleGroupRow[] {
   const qtyById = new Map(trades.map((t) => [t.orderId, t.orderQty]));
   const groups = new Map<SettleWindow, Array<{ result: SettleResult; qty: number }>>();
@@ -89,7 +95,7 @@ export function buildSettleWindowSummary(
     groups.get(r.window)?.push({ result: r, qty: qtyById.get(r.orderId) ?? 0 });
   }
 
-  return WINDOW_ORDER.map((w) => summarise(w, w, null, groups.get(w) ?? []));
+  return WINDOW_ORDER.map((w) => summarise(w, w, null, groups.get(w) ?? [], cash));
 }
 
 /**
@@ -100,6 +106,7 @@ export function buildSettleBySymbol(
   trades: TradeRecord[],
   results: SettleResult[],
   symbolKeyFor: (ric: string) => string,
+  cash: CashTotaller = NATIVE_TOTALLER,
 ): SettleGroupRow[] {
   const tradeById = new Map(trades.map((t) => [t.orderId, t]));
   const groups = new Map<string, { window: SettleWindow; label: string; rows: Array<{ result: SettleResult; qty: number }> }>();
@@ -118,7 +125,7 @@ export function buildSettleBySymbol(
   }
 
   return [...groups.values()]
-    .map((g) => summarise(g.label, g.window, null, g.rows))
+    .map((g) => summarise(g.label, g.window, null, g.rows, cash))
     .sort((a, b) => {
       const wa = WINDOW_ORDER.indexOf(a.window);
       const wb = WINDOW_ORDER.indexOf(b.window);
@@ -145,6 +152,7 @@ export function buildSettleBySymbolAlgo(
   trades: TradeRecord[],
   results: SettleResult[],
   symbolKeyFor: (ric: string) => string,
+  cash: CashTotaller = NATIVE_TOTALLER,
 ): SettleGroupRow[] {
   const tradeById = new Map(trades.map((t) => [t.orderId, t]));
   const groups = new Map<
@@ -178,7 +186,7 @@ export function buildSettleBySymbolAlgo(
   }
 
   return [...groups.values()]
-    .map((g) => ({ g, row: summarise(g.label, g.window, g.algo, g.rows) }))
+    .map((g) => ({ g, row: summarise(g.label, g.window, g.algo, g.rows, cash) }))
     .sort((a, b) => {
       const wa = WINDOW_ORDER.indexOf(a.row.window);
       const wb = WINDOW_ORDER.indexOf(b.row.window);

@@ -184,6 +184,34 @@ export function ChartCard({ title, subtitle, children, id, actions }: ChartCardP
   );
 }
 
+/**
+ * The FX disclosure printed under any table or card showing converted figures.
+ *
+ * Renders nothing when there is nothing to disclose — native mode, or a report
+ * that is entirely USD — so a single-currency report carries no footnote. It is
+ * repeated under every such surface rather than stated once at the top, so a
+ * figure cannot be read, screenshotted or printed apart from the rate that
+ * produced it.
+ */
+export function FxNote({ text }: { text: string }) {
+  if (text.trim() === "") return null;
+  return (
+    <p className="mt-2 text-[10px] text-gray-400 dark:text-gray-500">{text}</p>
+  );
+}
+
+/** Marker on a figure left in its native currency because no USD rate exists. */
+export function UnconvertedMark() {
+  return (
+    <span
+      className="ml-1 text-amber-600 dark:text-amber-400"
+      title="No USD rate available for this currency — shown in the contract's own currency. Set one in Symbols, or fetch Bloomberg."
+    >
+      &#9888;
+    </span>
+  );
+}
+
 export function EmptyState({ message }: { message: string }) {
   return (
     <div className="flex items-center justify-center h-44 text-sm text-gray-400 dark:text-gray-600 italic text-center px-4">

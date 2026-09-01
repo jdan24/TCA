@@ -18,9 +18,11 @@ import {
   ChartCard,
   EmptyState,
   fmtBps,
-  fmtUsd,
+  FxNote,
   slipToneClass,
+  UnconvertedMark,
 } from "@/components/dashboard/dashboardUtils";
+import { useCashDisplay } from "@/hooks/useCashDisplay";
 
 // ── Row shape ─────────────────────────────────────────────────────────────────
 
@@ -267,15 +269,7 @@ export function renderSettleCell(row: SettleTableRow, id: SettleColumnId) {
         </span>
       );
     case "slip_usd":
-      return r.slip_usd === null ? (
-        <NaCell />
-      ) : (
-        <span
-          className={`tabular-nums font-medium whitespace-nowrap ${slipToneClass(r.slip_usd)}`}
-        >
-          {fmtUsd(r.slip_usd, r.currency)}
-        </span>
-      );
+      return r.slip_usd === null ? <NaCell /> : <SlipUsdCell result={r} />;
     case "lastFillTime":
       return (
         <span className="tabular-nums font-mono text-[11px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
@@ -289,6 +283,24 @@ export function renderSettleCell(row: SettleTableRow, id: SettleColumnId) {
         </span>
       );
   }
+}
+
+/**
+ * Per-order cash slippage, in whichever currency the report is being read in.
+ *
+ * Its own component because renderSettleCell is a plain function, not a
+ * component, and so cannot call the hook that knows the display mode.
+ */
+function SlipUsdCell({ result }: { result: SettleResult }) {
+  const cash = useCashDisplay();
+  const v = result.slip_usd;
+  if (v === null) return <NaCell />;
+  return (
+    <span className={`tabular-nums font-medium whitespace-nowrap ${slipToneClass(v)}`}>
+      {cash.formatCash(v, result.currency)}
+      {cash.isUnconverted(v, result.currency) && <UnconvertedMark />}
+    </span>
+  );
 }
 
 /** CSV value for a column — plain text, no markup. */
@@ -328,6 +340,7 @@ export function SettleOrderTable({
   onExportCsv,
 }: SettleOrderTableProps) {
   const { open, btnRef, menuRef, pos, toggle } = usePortalMenu("right");
+  const cash = useCashDisplay();
   const cols = SETTLE_COLUMNS.filter((c) => visibleColumns.includes(c.id));
 
   function toggleColumn(id: SettleColumnId) {
@@ -437,6 +450,7 @@ export function SettleOrderTable({
           </tbody>
         </table>
       </div>
+      <FxNote text={cash.disclosureFor(rows.map((r) => r.result.currency))} />
     </ChartCard>
   );
 }

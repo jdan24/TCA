@@ -39,6 +39,7 @@ import {
 } from "@/tca/dollars";
 import { getTreasuryPrecision } from "@/tca/treasuryFrac";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
+import { useCashDisplay } from "@/hooks/useCashDisplay";
 import { useTCAStore } from "@/store/useTCAStore";
 import { SettleWindowSummary } from "./SettleWindowSummary";
 import { SettleAlgoDistribution } from "./SettleAlgoDistribution";
@@ -86,6 +87,9 @@ export function SettleDashboard({
   onReset,
 }: SettleDashboardProps) {
   const symbolMap = useSymbolMap();
+  // Cash display mode + FX rates, so group totals are formed in whatever
+  // currency the report is being read in.
+  const cash = useCashDisplay();
   const settleBenchmarks = useTCAStore((s) => s.settleBenchmarks);
   const settleReference = useTCAStore((s) => s.settleReference);
   const tolerance = useTCAStore((s) => s.settleTolerance);
@@ -152,8 +156,8 @@ export function SettleDashboard({
   );
 
   const windowSummary = useMemo(
-    () => buildSettleWindowSummary(trades, results),
-    [trades, results],
+    () => buildSettleWindowSummary(trades, results, cash),
+    [trades, results, cash],
   );
 
   const symbolKeyFor = useMemo(
@@ -163,15 +167,15 @@ export function SettleDashboard({
   );
 
   const bySymbol = useMemo(
-    () => buildSettleBySymbol(trades, results, symbolKeyFor),
-    [trades, results, symbolKeyFor],
+    () => buildSettleBySymbol(trades, results, symbolKeyFor, cash),
+    [trades, results, symbolKeyFor, cash],
   );
 
   // The instrument+algo table follows the same Generic/Expiry toggle, so the two
   // tables can never disagree about what counts as one instrument.
   const bySymbolAlgo = useMemo(
-    () => buildSettleBySymbolAlgo(trades, results, symbolKeyFor),
-    [trades, results, symbolKeyFor],
+    () => buildSettleBySymbolAlgo(trades, results, symbolKeyFor, cash),
+    [trades, results, symbolKeyFor, cash],
   );
 
   // Tick size for the spread-cost charts: Bloomberg's FUT_TICK_SIZE from the

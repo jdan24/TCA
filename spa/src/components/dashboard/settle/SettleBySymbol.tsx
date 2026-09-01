@@ -17,8 +17,10 @@ import {
   EmptyState,
   fmtBps,
   fmtUsd,
+  FxNote,
   slipToneClass,
 } from "@/components/dashboard/dashboardUtils";
+import { useCashDisplay } from "@/hooks/useCashDisplay";
 
 interface SettleGroupTableProps {
   rows: SettleGroupRow[];
@@ -66,6 +68,7 @@ function SettleGroupTable({
   emptyMessage: string;
   showAlgo: boolean;
 }) {
+  const cash = useCashDisplay();
   if (rows.length === 0) {
     return (
       <ChartCard title={title} {...(actions !== undefined ? { actions } : {})}>
@@ -151,6 +154,9 @@ function SettleGroupTable({
                     <span
                       className={`tabular-nums font-medium whitespace-nowrap ${slipToneClass(row.totalSlip_usd)}`}
                     >
+                      {/* Already in the display currency — the totaller
+                          converted each member before adding, so this only
+                          needs its symbol. */}
                       {fmtUsd(row.totalSlip_usd, row.currency ?? "USD")}
                     </span>
                   )}
@@ -160,6 +166,7 @@ function SettleGroupTable({
           </tbody>
         </table>
       </div>
+      <FxNote text={cash.disclosureFor(rows.map((r) => r.currency ?? "USD"))} />
     </ChartCard>
   );
 }

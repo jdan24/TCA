@@ -12,10 +12,11 @@ import type { ParentOrderSummary } from "@/types";
 import {
   fmtSigma,
   fmtTtf,
-  fmtUsd,
   sigmaBandClass,
   SIGMA_TOOLTIP,
+  UnconvertedMark,
 } from "@/components/dashboard/dashboardUtils";
+import { useCashDisplay } from "@/hooks/useCashDisplay";
 
 // ── UTC helpers ───────────────────────────────────────────────────────────────
 
@@ -312,7 +313,8 @@ interface BenchmarkRowProps {
   slippageBps: number | null;
   /** Same slippage in cash terms; null when no point value is known. */
   slippageUsd?: number | null;
-  /** Currency of slippageUsd — the contract's own, no FX conversion. */
+  /** Native currency of slippageUsd — the contract's own. Converted for display
+   *  when the global toggle is on USD; see useCashDisplay. */
   currency?: string;
   missing?: boolean;
   highlighted: boolean;
@@ -323,6 +325,7 @@ function BenchmarkRow({
   slippageLabel, slippageBps, slippageUsd, currency,
   missing, highlighted,
 }: BenchmarkRowProps) {
+  const cash = useCashDisplay();
   const favorable = slippageBps !== null && slippageBps <= 0;
   const adverse   = slippageBps !== null && slippageBps >  0;
   const bpsClass  = favorable
@@ -361,9 +364,14 @@ function BenchmarkRow({
           {!missing && slippageUsd !== null && slippageUsd !== undefined && (
             <p
               className={`text-[11px] font-medium tabular-nums ${bpsClass}`}
-              title="Point value x quantity x price difference. No FX conversion."
+              title={
+                cash.display === "usd"
+                  ? "Point value x quantity x price difference, converted to USD at the rate shown under the card."
+                  : "Point value x quantity x price difference, in the contract's own currency."
+              }
             >
-              {fmtUsd(slippageUsd, currency)}
+              {cash.formatCash(slippageUsd, currency ?? "USD")}
+              {cash.isUnconverted(slippageUsd, currency ?? "USD") && <UnconvertedMark />}
             </p>
           )}
         </div>
