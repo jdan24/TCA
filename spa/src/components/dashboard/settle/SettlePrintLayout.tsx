@@ -22,7 +22,12 @@ import type { SettleResult, SettleTolerance, SettleWindow, TradeRecord } from "@
 import type { SettleGroupRow } from "@/tca/settleAggregate";
 import { settleWindowLabel } from "@/tca/settle";
 import { useCorporateTemplate } from "@/hooks/useCorporateTemplate";
-import { fmtBps, fmtUsd, slipToneClass } from "@/components/dashboard/dashboardUtils";
+import {
+  fmtBps,
+  fmtUsd,
+  FxPrintNote,
+  slipToneClass,
+} from "@/components/dashboard/dashboardUtils";
 import { useCashDisplay } from "@/hooks/useCashDisplay";
 import {
   renderSettleCell,
@@ -365,8 +370,3 @@ function PrintGroupTable({
   );
 }
 
-/** Print-side FX disclosure — no dark-mode classes, like everything else here. */
-function FxPrintNote({ text }: { text: string }) {
-  if (text.trim() === "") return null;
-  return <p className="mt-1 text-[9px] text-gray-500">{text}</p>;
-}

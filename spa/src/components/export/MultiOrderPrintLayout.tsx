@@ -21,8 +21,10 @@ import type {
   TradeRecord,
 } from "@/types";
 import { useCorporateTemplate, type BridgeStatus } from "@/hooks/useCorporateTemplate";
-import { fmtBps, fmtTtf, safeAvg } from "@/components/dashboard/dashboardUtils";
+import { fmtBps, fmtTtf, FxPrintNote, safeAvg } from "@/components/dashboard/dashboardUtils";
+import { useCashDisplay } from "@/hooks/useCashDisplay";
 import {
+  AGGREGATE_CASH_COLUMN_IDS,
   AGGREGATE_COLUMNS,
   renderAggregateCell,
   type AggregateColumnId,
@@ -164,10 +166,14 @@ function PrintAggTable({
   rows: AggregateRow[];
   visibleColumns: AggregateColumnId[];
 }) {
+  const cash = useCashDisplay();
   if (rows.length === 0) return null;
   // Columns mirror that table's on-screen selection, and the cells come from the
   // same renderer the screen uses, so the two cannot drift apart.
   const cols = AGGREGATE_COLUMNS.filter((c) => visibleColumns.includes(c.id));
+  // The disclosure only applies if a cash column is actually on: a table of bps
+  // converted nothing and a footnote about FX rates would be noise on it.
+  const showsCash = cols.some((c) => AGGREGATE_CASH_COLUMN_IDS.has(c.id));
   return (
     <div className="break-inside-avoid mb-5">
       <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-1.5">{title}</p>
@@ -195,6 +201,9 @@ function PrintAggTable({
           </tbody>
         </table>
       </div>
+      <FxPrintNote
+        text={showsCash ? cash.disclosureFor(rows.map((r) => r.currency ?? "USD")) : ""}
+      />
     </div>
   );
 }

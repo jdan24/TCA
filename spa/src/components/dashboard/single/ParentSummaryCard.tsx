@@ -11,6 +11,7 @@ import { useState } from "react";
 import type { ParentOrderSummary } from "@/types";
 import {
   fmtTtf,
+  FxNote,
   UnconvertedMark,
 } from "@/components/dashboard/dashboardUtils";
 import { useCashDisplay } from "@/hooks/useCashDisplay";
@@ -369,6 +370,7 @@ export function ParentSummaryCard({
   brokerOrderId: brokerOrderIdProp,
   onBrokerOrderIdChange,
 }: ParentSummaryCardProps) {
+  const cash = useCashDisplay();
   // Effective order ID: manual override takes priority over the value from the file
   const effectiveBrokerOrderId = brokerOrderIdProp !== undefined
     ? brokerOrderIdProp
@@ -531,6 +533,11 @@ export function ParentSummaryCard({
         </div>
 
       </div>
+
+      {/* Rate behind the cash figures above. Lives on the card rather than in
+          the page, so it travels into the print layout — which renders this
+          component directly — without a second copy of the rule. */}
+      <FxNote text={cash.disclosureFor([summary.currency ?? "USD"])} />
     </div>
   );
 }

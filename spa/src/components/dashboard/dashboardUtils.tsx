@@ -163,6 +163,18 @@ export function FxNote({ text }: { text: string }) {
   );
 }
 
+/**
+ * The same disclosure, for the print layouts.
+ *
+ * Separate from FxNote only because those layouts render for paper and
+ * deliberately carry no dark: classes — the text and sizing differ, the rule
+ * about when it appears does not.
+ */
+export function FxPrintNote({ text }: { text: string }) {
+  if (text.trim() === "") return null;
+  return <p className="mt-1 text-[9px] text-gray-500">{text}</p>;
+}
+
 /** Marker on a figure left in its native currency because no USD rate exists. */
 export function UnconvertedMark() {
   return (

@@ -75,6 +75,19 @@ export const AGGREGATE_COLUMNS: ReadonlyArray<{
   { id: "worstIS_bps",       label: "Worst IS"        },
 ];
 
+/**
+ * The columns that render a cash figure.
+ *
+ * Exported so a surface can tell whether the FX disclosure applies to it: a
+ * table showing only bps converted nothing and should carry no footnote. The
+ * on-screen table always has the note available; the print layout renders
+ * whatever selection was active, so it has to ask.
+ */
+export const AGGREGATE_CASH_COLUMN_IDS: ReadonlySet<AggregateColumnId> = new Set([
+  "totalVWAP_dev_usd",
+  "totalTWAP_dev_usd",
+]);
+
 const ALL_COLUMN_IDS: AggregateColumnId[] = AGGREGATE_COLUMNS.map((c) => c.id);
 
 // ── Visibility persistence, one entry per grouping ────────────────────────────
