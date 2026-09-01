@@ -33,6 +33,7 @@
 
 import type { BidAskTick, BloombergEnrichment, IntradayBar, TradeTick, TradeRecord } from "@/types";
 import { pointValueFromContractSize, pointValueFromValPt, toMajorCurrency } from "@/tca/dollars";
+import { asBloombergNumber } from "@/tca/tcaUtils";
 import { getTreasuryPrecision } from "@/tca/treasuryFrac";
 import {
   fetchArrivalPrice,
@@ -212,8 +213,21 @@ function getPriceAtOrBefore(bars: IntradayBar[], targetTime: Date): number | nul
  *   dailyVol = (pct / 100) / √252
  */
 function annualizedPctToDaily(raw: unknown): number {
-  if (typeof raw !== "number" || raw <= 0) return 0;
-  return (raw / 100) / Math.sqrt(252);
+  // Coerced, not type-guarded: Bloomberg types some of these vol fields as
+  // strings, and a rejected value silently costs the whole vol chain — see
+  // asBloombergNumber.
+  const pct = asBloombergNumber(raw);
+  if (pct === null || pct <= 0) return 0;
+  return (pct / 100) / Math.sqrt(252);
+}
+
+/** 30-day ADV, falling back to the 20-day figure. 0 when neither is usable. */
+function advFrom(refData: Record<string, unknown>): number {
+  return (
+    asBloombergNumber(refData["VOLUME_AVG_30D"]) ??
+    asBloombergNumber(refData["VOLUME_AVG_20D"]) ??
+    0
+  );
 }
 
 // ── Per-trade enrichment ──────────────────────────────────────────────────────
@@ -288,12 +302,7 @@ async function enrichOneTrade(
       refData["CLOSE_TO_CLOSE_HIST_VOL_30D"],
     ) || computeDailyVolFromBars(bars);
   // Prefer 30-day ADV; fall back to 20-day when 30-day is unavailable.
-  const adv =
-    typeof refData["VOLUME_AVG_30D"] === "number"
-      ? (refData["VOLUME_AVG_30D"] as number)
-      : typeof refData["VOLUME_AVG_20D"] === "number"
-        ? (refData["VOLUME_AVG_20D"] as number)
-        : 0;
+  const adv = advFrom(refData);
 
   // ── Reversion mark prices ────────────────────────────────────────────────
   // +30 s: last trade tick at or before lastFillTime + 30 s
@@ -547,12 +556,8 @@ export async function enrichSingleOrder(
     refData["CLOSE_TO_CLOSE_HIST_VOL_30D"],
   ) || computeDailyVolFromBars(bars);
 
-  const adv =
-    typeof refData["VOLUME_AVG_30D"] === "number"
-      ? (refData["VOLUME_AVG_30D"] as number)
-      : typeof refData["VOLUME_AVG_20D"] === "number"
-        ? (refData["VOLUME_AVG_20D"] as number)
-        : 0;
+  // Prefer 30-day ADV; fall back to 20-day when 30-day is unavailable.
+  const adv = advFrom(refData);
 
   // ── Reversion mark prices ─────────────────────────────────────────────────
   // +30 s: last trade tick at or before lastFillTime + 30 s

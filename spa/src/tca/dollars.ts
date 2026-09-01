@@ -18,7 +18,7 @@
  * degrade to 1: for a futures contract that would understate the cost by three
  * orders of magnitude while looking authoritative.
  */
-import { sideSign } from "./tcaUtils";
+import { asBloombergNumber, sideSign } from "./tcaUtils";
 
 export function dollarSlippage(
   fillPrice: number,
@@ -72,12 +72,16 @@ export function toMajorCurrency(crncy: unknown): string | null {
  *
  * Returns null when the field is absent or unusable, so callers fall through to
  * the FUT_CONT_SIZE derivation below rather than losing the cash figures.
+ *
+ * Bloomberg types this field as a string on at least some securities ("420.00"),
+ * so the value is coerced rather than type-guarded — see asBloombergNumber.
+ * Rejecting the string form here is not a harmless miss: it hands the job to
+ * FUT_CONT_SIZE, which for a contract quoted in cents but reporting CRNCY "USD"
+ * is out by 100x and looks entirely plausible.
  */
 export function pointValueFromValPt(futValPt: unknown): number | null {
-  if (typeof futValPt !== "number" || !isFinite(futValPt) || futValPt <= 0) {
-    return null;
-  }
-  return futValPt;
+  const n = asBloombergNumber(futValPt);
+  return n !== null && n > 0 ? n : null;
 }
 
 /**
@@ -111,10 +115,9 @@ export function pointValueFromContractSize(
   quotedPerPar: boolean,
   crncy?: unknown,
 ): number | null {
-  if (typeof futContSize !== "number" || !isFinite(futContSize) || futContSize <= 0) {
-    return null;
-  }
-  let pv = quotedPerPar ? futContSize / 100 : futContSize;
+  const size = asBloombergNumber(futContSize);
+  if (size === null || size <= 0) return null;
+  let pv = quotedPerPar ? size / 100 : size;
   if (isMinorCurrency(crncy)) pv = pv / 100;
   return pv;
 }

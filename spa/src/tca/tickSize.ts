@@ -23,6 +23,7 @@
  */
 
 import { toGenericTicker } from "./genericTicker";
+import { asBloombergNumber } from "./tcaUtils";
 
 /**
  * Tick sizes by contract root, in decimal price.
@@ -95,11 +96,11 @@ const TICK_BY_ROOT: Record<string, number> = {
 /**
  * A Bloomberg reference value is only trusted when it is a positive, finite
  * number. Bloomberg returns empty strings and nulls freely for fields a given
- * security does not carry.
+ * security does not carry, and types some numeric fields as strings.
  */
 function asPositiveNumber(v: unknown): number | null {
-  const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
-  return isFinite(n) && n > 0 ? n : null;
+  const n = asBloombergNumber(v);
+  return n !== null && n > 0 ? n : null;
 }
 
 /**
