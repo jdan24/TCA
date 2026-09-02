@@ -9,6 +9,13 @@
  *   "ESH5 Index"   →  "ES Index"
  *   "FVU6"         →  "FV"
  *
+ * Some roots are quoted with a space between the root and the expiry —
+ * "S H7 Comdty" (soybeans), "Z M6 Index" (FTSE 100), "G Z6 Comdty" (long gilt).
+ * Those collapse the same way:
+ *
+ *   "S H7 Comdty"  →  "S Comdty"
+ *   "Z M6 Index"   →  "Z Index"
+ *
  * Note this is an *aggregation key*, not a queryable Bloomberg security —
  * Bloomberg's own generic form would be "FV1 Comdty". Nothing here is ever sent
  * to the bridge.
@@ -21,10 +28,16 @@
 import { SPREAD_RE } from "./treasuryFrac";
 
 /**
- * Month code + 1–2 digit year, e.g. "U6" or "H25". Mirrors the root pattern the
- * bridge already uses (`_ROOT_RE` in bloomberg-bridge/bridge.py).
+ * Month code + 1–2 digit year, e.g. "U6" or "H25", optionally separated from
+ * the root by a space ("S H7"). Mirrors the root pattern the bridge already
+ * uses (`_ROOT_RE` in bloomberg-bridge/bridge.py).
+ *
+ * The root itself cannot contain the space, so a two-token symbol only matches
+ * when its second token really is a month code plus a year — an equity's
+ * exchange code ("BP LN Equity", "MSFT US Equity") has no digits and is left
+ * alone.
  */
-const ROOT_RE = /^([A-Z0-9]+?)[FGHJKMNQUVXZ]\d{1,2}$/;
+const ROOT_RE = /^([A-Z0-9]+?) ?[FGHJKMNQUVXZ]\d{1,2}$/;
 
 /**
  * Yellow keys we recognise as such. Matching against a known set — rather than

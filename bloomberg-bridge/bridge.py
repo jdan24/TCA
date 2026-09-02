@@ -122,7 +122,9 @@ YELLOW_KEY: dict[str, str] = {
 
 # Month codes used in futures tickers (Jan–Dec)
 _MONTH_CODES = set("FGHJKMNQUVXZ")
-_ROOT_RE = re.compile(r"^([A-Z0-9]+?)[FGHJKMNQUVXZ]\d{1,2}$")
+# The expiry may be separated from the root by a space ('S H7', 'Z M6'). Kept in
+# step with ROOT_RE in spa/src/tca/genericTicker.ts.
+_ROOT_RE = re.compile(r"^([A-Z0-9]+?) ?[FGHJKMNQUVXZ]\d{1,2}$")
 
 
 def extract_root(symbol: str) -> str:
