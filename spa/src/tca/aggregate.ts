@@ -2,15 +2,26 @@
  * Multi-order aggregation — group trades + results by various dimensions
  * and compute summary statistics for each group.
  *
- * buildAggregations() is the public entry point.  It returns four sorted
- * AggregateRow arrays: by symbol, by algo, by symbol+algo, by symbol+side.
+ * Two public entry points:
+ *
+ *   buildAggregations()      the groupings that span every benchmark — by algo,
+ *                            symbol+algo, symbol+side, symbol+algo+side.
+ *   buildSymbolAggregation() one By Symbol table, for one benchmark.
+ *
+ * The split exists because an order is only comparable with the benchmark its
+ * algo was working to: averaging a TWAP order's arrival slippage next to a
+ * POV order's says nothing about either. The caller partitions its orders by
+ * benchmark and calls buildSymbolAggregation() once per bucket, so each table
+ * scores its win rate, best and worst against the right series.
+ *
  * Each row includes orderIds for TradeTable pre-filtering.
  */
 
 import { NATIVE_TOTALLER, type CashTotaller } from "./fx";
 import type {
   AggregateRow,
-  AggregationSet,
+  BenchmarkKind,
+  CrossBenchmarkAggregations,
   SpreadSavingsRow,
   TCAResult,
   TradeRecord,
@@ -24,6 +35,18 @@ interface GroupAcc {
   results: TCAResult[];
 }
 
+/**
+ * The slippage series a benchmark is scored on.
+ *
+ * Positive is a cost in every one of them (see tca/slippage.ts), so win rate,
+ * best and worst read the same way whichever benchmark is in play.
+ */
+export function slippageFor(r: TCAResult, benchmark: BenchmarkKind): number | null {
+  return benchmark === "vwap" ? r.VWAP_dev_bps
+       : benchmark === "twap" ? r.TWAP_dev_bps
+       : r.IS_bps;
+}
+
 // ── Generic groupBy helper ────────────────────────────────────────────────────
 
 function groupBy(
@@ -31,6 +54,8 @@ function groupBy(
   results: TCAResult[],
   keyFn: (t: TradeRecord) => string,
   cash: CashTotaller = NATIVE_TOTALLER,
+  /** Which slippage series feeds win rate, best and worst. */
+  benchmark: BenchmarkKind = "arrival",
 ): AggregateRow[] {
   const resultMap = new Map<string, TCAResult>();
   for (const r of results) resultMap.set(r.orderId, r);
@@ -91,13 +116,17 @@ function groupBy(
     const avgTWAS_bps = safeAvg(gResults.map((r) => r.TWAS_bps));
     const avgTTF_ms = safeAvg(gResults.map((r) => r.timeToFill_ms)) ?? 0;
 
-    // Win rate: fraction of orders with IS_bps <= 0 among those with IS data
-    const isVals = gResults.map((r) => r.IS_bps).filter((v): v is number => v !== null);
-    const winRate = isVals.length > 0 ? isVals.filter((v) => v <= 0).length / isVals.length : null;
-
-    // Best / worst IS
-    const bestIS_bps = isVals.length > 0 ? Math.min(...isVals) : null;
-    const worstIS_bps = isVals.length > 0 ? Math.max(...isVals) : null;
+    // Win rate, best and worst all score against the table's own benchmark, so a
+    // "vs TWAP" table never reports a win that was only a win against arrival.
+    // Orders with no figure for that benchmark are excluded rather than counted
+    // as losses.
+    const slipVals = gResults
+      .map((r) => slippageFor(r, benchmark))
+      .filter((v): v is number => v !== null);
+    const winRate =
+      slipVals.length > 0 ? slipVals.filter((v) => v <= 0).length / slipVals.length : null;
+    const bestIS_bps = slipVals.length > 0 ? Math.min(...slipVals) : null;
+    const worstIS_bps = slipVals.length > 0 ? Math.max(...slipVals) : null;
 
     rows.push({
       groupKey,
@@ -125,6 +154,23 @@ function groupBy(
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+/**
+ * One By Symbol table, over orders already narrowed to a single benchmark.
+ *
+ * The caller does the partitioning because it also applies the table's own algo
+ * filter — passing the benchmark in here would leave this function unable to
+ * tell "no VWAP orders" from "every VWAP algo unticked".
+ */
+export function buildSymbolAggregation(
+  trades: TradeRecord[],
+  results: TCAResult[],
+  benchmark: BenchmarkKind,
+  groupSymbol: (ric: string) => string = (s) => s,
+  cash: CashTotaller = NATIVE_TOTALLER,
+): AggregateRow[] {
+  return groupBy(trades, results, (t) => groupSymbol(t.symbol), cash, benchmark);
+}
+
 export function buildAggregations(
   trades: TradeRecord[],
   results: TCAResult[],
@@ -142,9 +188,8 @@ export function buildAggregations(
    * gain a real total.
    */
   cash: CashTotaller = NATIVE_TOTALLER,
-): AggregationSet {
+): CrossBenchmarkAggregations {
   return {
-    bySymbol: groupBy(trades, results, (t) => groupSymbol(t.symbol), cash),
     byAlgo: groupBy(trades, results, (t) => t.algo ?? "(no algo)", cash),
     bySymbolAlgo: groupBy(
       trades,
@@ -200,11 +245,23 @@ function median(values: number[]): number | null {
  *
  * Every figure is null rather than 0 when its inputs are missing, so a group
  * with no Bloomberg quotes reads as "no data" instead of "paid nothing".
+ *
+ * On the benchmark
+ * ────────────────
+ * The savings formula keeps its shape whichever benchmark is passed — only the
+ * slippage term changes, from arrival to deviation vs market VWAP or TWAP. That
+ * keeps the scale comparable across the three tables (1.0 = near touch, 0.5 =
+ * mid, 0.0 = paid the spread). Worth knowing when reading the VWAP and TWAP
+ * tables: half the quoted spread is the natural yardstick for an order crossing
+ * a spread at arrival, and a looser one for an order following a schedule, so
+ * their figures are best read against each other rather than against arrival's.
  */
 export function buildSpreadSavings(
   trades: TradeRecord[],
   results: TCAResult[],
   genericFor: (ric: string) => string,
+  /** Which slippage series is scored against the spread. */
+  benchmark: BenchmarkKind = "arrival",
 ): SpreadSavingsRow[] {
   const resultMap = new Map<string, TCAResult>();
   for (const r of results) resultMap.set(r.orderId, r);
@@ -227,8 +284,9 @@ export function buildSpreadSavings(
   for (const [groupKey, { trades: gTrades, results: gResults }] of groups.entries()) {
     const avgSpread_bps = safeAvg(gResults.map((r) => r.TWAS_bps));
 
-    // Quantity-weighted IS: a 200-lot should move this figure 200× more than a
-    // 1-lot. Orders missing IS are excluded from both sums, not counted as zero.
+    // Quantity-weighted slippage vs the benchmark: a 200-lot should move this
+    // figure 200× more than a 1-lot. Orders with no figure for this benchmark
+    // are excluded from both sums, not counted as zero.
     let isWeightedSum = 0;
     let isWeight = 0;
     // Savings is computed per order and then quantity-weighted, rather than as a
@@ -238,7 +296,7 @@ export function buildSpreadSavings(
     let savWeight = 0;
     const isValues: number[] = [];
     // Quantity-weighted, matching wAvgIS_bps rather than the simple mean the
-    // AggregateTables use — this table weights its IS figures by size.
+    // AggregateTables use — this table weights its slippage figures by size.
     const volValues: number[] = [];
     const volRates: number[] = [];
 
@@ -246,7 +304,8 @@ export function buildSpreadSavings(
       const r = resultMap.get(t.orderId);
       if (!r) continue;
       const qty = t.orderQty > 0 ? t.orderQty : 0;
-      const is = r.IS_bps !== null && isFinite(r.IS_bps) ? r.IS_bps : null;
+      const slip = slippageFor(r, benchmark);
+      const is = slip !== null && isFinite(slip) ? slip : null;
       const spread = r.TWAS_bps !== null && isFinite(r.TWAS_bps) ? r.TWAS_bps : null;
 
       if (is !== null) {

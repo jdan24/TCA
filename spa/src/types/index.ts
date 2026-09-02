@@ -212,8 +212,19 @@ export interface SettleResult {
 }
 
 // ── Multi-order aggregation types ─────────────────────────────────────────────
+/**
+ * "symbol" holds the arrival-benchmarked orders only; "symbol:vwap" and
+ * "symbol:twap" are the same grouping over the orders whose algo maps to those
+ * benchmarks. The plain "symbol" id is deliberately kept for the arrival table
+ * so its stored column selection survives the split.
+ *
+ * The remaining groupings span every benchmark, as they always have — an algo
+ * maps to exactly one benchmark, so By Algo is already unmixed.
+ */
 export type AggGroupType =
   | "symbol"
+  | "symbol:vwap"
+  | "symbol:twap"
   | "algo"
   | "symbol+algo"
   | "symbol+side"
@@ -237,9 +248,19 @@ export interface AggregateRow {
   avgMI_bps: number | null;
   avgTWAS_bps: number | null;
   avgTTF_ms: number;
-  winRate: number | null; // fraction [0,1] of orders where IS_bps <= 0
-  bestIS_bps: number | null; // most favourable (min) IS in group
-  worstIS_bps: number | null; // most adverse (max) IS in group
+  /**
+   * The three fields below score the group against *one* benchmark — the one
+   * the table was built for, not always arrival. In the By Symbol vs TWAP
+   * table they read against TWAP_dev_bps, and so on. The ids keep their IS
+   * names because a stored column selection is keyed on them; the table
+   * relabels the headers per benchmark.
+   */
+  /** Fraction [0,1] of orders whose slippage vs the table's benchmark is <= 0. */
+  winRate: number | null;
+  /** Most favourable (min) slippage vs the table's benchmark. */
+  bestIS_bps: number | null;
+  /** Most adverse (max) slippage vs the table's benchmark. */
+  worstIS_bps: number | null;
   orderIds: string[]; // pre-computed for TradeTable pre-filter
 }
 
@@ -249,12 +270,22 @@ export interface AggregationFilter {
   orderIds: string[];
 }
 
-export interface AggregationSet {
-  bySymbol: AggregateRow[];
+/**
+ * The groupings that span every benchmark. Built over the whole filtered
+ * dataset in one pass, so their IS-derived stats stay arrival-based as before.
+ */
+export interface CrossBenchmarkAggregations {
   byAlgo: AggregateRow[];
   bySymbolAlgo: AggregateRow[];
   bySymbolSide: AggregateRow[];
   bySymbolAlgoSide: AggregateRow[];
+}
+
+export interface AggregationSet extends CrossBenchmarkAggregations {
+  /** Arrival-benchmarked orders only. */
+  bySymbol: AggregateRow[];
+  bySymbolVwap: AggregateRow[];
+  bySymbolTwap: AggregateRow[];
 }
 
 // ── Spread-savings aggregation (multi-order, grouped by generic ticker) ───────

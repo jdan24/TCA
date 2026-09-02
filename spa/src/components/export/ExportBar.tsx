@@ -12,7 +12,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { toPng } from "html-to-image";
 import * as XLSX from "xlsx";
-import type { AggregateRow, AggregationSet, ParentOrderSummary, TCAResult, TradeRecord } from "@/types";
+import type { AggregateRow, AggregationSet, BenchmarkKind, ParentOrderSummary, TCAResult, TradeRecord } from "@/types";
 
 // Exported so PrintLayout and SingleOrderDashboard can import the same type.
 export interface ChartImages {
@@ -82,8 +82,14 @@ function buildTradeRows(trades: TradeRecord[], results: TCAResult[]): ExportRow[
  * CSV (EXPORT_COLS) and MultiOrderPrintLayout. Kept in step with AggregateRow so
  * it is correct if the Excel export is ever wired up for multi-order mode.
  */
-function buildAggRows(rows: AggregateRow[]): ExportRow[] {
+/**
+ * `benchmark` names the series behind Win %, Best and Worst — those three score
+ * a group against the benchmark its table was built for, so a sheet of TWAP
+ * orders must not head them "IS". Everything else means the same in every sheet.
+ */
+function buildAggRows(rows: AggregateRow[], benchmark: BenchmarkKind = "arrival"): ExportRow[] {
   const fmt = (v: number | null): number | "" => (v === null ? "" : v);
+  const b = benchmark === "vwap" ? "VWAP" : benchmark === "twap" ? "TWAP" : "IS";
   return rows.map((r) => ({
     Group:                r.groupKey,
     "# Orders":           r.count,
@@ -98,8 +104,8 @@ function buildAggRows(rows: AggregateRow[]): ExportRow[] {
     "Avg TWAS (bps)":     fmt(r.avgTWAS_bps),
     "Avg TTF (ms)":       Math.round(r.avgTTF_ms),
     "Win %":              r.winRate !== null ? Math.round(r.winRate * 100) : "",
-    "Best IS (bps)":      fmt(r.bestIS_bps),
-    "Worst IS (bps)":     fmt(r.worstIS_bps),
+    [`Best vs ${b} (bps)`]:  fmt(r.bestIS_bps),
+    [`Worst vs ${b} (bps)`]: fmt(r.worstIS_bps),
   }));
 }
 
@@ -112,15 +118,20 @@ function doExcelExport(tradeRows: ExportRow[], aggregations?: AggregationSet): v
   ws["!cols"] = colWidths.map((wch) => ({ wch }));
   XLSX.utils.book_append_sheet(wb, ws, "Trades");
   if (aggregations) {
-    for (const [name, rows] of [
-      ["By Symbol",      aggregations.bySymbol],
-      ["By Algo",        aggregations.byAlgo],
-      ["By Symbol+Algo", aggregations.bySymbolAlgo],
-      ["By Symbol+Side", aggregations.bySymbolSide],
-      ["By Sym+Algo+Side", aggregations.bySymbolAlgoSide],
+    // Sheet names are capped at 31 characters by the format, hence the
+    // abbreviations. Each By Symbol sheet carries only its own benchmark's
+    // orders, matching the three tables on screen.
+    for (const [name, rows, benchmark] of [
+      ["By Symbol vs Arrival", aggregations.bySymbol,     "arrival"],
+      ["By Symbol vs VWAP",    aggregations.bySymbolVwap, "vwap"   ],
+      ["By Symbol vs TWAP",    aggregations.bySymbolTwap, "twap"   ],
+      ["By Algo",        aggregations.byAlgo,          "arrival"],
+      ["By Symbol+Algo", aggregations.bySymbolAlgo,    "arrival"],
+      ["By Symbol+Side", aggregations.bySymbolSide,    "arrival"],
+      ["By Sym+Algo+Side", aggregations.bySymbolAlgoSide, "arrival"],
     ] as const) {
       if (rows.length === 0) continue;
-      const aggWs = XLSX.utils.json_to_sheet(buildAggRows(rows));
+      const aggWs = XLSX.utils.json_to_sheet(buildAggRows(rows, benchmark));
       aggWs["!cols"] = [22, 8, 10, 12, 14, 14, 14, 14, 10, 12, 12, 12, 12, 8, 12, 12].map((wch) => ({ wch }));
       XLSX.utils.book_append_sheet(wb, aggWs, name);
     }

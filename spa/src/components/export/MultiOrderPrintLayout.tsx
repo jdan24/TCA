@@ -17,6 +17,7 @@ import type {
   AggregationSet,
   AggregateRow,
   SpreadSavingsRow,
+  BenchmarkKind,
   TCAResult,
   TradeRecord,
 } from "@/types";
@@ -26,12 +27,14 @@ import { useCashDisplay } from "@/hooks/useCashDisplay";
 import {
   AGGREGATE_CASH_COLUMN_IDS,
   AGGREGATE_COLUMNS,
+  aggregateColumnLabel,
   renderAggregateCell,
   type AggregateColumnId,
 } from "@/components/dashboard/AggregateTable";
 import {
   Legend as SpreadSavingsLegend,
   renderCell as renderSpreadSavingsCell,
+  spreadSavingsColumnLabel,
   SPREAD_SAVINGS_COLUMNS,
   type SpreadSavingsColumnId,
 } from "@/components/dashboard/SpreadSavingsTable";
@@ -45,7 +48,11 @@ export type SectionId =
   | "twap_dev"
   | "spread"
   | "spread_savings"
+  | "spread_savings_vwap"
+  | "spread_savings_twap"
   | "by_symbol"
+  | "by_symbol_vwap"
+  | "by_symbol_twap"
   | "by_algo"
   | "by_symbol_algo"
   | "by_symbol_side"
@@ -55,8 +62,9 @@ export type SectionId =
 export const ALL_SECTIONS: SectionId[] = [
   "kpi",
   "slippage", "vwap_dev", "twap_dev", "spread",
-  "spread_savings",
-  "by_symbol", "by_algo", "by_symbol_algo", "by_symbol_side", "by_symbol_algo_side",
+  "spread_savings", "spread_savings_vwap", "spread_savings_twap",
+  "by_symbol", "by_symbol_vwap", "by_symbol_twap",
+  "by_algo", "by_symbol_algo", "by_symbol_side", "by_symbol_algo_side",
   "order_table",
 ];
 
@@ -80,8 +88,12 @@ const SECTION_GROUPS: SectionGroup[] = [
   {
     heading: "Aggregation Tables",
     items: [
-      { id: "spread_savings", label: "Spread Savings"    },
-      { id: "by_symbol",      label: "By Symbol"        },
+      { id: "spread_savings",      label: "Spread Savings vs Arrival" },
+      { id: "spread_savings_vwap", label: "Spread Savings vs VWAP"    },
+      { id: "spread_savings_twap", label: "Spread Savings vs TWAP"    },
+      { id: "by_symbol",           label: "By Symbol vs Arrival"      },
+      { id: "by_symbol_vwap",      label: "By Symbol vs VWAP"         },
+      { id: "by_symbol_twap",      label: "By Symbol vs TWAP"         },
       { id: "by_algo",        label: "By Algo"           },
       { id: "by_symbol_algo", label: "By Symbol + Algo"  },
       { id: "by_symbol_side", label: "By Symbol + Side"  },
@@ -111,7 +123,8 @@ interface MultiOrderPrintLayoutProps {
   aggregations: AggregationSet;
   /** Maps a file symbol to its generic ticker for the Order Detail table. */
   genericFor: (ric: string) => string;
-  spreadSavings: SpreadSavingsRow[];
+  /** Spread Savings rows per benchmark, mirroring the three tables on screen. */
+  spreadSavingsByBenchmark: Record<BenchmarkKind, SpreadSavingsRow[]>;
   /** The same column selection made on screen — the print view mirrors it. */
   spreadSavingsColumns: SpreadSavingsColumnId[];
   /** Per-grouping column selection, mirrored from the screen the same way. */
@@ -161,10 +174,13 @@ function PrintAggTable({
   title,
   rows,
   visibleColumns,
+  benchmark = "arrival",
 }: {
   title: string;
   rows: AggregateRow[];
   visibleColumns: AggregateColumnId[];
+  /** Names the series behind the win-rate, best and worst headers. */
+  benchmark?: BenchmarkKind;
 }) {
   const cash = useCashDisplay();
   if (rows.length === 0) return null;
@@ -183,7 +199,9 @@ function PrintAggTable({
             <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 text-left">
               <th className="px-2 py-1.5 font-semibold text-left">Group</th>
               {cols.map((c) => (
-                <th key={c.id} className="px-2 py-1.5 font-semibold text-right">{c.label}</th>
+                <th key={c.id} className="px-2 py-1.5 font-semibold text-right">
+                  {aggregateColumnLabel(c.id, c.label, benchmark)}
+                </th>
               ))}
             </tr>
           </thead>
@@ -219,9 +237,14 @@ function PrintAggTable({
 function PrintSpreadSavingsTable({
   rows,
   visibleColumns,
+  title,
+  benchmark,
 }: {
   rows: SpreadSavingsRow[];
   visibleColumns: SpreadSavingsColumnId[];
+  title: string;
+  /** Names the series in the two slippage headers and in the legend. */
+  benchmark: BenchmarkKind;
 }) {
   if (rows.length === 0) return null;
   const cols = SPREAD_SAVINGS_COLUMNS.filter((c) => visibleColumns.includes(c.id));
@@ -229,7 +252,7 @@ function PrintSpreadSavingsTable({
   return (
     <div className="break-inside-avoid mb-5">
       <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-1.5">
-        Spread Savings by Instrument
+        {title}
       </p>
       <div className="border border-gray-200 rounded-lg overflow-hidden">
         <table className="w-full text-[10px]">
@@ -238,7 +261,7 @@ function PrintSpreadSavingsTable({
               <th className="px-2 py-1.5 font-semibold text-left">Generic Ticker</th>
               {cols.map((c) => (
                 <th key={c.id} className="px-2 py-1.5 font-semibold text-right">
-                  {c.label}
+                  {spreadSavingsColumnLabel(c.id, c.label, benchmark)}
                 </th>
               ))}
             </tr>
@@ -257,7 +280,9 @@ function PrintSpreadSavingsTable({
           </tbody>
         </table>
       </div>
-      {visibleColumns.includes("savingsPct") && <SpreadSavingsLegend />}
+      {visibleColumns.includes("savingsPct") && (
+        <SpreadSavingsLegend benchmark={benchmark} />
+      )}
     </div>
   );
 }
@@ -265,7 +290,7 @@ function PrintSpreadSavingsTable({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function MultiOrderPrintLayout({
-  trades, results, aggregations, genericFor, spreadSavings, spreadSavingsColumns,
+  trades, results, aggregations, genericFor, spreadSavingsByBenchmark, spreadSavingsColumns,
   aggregateColumns, charts, onBack,
 }: MultiOrderPrintLayoutProps) {
   const {
@@ -359,7 +384,9 @@ export function MultiOrderPrintLayout({
 
   // ── Aggregation table defs ────────────────────────────────────────────────
   const AGG_DEFS = [
-    { id: "by_symbol"      as SectionId, label: "By Symbol",        rows: aggregations.bySymbol,     group: "symbol"      as AggGroupType },
+    { id: "by_symbol"      as SectionId, label: "By Symbol vs Arrival",      rows: aggregations.bySymbol,     group: "symbol"      as AggGroupType, benchmark: "arrival" as BenchmarkKind },
+    { id: "by_symbol_vwap" as SectionId, label: "By Symbol vs VWAP benchmark", rows: aggregations.bySymbolVwap, group: "symbol:vwap" as AggGroupType, benchmark: "vwap"    as BenchmarkKind },
+    { id: "by_symbol_twap" as SectionId, label: "By Symbol vs TWAP benchmark", rows: aggregations.bySymbolTwap, group: "symbol:twap" as AggGroupType, benchmark: "twap"    as BenchmarkKind },
     { id: "by_algo"        as SectionId, label: "By Algo",          rows: aggregations.byAlgo,       group: "algo"        as AggGroupType },
     { id: "by_symbol_algo" as SectionId, label: "By Symbol + Algo", rows: aggregations.bySymbolAlgo, group: "symbol+algo" as AggGroupType },
     { id: "by_symbol_side" as SectionId, label: "By Symbol + Side", rows: aggregations.bySymbolSide, group: "symbol+side" as AggGroupType },
@@ -474,8 +501,18 @@ export function MultiOrderPrintLayout({
   }
 
   // — Aggregation tables ————————————————————————————————————————————————————
-  const showSpreadSavings = vis("spread_savings") && spreadSavings.length > 0;
-  if (hasAnyAgg || showSpreadSavings) {
+  // Spread Savings prints once per benchmark, matching the screen. A benchmark
+  // with no orders contributes no rows and so renders nothing.
+  const SAVINGS_DEFS = [
+    { id: "spread_savings"      as SectionId, benchmark: "arrival" as BenchmarkKind, label: "Spread Savings vs Arrival"        },
+    { id: "spread_savings_vwap" as SectionId, benchmark: "vwap"    as BenchmarkKind, label: "Spread Savings vs VWAP benchmark" },
+    { id: "spread_savings_twap" as SectionId, benchmark: "twap"    as BenchmarkKind, label: "Spread Savings vs TWAP benchmark" },
+  ];
+  const enabledSavings = SAVINGS_DEFS.filter(
+    (d) => vis(d.id) && (spreadSavingsByBenchmark[d.benchmark]?.length ?? 0) > 0,
+  );
+
+  if (hasAnyAgg || enabledSavings.length > 0) {
     contentGroups.push({
       key: "agg",
       node: (
@@ -483,18 +520,22 @@ export function MultiOrderPrintLayout({
           <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-3">
             Aggregation
           </p>
-          {showSpreadSavings && (
+          {enabledSavings.map((d) => (
             <PrintSpreadSavingsTable
-              rows={spreadSavings}
+              key={d.id}
+              title={d.label}
+              benchmark={d.benchmark}
+              rows={spreadSavingsByBenchmark[d.benchmark] ?? []}
               visibleColumns={spreadSavingsColumns}
             />
-          )}
+          ))}
           {enabledAggs.map((a) => (
             <PrintAggTable
               key={a.id}
               title={a.label}
               rows={a.rows}
               visibleColumns={aggregateColumns[a.group]}
+              benchmark={a.benchmark ?? "arrival"}
             />
           ))}
         </div>

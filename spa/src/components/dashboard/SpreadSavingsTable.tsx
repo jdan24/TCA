@@ -13,8 +13,9 @@
  * See buildSpreadSavings() in tca/aggregate.ts for the arithmetic.
  */
 
+import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { SpreadSavingsRow } from "@/types";
+import type { BenchmarkKind, SpreadSavingsRow } from "@/types";
 import { usePortalMenu } from "@/hooks/usePortalMenu";
 import { ChartCard } from "./dashboardUtils";
 
@@ -67,6 +68,54 @@ export const SPREAD_SAVINGS_COLUMNS: ReadonlyArray<{
 
 const ALL_COLUMN_IDS: SpreadSavingsColumnId[] = SPREAD_SAVINGS_COLUMNS.map((c) => c.id);
 
+/** How a benchmark names itself in a column header. */
+const BENCHMARK_LABEL: Record<BenchmarkKind, string> = {
+  arrival: "IS",
+  vwap: "VWAP",
+  twap: "TWAP",
+};
+
+/**
+ * The header for a column in a table built for `benchmark`.
+ *
+ * Both slippage columns hold deviation vs market VWAP or TWAP in those tables,
+ * so labelling them "IS" would name the wrong series. The ids keep their IS
+ * names because the stored column selection is keyed on them.
+ *
+ * Exported so the print layout labels its headers identically.
+ */
+export function spreadSavingsColumnLabel(
+  id: SpreadSavingsColumnId,
+  label: string,
+  benchmark: BenchmarkKind,
+): string {
+  if (benchmark === "arrival") return label;
+  const b = BENCHMARK_LABEL[benchmark];
+  switch (id) {
+    case "wAvgIS_bps":   return `Wtd Avg vs ${b}`;
+    case "medianIS_bps": return `Median vs ${b}`;
+    default:             return label;
+  }
+}
+
+/** Tooltip for the two slippage columns, naming the series in play. */
+export function spreadSavingsColumnTitle(
+  id: SpreadSavingsColumnId,
+  title: string | undefined,
+  benchmark: BenchmarkKind,
+): string | undefined {
+  if (benchmark === "arrival") return title;
+  const b = BENCHMARK_LABEL[benchmark];
+  switch (id) {
+    case "wAvgIS_bps":
+      return `Quantity-weighted average deviation vs market ${b}`;
+    case "medianIS_bps":
+      return `Median per-order deviation vs market ${b}, unweighted — a gap against the weighted average means one order is carrying the group`;
+    default:
+      return title;
+  }
+}
+
 // ── Visibility persistence ────────────────────────────────────────────────────
 
 // What is stored is the set of *hidden* columns, not the visible ones.
@@ -111,12 +160,20 @@ interface SpreadSavingsTableProps {
   /** Ids of the optional columns to show, in canonical order. */
   visibleColumns: SpreadSavingsColumnId[];
   onVisibleColumnsChange: (ids: SpreadSavingsColumnId[]) => void;
+  title?: string;
+  /** Which slippage series was scored against the spread. */
+  benchmark?: BenchmarkKind;
+  /** Controls rendered left of the Columns menu, e.g. the algo filter. */
+  actions?: ReactNode;
 }
 
 export function SpreadSavingsTable({
   rows,
   visibleColumns,
   onVisibleColumnsChange,
+  title = "Spread Savings by Instrument",
+  benchmark = "arrival",
+  actions,
 }: SpreadSavingsTableProps) {
   const { open, btnRef, menuRef, pos, toggle } = usePortalMenu("right");
 
@@ -170,9 +227,16 @@ export function SpreadSavingsTable({
     </div>
   );
 
+  const headerActions = (
+    <div className="flex items-center gap-2">
+      {actions}
+      {columnsMenu}
+    </div>
+  );
+
   if (rows.length === 0) {
     return (
-      <ChartCard title="Spread Savings by Instrument" actions={columnsMenu}>
+      <ChartCard title={title} actions={headerActions}>
         <p className="py-8 text-center text-xs text-gray-400 dark:text-gray-600 italic">
           No data
         </p>
@@ -182,9 +246,13 @@ export function SpreadSavingsTable({
 
   return (
     <ChartCard
-      title="Spread Savings by Instrument"
-      subtitle="Execution quality measured against the spread that was quoted at the time"
-      actions={columnsMenu}
+      title={title}
+      subtitle={
+        benchmark === "arrival"
+          ? "Execution quality measured against the spread that was quoted at the time"
+          : `Deviation vs market ${BENCHMARK_LABEL[benchmark]} measured against the spread that was quoted at the time`
+      }
+      actions={headerActions}
     >
       <div className="overflow-x-auto -mx-4 px-4">
         <table className="w-full text-xs min-w-[560px]">
@@ -193,17 +261,20 @@ export function SpreadSavingsTable({
               <th className="pb-2 pr-3 text-left text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap">
                 Generic Ticker
               </th>
-              {cols.map((c) => (
-                <th
-                  key={c.id}
-                  {...(c.title !== undefined ? { title: c.title } : {})}
-                  className={`pb-2 pr-3 text-left text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap${
-                    c.title !== undefined ? " cursor-help" : ""
-                  }`}
-                >
-                  {c.label}
-                </th>
-              ))}
+              {cols.map((c) => {
+                const title = spreadSavingsColumnTitle(c.id, c.title, benchmark);
+                return (
+                  <th
+                    key={c.id}
+                    {...(title !== undefined ? { title } : {})}
+                    className={`pb-2 pr-3 text-left text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap${
+                      title !== undefined ? " cursor-help" : ""
+                    }`}
+                  >
+                    {spreadSavingsColumnLabel(c.id, c.label, benchmark)}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -226,7 +297,7 @@ export function SpreadSavingsTable({
         </table>
       </div>
 
-      {visibleColumns.includes("savingsPct") && <Legend />}
+      {visibleColumns.includes("savingsPct") && <Legend benchmark={benchmark} />}
     </ChartCard>
   );
 }
@@ -267,13 +338,25 @@ export function renderCell(row: SpreadSavingsRow, id: SpreadSavingsColumnId) {
 
 // ── Legend ────────────────────────────────────────────────────────────────────
 
-export function Legend() {
-  const items: Array<{ mark: string; text: string }> = [
-    { mark: "100%",     text: "filled at or better than the near touch" },
-    { mark: "50%",      text: "filled at mid" },
-    { mark: "0%",       text: "paid the full spread" },
-    { mark: "below 0%", text: "worse than crossing the spread" },
-  ];
+export function Legend({ benchmark = "arrival" }: { benchmark?: BenchmarkKind }) {
+  // The arithmetic is identical in all three tables — only what the slippage
+  // term measures changes, so the same scale reads differently. 50% is always
+  // "matched the benchmark exactly"; for arrival that is a fill at mid.
+  const b = BENCHMARK_LABEL[benchmark];
+  const items: Array<{ mark: string; text: string }> =
+    benchmark === "arrival"
+      ? [
+          { mark: "100%",     text: "filled at or better than the near touch" },
+          { mark: "50%",      text: "filled at mid" },
+          { mark: "0%",       text: "paid the full spread" },
+          { mark: "below 0%", text: "worse than crossing the spread" },
+        ]
+      : [
+          { mark: "100%",     text: `beat market ${b} by at least half the spread` },
+          { mark: "50%",      text: `matched market ${b}` },
+          { mark: "0%",       text: `lagged market ${b} by half the spread` },
+          { mark: "below 0%", text: "lagged by more than half the spread" },
+        ];
   return (
     <div className="mt-3 pt-2.5 border-t border-gray-100 dark:border-gray-800 flex flex-wrap gap-x-4 gap-y-1">
       {items.map(({ mark, text }) => (

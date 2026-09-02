@@ -12,8 +12,9 @@
  * differently from the screen.
  */
 
+import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { AggregateRow, AggGroupType } from "@/types";
+import type { AggregateRow, AggGroupType, BenchmarkKind } from "@/types";
 import { usePortalMenu } from "@/hooks/usePortalMenu";
 import {
   ChartCard,
@@ -89,6 +90,56 @@ export const AGGREGATE_CASH_COLUMN_IDS: ReadonlySet<AggregateColumnId> = new Set
 ]);
 
 const ALL_COLUMN_IDS: AggregateColumnId[] = AGGREGATE_COLUMNS.map((c) => c.id);
+
+/** How a benchmark names itself in a column header. */
+const BENCHMARK_LABEL: Record<BenchmarkKind, string> = {
+  arrival: "IS",
+  vwap: "VWAP",
+  twap: "TWAP",
+};
+
+/**
+ * The header for a column in a table built for `benchmark`.
+ *
+ * Win rate, best and worst are scored against whichever benchmark the table
+ * holds, so their headers have to say which — "Best IS" over a column of TWAP
+ * deviations would be a plain misstatement. Every other column means the same
+ * thing in all three tables and keeps its registry label.
+ *
+ * Exported so the print layout labels its headers identically.
+ */
+export function aggregateColumnLabel(
+  id: AggregateColumnId,
+  label: string,
+  benchmark: BenchmarkKind,
+): string {
+  if (benchmark === "arrival") return label;
+  const b = BENCHMARK_LABEL[benchmark];
+  switch (id) {
+    case "bestIS_bps":  return `Best vs ${b}`;
+    case "worstIS_bps": return `Worst vs ${b}`;
+    default:            return label;
+  }
+}
+
+/** Tooltip for the three benchmark-scored columns, naming the series in play. */
+export function aggregateColumnTitle(
+  id: AggregateColumnId,
+  title: string | undefined,
+  benchmark: BenchmarkKind,
+): string | undefined {
+  const b = BENCHMARK_LABEL[benchmark];
+  const vs = benchmark === "arrival" ? "arrival" : `market ${b}`;
+  switch (id) {
+    case "winRate":
+      return `Share of orders that beat ${vs}, among those with a figure for it`;
+    case "bestIS_bps":
+    case "worstIS_bps":
+      return `Measured against ${vs}`;
+    default:
+      return title;
+  }
+}
 
 // ── Visibility persistence, one entry per grouping ────────────────────────────
 //
@@ -186,6 +237,7 @@ export function renderAggregateCell(row: AggregateRow, id: AggregateColumnId) {
 
 interface AggregateTableProps {
   title: string;
+  subtitle?: string;
   rows: AggregateRow[];
   /** groupKey of the currently selected row, or null */
   activeKey: string | null;
@@ -193,15 +245,25 @@ interface AggregateTableProps {
   /** Visible optional columns, in canonical order. */
   visibleColumns: AggregateColumnId[];
   onVisibleColumnsChange: (ids: AggregateColumnId[]) => void;
+  /**
+   * Which benchmark this table's orders were measured against. Drives the
+   * headers of the columns that score a group rather than describe it.
+   */
+  benchmark?: BenchmarkKind;
+  /** Controls rendered left of the Columns menu, e.g. the algo filter. */
+  actions?: ReactNode;
 }
 
 export function AggregateTable({
   title,
+  subtitle = "Click a row to filter the trade detail table",
   rows,
   activeKey,
   onRowClick,
   visibleColumns,
   onVisibleColumnsChange,
+  benchmark = "arrival",
+  actions,
 }: AggregateTableProps) {
   const { open, btnRef, menuRef, pos, toggle } = usePortalMenu("right");
   const cash = useCashDisplay();
@@ -256,9 +318,16 @@ export function AggregateTable({
     </div>
   );
 
+  const headerActions = (
+    <div className="flex items-center gap-2">
+      {actions}
+      {columnsMenu}
+    </div>
+  );
+
   if (rows.length === 0) {
     return (
-      <ChartCard title={title} actions={columnsMenu}>
+      <ChartCard title={title} actions={headerActions}>
         <p className="py-8 text-center text-xs text-gray-400 dark:text-gray-600 italic">
           No data
         </p>
@@ -267,11 +336,7 @@ export function AggregateTable({
   }
 
   return (
-    <ChartCard
-      title={title}
-      subtitle="Click a row to filter the trade detail table"
-      actions={columnsMenu}
-    >
+    <ChartCard title={title} subtitle={subtitle} actions={headerActions}>
       <div className="overflow-x-auto -mx-4 px-4">
         <table className="w-full text-xs min-w-[640px]">
           <thead>
@@ -279,17 +344,20 @@ export function AggregateTable({
               <th className="pb-2 pr-3 text-left text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap">
                 Group
               </th>
-              {cols.map((c) => (
-                <th
-                  key={c.id}
-                  {...(c.title !== undefined ? { title: c.title } : {})}
-                  className={`pb-2 pr-3 text-left text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap${
-                    c.title !== undefined ? " cursor-help" : ""
-                  }`}
-                >
-                  {c.label}
-                </th>
-              ))}
+              {cols.map((c) => {
+                const title = aggregateColumnTitle(c.id, c.title, benchmark);
+                return (
+                  <th
+                    key={c.id}
+                    {...(title !== undefined ? { title } : {})}
+                    className={`pb-2 pr-3 text-left text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap${
+                      title !== undefined ? " cursor-help" : ""
+                    }`}
+                  >
+                    {aggregateColumnLabel(c.id, c.label, benchmark)}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>

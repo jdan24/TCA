@@ -3,11 +3,25 @@
  * and the TradeTable in the Multi-order dashboard.
  *
  * Layout:
- *   Spread Savings (full width)
- *   By Symbol (full width)
+ *   Spread Savings vs Arrival / vs VWAP / vs TWAP (full width, one per benchmark)
+ *   By Symbol vs Arrival / vs VWAP / vs TWAP       (full width, one per benchmark)
  *   By Algo | By Symbol + Algo (2-col)
  *   By Symbol + Side (full width)
  *   By Symbol + Algo + Side (full width)
+ *
+ * On the benchmark split
+ * ──────────────────────
+ * An order is only comparable with the benchmark its algo was working to, so
+ * By Symbol and Spread Savings are rendered once per benchmark over disjoint
+ * sets of orders rather than once over all of them. Which orders land where
+ * comes from the algo → benchmark table in Settings, the same mapping behind
+ * the Order Detail highlight ring.
+ *
+ * A benchmark nobody traded renders nothing at all. An empty table therefore
+ * means the section's own algo menu emptied it, which is worth showing.
+ *
+ * The remaining groupings still span every benchmark: an algo maps to exactly
+ * one benchmark, so By Algo and the two +Algo tables are already unmixed.
  *
  * Clicking any row calls setAggregationFilter in the store; clicking the
  * active row again clears the filter.
@@ -20,13 +34,43 @@
  */
 
 import { useTCAStore } from "@/store/useTCAStore";
-import type { AggGroupType, AggregateRow, AggregationSet, SpreadSavingsRow } from "@/types";
+import type { AggGroupType, AggregateRow, AggregationSet, BenchmarkKind } from "@/types";
+import type { BenchmarkAggregation } from "@/hooks/useBenchmarkAggregation";
+import { AlgoFilterMenu } from "./AlgoFilterMenu";
 import { AggregateTable, type AggregateColumnId } from "./AggregateTable";
 import { SpreadSavingsTable, type SpreadSavingsColumnId } from "./SpreadSavingsTable";
 
+/** Table titles and stored-column keys for each benchmark's pair of tables. */
+export const BENCHMARK_SECTIONS: ReadonlyArray<{
+  benchmark: BenchmarkKind;
+  group: AggGroupType;
+  symbolTitle: string;
+  savingsTitle: string;
+}> = [
+  {
+    benchmark: "arrival",
+    group: "symbol",
+    symbolTitle: "By Symbol vs Arrival",
+    savingsTitle: "Spread Savings vs Arrival",
+  },
+  {
+    benchmark: "vwap",
+    group: "symbol:vwap",
+    symbolTitle: "By Symbol vs VWAP benchmark",
+    savingsTitle: "Spread Savings vs VWAP benchmark",
+  },
+  {
+    benchmark: "twap",
+    group: "symbol:twap",
+    symbolTitle: "By Symbol vs TWAP benchmark",
+    savingsTitle: "Spread Savings vs TWAP benchmark",
+  },
+];
+
 interface AggregationSectionProps {
   aggregations: AggregationSet;
-  spreadSavings: SpreadSavingsRow[];
+  /** One entry per benchmark, in BENCHMARK_SECTIONS order. */
+  benchmarkSections: BenchmarkAggregation[];
   /** Optional Spread Savings columns currently shown — also drives the print view. */
   spreadSavingsColumns: SpreadSavingsColumnId[];
   onSpreadSavingsColumnsChange: (ids: SpreadSavingsColumnId[]) => void;
@@ -40,7 +84,7 @@ interface AggregationSectionProps {
 
 export function AggregationSection({
   aggregations,
-  spreadSavings,
+  benchmarkSections,
   spreadSavingsColumns,
   onSpreadSavingsColumnsChange,
   aggregateColumns,
@@ -66,16 +110,32 @@ export function AggregationSection({
     return aggregationFilter?.type === type ? (aggregationFilter.key ?? null) : null;
   }
 
+  // Pair each benchmark's rows with its titles. A benchmark with no orders in
+  // the dataset drops out entirely rather than printing an empty card.
+  const sections = BENCHMARK_SECTIONS.map((def, i) => ({
+    ...def,
+    data: benchmarkSections[i],
+  })).filter(
+    (s): s is typeof s & { data: BenchmarkAggregation } =>
+      s.data !== undefined && !s.data.isEmpty,
+  );
+
   return (
     <div className="space-y-4">
-      {/* Spread savings — full width, always by generic ticker */}
-      <SpreadSavingsTable
-        rows={spreadSavings}
-        visibleColumns={spreadSavingsColumns}
-        onVisibleColumnsChange={onSpreadSavingsColumnsChange}
-      />
+      {/* Spread savings — full width, always by generic ticker, one per benchmark */}
+      {sections.map((s) => (
+        <SpreadSavingsTable
+          key={s.benchmark}
+          title={s.savingsTitle}
+          benchmark={s.benchmark}
+          rows={s.data.savings}
+          visibleColumns={spreadSavingsColumns}
+          onVisibleColumnsChange={onSpreadSavingsColumnsChange}
+          actions={<AlgoFilterMenu filter={s.data.algoFilter} />}
+        />
+      ))}
 
-      {/* Grouping toggle for the three symbol-keyed tables below */}
+      {/* Grouping toggle for the symbol-keyed tables below */}
       <div className="flex items-center justify-end gap-2 print:hidden">
         <span className="text-[11px] text-gray-400 dark:text-gray-500">
           Group symbols by
@@ -96,15 +156,20 @@ export function AggregationSection({
         </div>
       </div>
 
-      {/* By Symbol — full width */}
-      <AggregateTable
-        title="By Symbol"
-        rows={aggregations.bySymbol}
-        activeKey={activeKeyFor("symbol")}
-        onRowClick={makeHandler("symbol")}
-        visibleColumns={aggregateColumns["symbol"]}
-        onVisibleColumnsChange={(ids) => onAggregateColumnsChange("symbol", ids)}
-      />
+      {/* By Symbol — full width, one per benchmark */}
+      {sections.map((s) => (
+        <AggregateTable
+          key={s.benchmark}
+          title={s.symbolTitle}
+          benchmark={s.benchmark}
+          rows={s.data.rows}
+          activeKey={activeKeyFor(s.group)}
+          onRowClick={makeHandler(s.group)}
+          visibleColumns={aggregateColumns[s.group]}
+          onVisibleColumnsChange={(ids) => onAggregateColumnsChange(s.group, ids)}
+          actions={<AlgoFilterMenu filter={s.data.algoFilter} />}
+        />
+      ))}
 
       {/* By Algo + By Symbol+Algo — 2-col */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

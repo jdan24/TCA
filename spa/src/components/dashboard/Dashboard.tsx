@@ -10,6 +10,9 @@
  *   ├─ VWAP Deviation ──── TWAP Deviation ──────────────────────────────┤
  *   ├─ SpreadScatter (full width) ──────────────────────────────────────┤
  *   └─ AggregationSection (Spread Savings / By Symbol / Algo / …)───────┘
+ *
+ * By Symbol and Spread Savings each render three times — once per benchmark, over
+ * disjoint sets of orders. See AggregationSection for why.
  */
 
 import { useMemo, useState } from "react";
@@ -17,11 +20,16 @@ import { toPng } from "html-to-image";
 import type { EnrichProgress } from "@/bloomberg/enrichmentService";
 import type { AggGroupType, AggregationSet, DataFilter, TCAResult, TradeRecord } from "@/types";
 import { EMPTY_FILTER } from "@/types";
-import { buildAggregations, buildSpreadSavings } from "@/tca/aggregate";
+import { buildAggregations } from "@/tca/aggregate";
 import { toGenericTicker } from "@/tca/genericTicker";
 import { decToTreasuryFrac, getTreasuryPrecision } from "@/tca/treasuryFrac";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { useCashDisplay } from "@/hooks/useCashDisplay";
+import { useAlgoMap } from "@/hooks/useAlgoMap";
+import {
+  partitionByBenchmark,
+  useBenchmarkAggregation,
+} from "@/hooks/useBenchmarkAggregation";
 import { MultiOrderPrintLayout, type MOChartImages } from "@/components/export/MultiOrderPrintLayout";
 import { TradeTable } from "@/components/table/TradeTable";
 import { AggregationSection } from "./AggregationSection";
@@ -69,7 +77,8 @@ function saveGroupGeneric(v: boolean): void {
 
 /** Every grouping that gets its own aggregation table and column preference. */
 const AGG_GROUP_TYPES: AggGroupType[] = [
-  "symbol", "algo", "symbol+algo", "symbol+side", "symbol+algo+side",
+  "symbol", "symbol:vwap", "symbol:twap",
+  "algo", "symbol+algo", "symbol+side", "symbol+algo+side",
 ];
 
 /** One stored column selection per grouping, loaded on first render. */
@@ -220,21 +229,58 @@ export function Dashboard({
     [results, filteredResultSet],
   );
 
-  const aggregations: AggregationSet = useMemo(
-    () => buildAggregations(
-      filteredTrades,
-      filteredResults,
-      groupGeneric ? genericFor : undefined,
-      cash,
-    ),
-    [filteredTrades, filteredResults, groupGeneric, genericFor, cash],
+  // How the symbol tables key their rows: generic ticker or specific expiry.
+  const groupSymbol = useMemo(
+    () => (groupGeneric ? genericFor : (ric: string) => ric),
+    [groupGeneric, genericFor],
   );
 
-  // Always by generic ticker — collapsing expiries onto the instrument is the
-  // point of this table, so it ignores the toggle above.
-  const spreadSavings = useMemo(
-    () => buildSpreadSavings(filteredTrades, filteredResults, genericFor),
-    [filteredTrades, filteredResults, genericFor],
+  // ── Benchmark split ─────────────────────────────────────────────────────────
+  //
+  // By Symbol and Spread Savings are rendered once per benchmark, over disjoint
+  // sets of orders: averaging a TWAP order's arrival slippage beside a POV
+  // order's says nothing about either. The algo → benchmark table in Settings
+  // decides which bucket an order lands in, so the split tracks the same
+  // mapping as the Order Detail highlight ring and the Total Cost tile.
+  const { resolve: benchmarkFor } = useAlgoMap();
+
+  const buckets = useMemo(
+    () => partitionByBenchmark(filteredTrades, benchmarkFor),
+    [filteredTrades, benchmarkFor],
+  );
+
+  // One call per benchmark rather than a loop — each carries its own algo menu,
+  // and a hook cannot be called from inside one. Order matches
+  // BENCHMARK_SECTIONS in AggregationSection.
+  const arrivalSection = useBenchmarkAggregation(
+    "agg-symbol-arrival", "arrival", buckets.arrival,
+    filteredResults, groupSymbol, genericFor, cash,
+  );
+  const vwapSection = useBenchmarkAggregation(
+    "agg-symbol-vwap", "vwap", buckets.vwap,
+    filteredResults, groupSymbol, genericFor, cash,
+  );
+  const twapSection = useBenchmarkAggregation(
+    "agg-symbol-twap", "twap", buckets.twap,
+    filteredResults, groupSymbol, genericFor, cash,
+  );
+  const benchmarkSections = useMemo(
+    () => [arrivalSection, vwapSection, twapSection],
+    [arrivalSection, vwapSection, twapSection],
+  );
+
+  // The groupings that span every benchmark, plus the three symbol tables above.
+  const aggregations: AggregationSet = useMemo(
+    () => ({
+      ...buildAggregations(filteredTrades, filteredResults, groupSymbol, cash),
+      bySymbol: arrivalSection.rows,
+      bySymbolVwap: vwapSection.rows,
+      bySymbolTwap: twapSection.rows,
+    }),
+    [
+      filteredTrades, filteredResults, groupSymbol, cash,
+      arrivalSection.rows, vwapSection.rows, twapSection.rows,
+    ],
   );
 
   const isFiltered = filteredTrades.length !== trades.length;
@@ -246,7 +292,11 @@ export function Dashboard({
         results={filteredResults}
         aggregations={aggregations}
         genericFor={genericFor}
-        spreadSavings={spreadSavings}
+        spreadSavingsByBenchmark={{
+          arrival: arrivalSection.savings,
+          vwap: vwapSection.savings,
+          twap: twapSection.savings,
+        }}
         spreadSavingsColumns={spreadSavingsColumns}
         aggregateColumns={aggregateColumns}
         charts={printCharts}
@@ -402,7 +452,7 @@ export function Dashboard({
       {/* ── Aggregation tables ───────────────────────────────────────────── */}
       <AggregationSection
         aggregations={aggregations}
-        spreadSavings={spreadSavings}
+        benchmarkSections={benchmarkSections}
         spreadSavingsColumns={spreadSavingsColumns}
         onSpreadSavingsColumnsChange={changeSpreadSavingsColumns}
         aggregateColumns={aggregateColumns}
