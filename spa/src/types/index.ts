@@ -409,6 +409,20 @@ export interface RawFileData {
   headers: string[];
   rows: Record<string, string>[];
   fileType: "csv" | "xlsx";
+  /**
+   * Stored numeric cell values by header, parallel to `rows`.
+   *
+   * A spreadsheet cell has two faces: the number it stores and the text Excel
+   * shows for it. `rows` carries the text, which is what dates, currency and
+   * text-typed identifiers need — but a price cell formatted to 3 decimals
+   * shows "108.508" for a stored 108.5078125, and importing that text throws
+   * the precision away before anything can use it.
+   *
+   * Only present for spreadsheet imports, and only populated for cells the
+   * sheet actually stores as numbers. CSV has no second face: its text is the
+   * value, so the field is absent and callers fall back to `rows`.
+   */
+  numeric?: Record<string, number>[];
 }
 
 // ── Zustand store shape ───────────────────────────────────────────────────────

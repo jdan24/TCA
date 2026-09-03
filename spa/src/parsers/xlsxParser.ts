@@ -45,6 +45,21 @@ export function parseXlsxFile(file: File): Promise<RawFileData> {
           dateNF: "yyyymmdd-HH:MM:ss.000",
         });
 
+        // The same grid read a second time, this time as stored values rather
+        // than display text.
+        //
+        // raw:false above returns what Excel *shows*, which is what dates and
+        // text-typed identifiers need — but it silently applies the cell's
+        // number format, so a price stored as 108.5078125 under a "0.000"
+        // format imports as "108.508" and the sub-tick detail is gone before
+        // any code sees it. Reading both lets a caller take the exact number
+        // where precision matters and keep the formatted text everywhere else.
+        const valueArrays = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+          header: 1,
+          defval: "",
+          raw: true,
+        });
+
         if (rawArrays.length === 0) {
           reject(new Error("Spreadsheet appears to be empty"));
           return;
@@ -61,12 +76,15 @@ export function parseXlsxFile(file: File): Promise<RawFileData> {
           .filter(Boolean);
 
         const rows: Record<string, string>[] = [];
+        const numeric: Record<string, number>[] = [];
 
         for (let i = 1; i < rawArrays.length; i++) {
           const rowArr = rawArrays[i];
           if (!Array.isArray(rowArr)) continue;
+          const valueArr = valueArrays[i];
 
           const row: Record<string, string> = {};
+          const nums: Record<string, number> = {};
           let hasValue = false;
 
           for (let j = 0; j < headers.length; j++) {
@@ -76,13 +94,24 @@ export function parseXlsxFile(file: File): Promise<RawFileData> {
               const val = String(cell ?? "").trim();
               row[header] = val;
               if (val) hasValue = true;
+
+              // Recorded only for cells the sheet stores as a number. A date
+              // arrives here as a Date and a text-typed cell as a string; both
+              // are left to the formatted text, which already handles them.
+              const stored = Array.isArray(valueArr) ? valueArr[j] : undefined;
+              if (typeof stored === "number" && isFinite(stored)) nums[header] = stored;
             }
           }
 
-          if (hasValue) rows.push(row);
+          if (hasValue) {
+            rows.push(row);
+            // Pushed in step with `rows` so the two stay index-aligned; a row
+            // skipped as empty must not shift every later row's numbers.
+            numeric.push(nums);
+          }
         }
 
-        resolve({ headers, rows, fileType: "xlsx" });
+        resolve({ headers, rows, numeric, fileType: "xlsx" });
       } catch (err) {
         reject(err instanceof Error ? err : new Error(String(err)));
       }

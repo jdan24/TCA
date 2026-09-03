@@ -115,6 +115,8 @@ export function normalizeRows(data: RawFileData, mapping: ColumnMapping): TradeR
   for (let i = 0; i < data.rows.length; i++) {
     const row = data.rows[i];
     if (!row) continue;
+    // Stored cell values for this row, when the import had any (spreadsheets).
+    const nums = data.numeric?.[i];
 
     /**
      * Pull a trimmed string from the mapped column.
@@ -126,16 +128,39 @@ export function normalizeRows(data: RawFileData, mapping: ColumnMapping): TradeR
       return isNullSentinel(raw) ? "" : raw;
     };
 
+    /**
+     * A price from the mapped column, at the precision the source actually
+     * holds.
+     *
+     * A spreadsheet cell formatted to 3 decimals displays "108.508" for a
+     * stored 108.5078125, and the display text is what `row` carries. For a
+     * price that difference is a sub-tick: 108.5078125 is 108-16¼ on the 1/128
+     * grid an FV contract trades, and 108.508 is not a price at all. So the
+     * stored number wins whenever the parser captured one.
+     *
+     * Restricted to prices deliberately. Quantities are integers, and a
+     * timestamp needs its formatted text, so neither gains anything from the
+     * stored value and both keep the path they have always taken. CSV supplies
+     * no numeric map at all — its text is the value — and falls through to
+     * parseNum unchanged.
+     */
+    const getPrice = (col: string | undefined): number => {
+      if (!col) return NaN;
+      const stored = nums?.[col];
+      if (typeof stored === "number" && isFinite(stored)) return stored;
+      return parseNum(get(col));
+    };
+
     try {
       const orderId = get(mapping.orderId) || `ROW-${i + 1}`;
       const symbol = get(mapping.symbol);
       const side = normalizeSide(get(mapping.side));
       const orderQty = parseNum(get(mapping.orderQty));
-      const avgFillPrice = parseNum(get(mapping.avgFillPrice));
+      const avgFillPrice = getPrice(mapping.avgFillPrice);
 
       // arrivalPrice is optional; null → Bloomberg will provide it in Phase 4
       const arrivalRaw = get(mapping.arrivalPrice);
-      const arrivalPrice = arrivalRaw !== "" ? (parseNum(arrivalRaw) || null) : null;
+      const arrivalPrice = arrivalRaw !== "" ? (getPrice(mapping.arrivalPrice) || null) : null;
 
       // File-sourced VWAP/TWAP benchmarks (optional — null when column not mapped)
       const fileVwapRaw = get(mapping.fileVwap);
