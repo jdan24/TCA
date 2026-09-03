@@ -77,6 +77,7 @@ export type SettleColumnId =
   | "avgFillPrice"
   | "avgFillPriceDec"
   | "benchmark"
+  | "benchmark32"
   | "source"
   | "slip_bps"
   | "slip_price"
@@ -95,8 +96,9 @@ export const SETTLE_COLUMNS: ReadonlyArray<{
   { id: "side",         label: "Side" },
   { id: "orderQty",     label: "Qty" },
   { id: "avgFillPrice", label: "Fill Price", title: "In the contract's own notation — 32nds for Treasuries, which rounds to the nearest tick" },
-  { id: "avgFillPriceDec", label: "Fill Price (dec)", title: "The average fill price exactly as imported, in decimal, unrounded" },
-  { id: "benchmark",    label: "Benchmark" },
+  { id: "avgFillPriceDec", label: "Fill Price (dec)", title: "The average fill price exactly as imported, in decimal, unrounded — padded to 5 decimals, and longer where the contract's tick grid needs more" },
+  { id: "benchmark",    label: "Benchmark", title: "The settle benchmark in decimal, unrounded — padded to 5 decimals, and longer where the contract's tick grid needs more" },
+  { id: "benchmark32",  label: "Benchmark (32nds)", title: "The same benchmark in the contract's own notation — 32nds for Treasuries, which rounds to the nearest tick" },
   { id: "source",       label: "Source", title: "Official settle, or the last print before 16:00:00 NY" },
   { id: "slip_bps",     label: "Slip (bps)", title: "Slippage vs the settle benchmark. Positive is a cost." },
   { id: "slip_price",   label: "Slip (px)" },
@@ -155,21 +157,63 @@ function priceText(value: number, bbgSymbol: string): string {
     : value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
 }
 
+/** Decimal places every price column pads out to, so the column aligns. */
+const MIN_PRICE_DECIMALS = 5;
+
 /**
- * The price exactly as it came off the import, in decimal.
+ * A price in decimal, never rounded.
  *
  * priceText() above renders a Treasury in 32nds, which is what a trader reads —
  * but 32nds notation is a grid, so a fill averaged across many prints snaps to
- * the nearest tick and the sub-tick detail disappears. This column carries the
- * unrounded number the slippage was actually computed from.
+ * the nearest tick and the sub-tick detail disappears. The decimal columns carry
+ * the unrounded number the slippage was actually computed from.
  *
- * toLocaleString would apply grouping separators and cap the fraction digits, so
- * the value is stringified directly and only trailing zeros are trimmed.
+ * Five decimals is the floor rather than a cap, because it is not enough to
+ * write every Treasury price exactly: the tick grids run 1/32 (5 dp, exact),
+ * 1/64 (6), 1/128 (7) and 1/256 (8), so an FV price of 108-16¼ is exactly
+ * 108.5078125 and capping it would display a number the contract cannot trade
+ * at. Values needing fewer places are zero-padded to five so the decimal points
+ * line up; values needing more keep every place they need.
+ *
+ * String() is the shortest form that round-trips back to the same double, so it
+ * states the stored value exactly without inventing precision. toLocaleString is
+ * avoided: it applies grouping separators and caps the fraction digits.
  */
-function rawDecimalText(value: number): string {
-  if (!isFinite(value)) return "N/A";
-  const s = String(value);
-  return s.includes("e") ? value.toFixed(10).replace(/0+$/, "").replace(/\.$/, "") : s;
+function priceDecimalText(value: number | null): string {
+  if (value === null || !isFinite(value)) return "N/A";
+  // Exponent form appears only for values far outside any price range; toFixed
+  // brings those back to plain notation rather than printing "1e-7" in a table.
+  const exact = String(value);
+  if (exact.includes("e")) return value.toFixed(MIN_PRICE_DECIMALS);
+  const dot = exact.indexOf(".");
+  const decimals = dot === -1 ? 0 : exact.length - dot - 1;
+  return decimals >= MIN_PRICE_DECIMALS ? exact : value.toFixed(MIN_PRICE_DECIMALS);
+}
+
+/**
+ * A benchmark price in whichever notation the caller formatted.
+ *
+ * A failed fetch is not the same as "no such price", and must not read as one —
+ * that conflation is what made a queue of timed-out requests look like missing
+ * Bloomberg history. Both benchmark columns share this so the distinction can
+ * never be made in one and lost in the other.
+ */
+function BenchmarkCell({ result, text }: { result: SettleResult; text: string }) {
+  if (result.benchmark === null) {
+    return result.benchmarkFailed ? (
+      <span
+        className="whitespace-nowrap text-amber-600 dark:text-amber-400"
+        title="The benchmark request failed twice — it timed out or the bridge errored. This is not Bloomberg reporting no settle. Re-fetch to try again."
+      >
+        &#9888; failed
+      </span>
+    ) : (
+      <NaCell />
+    );
+  }
+  return (
+    <span className="tabular-nums font-mono text-gray-700 dark:text-gray-300">{text}</span>
+  );
 }
 
 /** Shared with the print layout so a column renders identically in both. */
@@ -223,28 +267,19 @@ export function renderSettleCell(row: SettleTableRow, id: SettleColumnId) {
     case "avgFillPriceDec":
       return (
         <span className="tabular-nums font-mono text-gray-700 dark:text-gray-300">
-          {rawDecimalText(row.avgFillPrice)}
+          {priceDecimalText(row.avgFillPrice)}
         </span>
       );
+    // The two benchmark columns carry the same price in the two notations: the
+    // decimal one is exact, the 32nds one is what a trader reads off a screen.
     case "benchmark":
-      // A failed fetch is not the same as "no such price", and must not read as
-      // one — that conflation is what made a queue of timed-out requests look
-      // like missing Bloomberg history.
-      return r.benchmark === null ? (
-        r.benchmarkFailed ? (
-          <span
-            className="whitespace-nowrap text-amber-600 dark:text-amber-400"
-            title="The benchmark request failed twice — it timed out or the bridge errored. This is not Bloomberg reporting no settle. Re-fetch to try again."
-          >
-            &#9888; failed
-          </span>
-        ) : (
-          <NaCell />
-        )
-      ) : (
-        <span className="tabular-nums font-mono text-gray-700 dark:text-gray-300">
-          {priceText(r.benchmark, row.bbgSymbol)}
-        </span>
+      return <BenchmarkCell result={r} text={priceDecimalText(r.benchmark)} />;
+    case "benchmark32":
+      return (
+        <BenchmarkCell
+          result={r}
+          text={r.benchmark === null ? "" : priceText(r.benchmark, row.bbgSymbol)}
+        />
       );
     case "source":
       return r.source === null ? (
@@ -315,6 +350,12 @@ export function settleCellText(row: SettleTableRow, id: SettleColumnId): string 
     case "avgFillPrice": return row.avgFillPrice;
     case "avgFillPriceDec": return row.avgFillPrice;
     case "benchmark":    return r.benchmark === null && r.benchmarkFailed ? "FETCH FAILED" : r.benchmark;
+    // The 32nds column exports its notation rather than the number, so the
+    // header and the value agree once the file is opened.
+    case "benchmark32":
+      return r.benchmark === null
+        ? (r.benchmarkFailed ? "FETCH FAILED" : null)
+        : priceText(r.benchmark, row.bbgSymbol);
     case "source":       return r.source === "settle" ? r.field ?? "settle" : r.source === "print" ? "16:00 print" : null;
     case "slip_bps":     return r.slip_bps;
     case "slip_price":   return r.slip_price;
