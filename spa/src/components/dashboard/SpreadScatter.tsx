@@ -171,7 +171,10 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
     return pts;
   }, [results, tradeMap, algoFilter]);
 
-  const beatCount = points.filter((p) => p.verdict === "beat").length;
+  // The headline counts the neutral band as a pass: an order that matched the
+  // cost of crossing did not lose to it, and the claim being made is "at or
+  // better", not "strictly better".
+  const atOrBetterCount = points.filter((p) => p.verdict !== "miss").length;
 
   const yAxis = useMemo(
     () => wholeBpsAxis(points.map((p) => p.savings)),
@@ -201,7 +204,7 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
   return (
     <ChartCard
       title={SPREAD_SCATTER_TITLE}
-      subtitle={`${beatCount} of ${points.length} orders cost less than crossing the spread`}
+      subtitle={`${atOrBetterCount} of ${points.length} orders at or better than crossing the full spread`}
       actions={actions}
     >
       <ResponsiveContainer width="100%" height={240}>
