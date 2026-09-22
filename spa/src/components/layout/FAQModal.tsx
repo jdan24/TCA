@@ -66,15 +66,13 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function Pill({ children, color }: { children: React.ReactNode; color: "green" | "amber" | "red" | "gray" }) {
+function Pill({ children, color }: { children: React.ReactNode; color: "green" | "red" | "gray" }) {
   const cls =
     color === "green"
       ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400"
-      : color === "amber"
-        ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400"
-        : color === "red"
-          ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
-          : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300";
+      : color === "red"
+        ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
+        : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300";
   return (
     <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded ${cls}`}>
       {children}
@@ -258,23 +256,23 @@ export function FAQModal({ onClose }: FAQModalProps) {
               <Row label="Source (per fill)" value="Bloomberg bid/ask ticks filtered to [orderTime, lastFillTime] for that fill" />
               <Row label="Source (Parent Order Summary)" value="Single TWAS computed over the full parent order window [orderTime, lastFillTime] — not an average of per-fill values. The quote in force at orderTime is carried forward, since a quote that never changes produces no tick inside the window." />
               <Row label="TWAS (price)" value="The same time-weighted average as a raw price width (ask − bid), shown next to the bps figure and as its own column in multi-order mode. Treasury futures render it in 32nds." />
-              <Row label="On the scatter" value="Each order's TWAS also appears as a dashed mark on the Spread vs Slippage chart — see that entry below." />
+              <Row label="On the scatter" value="TWAS is the X axis of the Cost vs Crossing the Spread chart, and the baseline it scores against — see that entry below." />
               <Row label="Near-zero mid" value="bps is shown as N/A when |mid| is below 1e-6 — a calendar spread can trade through zero, where (ask − bid) / mid explodes. The price width stays meaningful there." />
               <Row label="≈ prefix" value="The spread was estimated from 1-minute bar ranges because Bloomberg quote ticks were unavailable for the window — a rough proxy, not a measurement." />
               <p>A liquidity environment proxy: how wide the market spread was, on average, while the order was executing. Comparing TWAS to IS helps distinguish execution skill from market conditions — high IS in a wide-spread environment is less concerning than high IS with a tight spread.</p>
               <p>On instruments whose price sits near zero — futures calendar spreads especially — read the price width first: a spread quoted 0-03¾ / 0-03⅞ is one eighth of a 32nd wide, which is a large number in bps only because the mid is small.</p>
             </Entry>
 
-            <Entry name="Spread vs Slippage chart — spread marks" tag="per order">
-              <Row label="Dot" value="One order: its TWAS on X, its IS on Y. Hover it for the symbol, side, quantity and the three figures behind the verdict." />
-              <Row label="Crossing mark" value="A dashed mark at TWAS / 2, at that order's own x — the cost of simply crossing the spread at arrival. This is the bar the colours are scored against." />
-              <Row label="Full mark" value="A lighter dashed mark at TWAS — the entire quoted width, kept as an outer bound." />
-              <Row label="Dot under the crossing mark" value={<Pill color="green">beat the cost of crossing</Pill>} />
-              <Row label="Between the two marks" value={<Pill color="amber">crossed, but inside the full spread</Pill>} />
-              <Row label="Dot over the full mark" value={<Pill color="red">paid more than the quoted width</Pill>} />
-              <p>Dots are coloured to say the same thing, so the reading survives turning the marks off — useful on a crowded plot. The subtitle counts how many orders came in under their own crossing cost.</p>
-              <p>Why half the spread is the bar: IS is measured against the arrival <strong>mid</strong>, so lifting the far touch costs half the quoted width, not all of it. Scoring against the full width would call an order that simply crossed a comfortable beat.</p>
-              <p>This is the same yardstick the Spread Savings table uses — its 0% sits at exactly IS = TWAS / 2 — so a green dot here and a positive savings figure there agree.</p>
+            <Entry name="Cost vs Crossing the Spread chart" tag="per order">
+              <Formula>Saved vs crossing (bps) = TWAS − IS</Formula>
+              <Row label="Dot" value="One order: the quoted spread it traded through (TWAS) on X, what it saved against crossing on Y. Hover it for the symbol, side, quantity and the figures behind the number." />
+              <Row label="The flat line at zero" value="The baseline — an order that cost exactly the full quoted spread. This single line replaces the per-order spread marks the chart used to draw." />
+              <Row label="Above the line" value={<Pill color="green">cost less than crossing</Pill>} />
+              <Row label="Below the line" value={<Pill color="red">cost more than crossing</Pill>} />
+              <p>Built for the question a client who trades with market orders actually asks: what would this have cost me if I had just hit the bid or lifted the offer? The subtitle counts how many orders came in cheaper than that.</p>
+              <p>The baseline is the <strong>full</strong> quoted spread — the round-trip cost of crossing. Note that IS is measured against the arrival <strong>mid</strong>, where lifting the far touch costs half that width, so this comparison is against a round trip rather than one-way touch-taking. The chart states the baseline beneath its legend.</p>
+              <p>It follows that this chart and the Spread Savings table cut at different points: zero here is IS = TWAS, while the table’s 0% is IS = TWAS / 2. They answer different questions and will not agree.</p>
+              <p>Because Y is derived from X, points form a wedge bounded above by the line Y = X, which an order reaches when its slippage is zero. Savings are naturally larger where spreads are wider.</p>
             </Entry>
 
             <Entry name="Trend Cost" tag="bps · IS decomposition">

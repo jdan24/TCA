@@ -33,6 +33,7 @@ import {
 import { MultiOrderPrintLayout, type MOChartImages } from "@/components/export/MultiOrderPrintLayout";
 import { TradeTable } from "@/components/table/TradeTable";
 import { AggregationSection } from "./AggregationSection";
+import { excludeFromCapture } from "./dashboardUtils";
 import { FilterBar } from "./FilterBar";
 import { SlippageChart } from "./SlippageChart";
 import { SpreadScatter } from "./SpreadScatter";
@@ -170,7 +171,11 @@ export function Dashboard({
       const capture = async (id: string): Promise<string | null> => {
         const el = document.getElementById(id);
         if (!el) return null;
-        return toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 }).catch(() => null);
+        return toPng(el, {
+          backgroundColor: "#ffffff",
+          pixelRatio: 2,
+          filter: excludeFromCapture,
+        }).catch(() => null);
       };
       const [slippage, vwapDev, twapDev, spread] = await Promise.all([
         capture("mo-chart-slippage"),

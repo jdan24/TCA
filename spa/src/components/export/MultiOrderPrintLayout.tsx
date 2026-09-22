@@ -38,6 +38,7 @@ import {
   SPREAD_SAVINGS_COLUMNS,
   type SpreadSavingsColumnId,
 } from "@/components/dashboard/SpreadSavingsTable";
+import { SPREAD_SCATTER_TITLE } from "@/components/dashboard/SpreadScatter";
 
 // ── Section type & constants ──────────────────────────────────────────────────
 
@@ -82,7 +83,7 @@ const SECTION_GROUPS: SectionGroup[] = [
       { id: "slippage",  label: "IS vs Order Size" },
       { id: "vwap_dev",  label: "VWAP Deviation"   },
       { id: "twap_dev",  label: "TWAP Deviation"   },
-      { id: "spread",    label: "Spread vs IS"      },
+      { id: "spread",    label: SPREAD_SCATTER_TITLE },
     ],
   },
   {
@@ -378,7 +379,7 @@ export function MultiOrderPrintLayout({
     { id: "slippage"  as SectionId, label: "IS vs Order Size", src: charts.slippage  },
     { id: "vwap_dev"  as SectionId, label: "VWAP Deviation",   src: charts.vwapDev   },
     { id: "twap_dev"  as SectionId, label: "TWAP Deviation",   src: charts.twapDev   },
-    { id: "spread"    as SectionId, label: "Spread vs IS",     src: charts.spread    },
+    { id: "spread"    as SectionId, label: SPREAD_SCATTER_TITLE, src: charts.spread  },
   ];
   const enabledCharts = CHART_DEFS.filter((c) => vis(c.id));
 

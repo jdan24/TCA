@@ -1,34 +1,35 @@
 /**
- * Spread vs slippage scatter — TWAS (bps) on X, IS (bps) on Y.
+ * Cost vs Crossing the Spread — what the algos saved against simply paying up.
  *
- * Reveals the relationship between the liquidity environment (spread width)
- * and execution quality (slippage):
- *   • Points in upper-right: wide spread AND high slippage → poor conditions AND poor execution
- *   • Points in lower-left: tight spread AND low slippage → good conditions AND good execution
- *   • Points in upper-left: tight spread BUT high slippage → poor execution in good conditions
+ * Built for an audience that trades with market orders. The question it answers
+ * is "what would this have cost me if I'd just hit the bid / lifted the offer?",
+ * so the y axis is not slippage but the saving against that alternative:
  *
- * Each order carries two short dashed marks at its own x, above or below its dot:
+ *   savings_bps = TWAS_bps − IS_bps        (positive = cheaper than crossing)
  *
- *   • the CROSSING mark at TWAS / 2 — the bar that matters. IS is measured
- *     against the arrival mid, so lifting the far touch costs half the quoted
- *     width. A dot under this mark did better than simply crossing.
- *   • the FULL mark at TWAS — the outer bound, drawn lighter. A dot above it
- *     paid more than the entire quoted width.
+ * That puts the baseline on a single flat line at y = 0 — the full quoted width,
+ * for the whole chart — instead of a dashed mark per order. Everything above the
+ * line cost less than crossing; everything below cost more.
  *
- * Dots are coloured on those same two thresholds — green below the crossing
- * mark, amber between the two, red above the full width — so the reading
- * survives turning the marks off on a crowded plot.
+ * On the baseline
+ * ───────────────
+ * The crossing cost here is the FULL quoted spread. Note that IS is measured
+ * against the arrival mid, where lifting the far touch costs half that width, so
+ * this is the round-trip cost of the spread rather than one-way touch-taking.
+ * The chart states the baseline under the legend rather than leaving it implied.
  *
- * The crossing mark is deliberately the same yardstick the Spread Savings table
- * uses: its 0% sits at exactly IS = TWAS / 2 (see buildSpreadSavings() in
- * tca/aggregate.ts). A green dot here and a positive savings figure there mean
- * the same thing, which they did not when this chart scored against the full
- * width — an order that merely crossed the spread read as a comfortable beat.
+ * It follows that this chart's zero (IS = TWAS) and the Spread Savings table's
+ * 0% (IS = TWAS / 2, see buildSpreadSavings() in tca/aggregate.ts) are different
+ * cut points. The two surfaces answer different questions and do not agree.
+ *
+ * X keeps TWAS, so the reading holds across tight and wide markets. Because y is
+ * derived from x, the points form a wedge bounded above by y = x — reached when
+ * IS is zero — and savings are naturally larger where spreads are wider.
  *
  * Requires both Bloomberg TWAS data and arrival price (IS).
  */
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   CartesianGrid,
   Cell,
@@ -45,15 +46,15 @@ import { useChartAlgoFilter } from "@/hooks/useChartAlgoFilter";
 import { AlgoFilterMenu } from "./AlgoFilterMenu";
 import { ChartCard, EmptyState, fmtBps, slipToneClass } from "./dashboardUtils";
 
-const BEAT_COLOR = "#10b981"; // emerald — cost less than crossing the spread
-const PART_COLOR = "#f59e0b"; // amber   — over the crossing cost, under the full width
-const MISS_COLOR = "#ef4444"; // red     — paid more than the full quoted width
+/**
+ * The card's title, exported so the print layout captions the image identically
+ * rather than re-typing it — the two had already drifted apart once.
+ */
+export const SPREAD_SCATTER_TITLE = "Cost vs Crossing the Spread";
 
-const CROSS_MARKER_COLOR = "#64748b"; // the bar: half the quoted spread
-const FULL_MARKER_COLOR = "#cbd5e1";  // lighter outer bound: the full width
-
-/** Half-width of a spread marker, in pixels. */
-const MARKER_HALF_WIDTH = 9;
+const BEAT_COLOR = "#10b981"; // emerald — cost less than crossing
+const MISS_COLOR = "#ef4444"; // red     — cost more than crossing
+const BASELINE_COLOR = "#64748b";
 
 interface SpreadScatterProps {
   /** Needed for the algo filter and the tooltip — algo, symbol, side and qty
@@ -62,26 +63,14 @@ interface SpreadScatterProps {
   results: TCAResult[];
 }
 
-/**
- * Where an order landed against the two marks.
- *   beat    — under TWAS / 2: better than crossing at arrival
- *   crossed — between TWAS / 2 and TWAS: worse than crossing, inside the width
- *   missed  — at or above TWAS: paid more than the entire quoted spread
- */
-type Verdict = "beat" | "crossed" | "missed";
-
-const VERDICT_COLOR: Record<Verdict, string> = {
-  beat: BEAT_COLOR,
-  crossed: PART_COLOR,
-  missed: MISS_COLOR,
-};
-
 interface Point {
   twas: number;
+  /** TWAS − IS: bps saved against crossing the full quoted spread. */
+  savings: number;
+  /** Kept for the tooltip, which shows the underlying slippage too. */
   is: number;
-  /** Half the quoted spread — the cost of simply crossing at arrival. */
-  half: number;
-  verdict: Verdict;
+  /** Strictly cheaper than crossing — landing exactly on the line is not a win. */
+  beat: boolean;
   /** Identity, so a visible outlier is an order you can go and look at. */
   orderId: string;
   symbol: string;
@@ -89,44 +78,7 @@ interface Point {
   qty: number;
 }
 
-function verdictFor(is: number, twas: number): Verdict {
-  if (is < twas / 2) return "beat";
-  if (is < twas) return "crossed";
-  return "missed";
-}
-
-/**
- * A short dashed horizontal tick, drawn at one of the point's spread levels.
- * Recharts hands the shape the resolved pixel centre of its datum.
- *
- * The stroke props are named `marker*` rather than `stroke`/`strokeDasharray`
- * so that Recharts cloning the element over its own props cannot blank them.
- */
-interface SpreadMarkerProps {
-  /** Resolved pixel centre, supplied by Recharts — absent until the datum lays out. */
-  cx?: number;
-  cy?: number;
-  markerStroke?: string;
-  markerDash?: string;
-}
-
-function SpreadMarker({ cx, cy, markerStroke, markerDash }: SpreadMarkerProps) {
-  if (typeof cx !== "number" || typeof cy !== "number") return null;
-  return (
-    <line
-      x1={cx - MARKER_HALF_WIDTH}
-      x2={cx + MARKER_HALF_WIDTH}
-      y1={cy}
-      y2={cy}
-      stroke={markerStroke ?? CROSS_MARKER_COLOR}
-      strokeWidth={1.5}
-      strokeDasharray={markerDash ?? "3 2"}
-    />
-  );
-}
-
 export function SpreadScatter({ trades, results }: SpreadScatterProps) {
-  const [showMarkers, setShowMarkers] = useState(true);
   const algoFilter = useChartAlgoFilter("spread", trades);
 
   const tradeMap = useMemo(() => {
@@ -141,11 +93,12 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
       if (r.TWAS_bps !== null && r.IS_bps !== null) {
         const trade = tradeMap.get(r.orderId);
         if (!trade || !algoFilter.includes(trade)) continue;
+        const savings = r.TWAS_bps - r.IS_bps;
         pts.push({
           twas: r.TWAS_bps,
+          savings,
           is: r.IS_bps,
-          half: r.TWAS_bps / 2,
-          verdict: verdictFor(r.IS_bps, r.TWAS_bps),
+          beat: savings > 0,
           orderId: r.orderId,
           symbol: trade.symbol,
           side: trade.side,
@@ -156,38 +109,15 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
     return pts;
   }, [results, tradeMap, algoFilter]);
 
-  // Marker series: same x as each order, plotted at its two spread levels.
-  const crossMarkers = useMemo(
-    () => points.map((p) => ({ twas: p.twas, is: p.half })),
-    [points],
-  );
-  const fullMarkers = useMemo(
-    () => points.map((p) => ({ twas: p.twas, is: p.twas })),
-    [points],
-  );
+  const beatCount = points.filter((p) => p.beat).length;
 
-  const beatCount = points.filter((p) => p.verdict === "beat").length;
-
-  // The spread-marks toggle and the algo filter share the actions slot.
-  const actions = (
-    <div className="flex items-center gap-2">
-      <AlgoFilterMenu filter={algoFilter} />
-      <button
-        type="button"
-        onClick={() => setShowMarkers((v) => !v)}
-        title="Show or hide the dashed spread marks above each order"
-        className="px-2 py-1 text-[11px] rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors whitespace-nowrap"
-      >
-        {showMarkers ? "Hide" : "Show"} spread marks
-      </button>
-    </div>
-  );
+  const actions = <AlgoFilterMenu filter={algoFilter} />;
 
   if (points.length === 0) {
     return (
       <ChartCard
-        title="Spread vs Slippage"
-        subtitle="TWAS (bps) vs IS (bps) — liquidity vs execution cost"
+        title={SPREAD_SCATTER_TITLE}
+        subtitle="What the algos saved against simply crossing and paying"
         actions={actions}
       >
         <EmptyState
@@ -203,8 +133,8 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
 
   return (
     <ChartCard
-      title="Spread vs Slippage"
-      subtitle={`${beatCount} of ${points.length} beat the cost of crossing the spread`}
+      title={SPREAD_SCATTER_TITLE}
+      subtitle={`${beatCount} of ${points.length} orders cost less than crossing the spread`}
       actions={actions}
     >
       <ResponsiveContainer width="100%" height={240}>
@@ -213,10 +143,10 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
           <XAxis
             dataKey="twas"
             type="number"
-            name="TWAS"
+            name="Quoted spread"
             tick={{ fontSize: 11 }}
             label={{
-              value: "TWAS (bps)",
+              value: "Quoted spread — TWAS (bps)",
               position: "insideBottom",
               offset: -12,
               fontSize: 11,
@@ -224,16 +154,16 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
             }}
           />
           <YAxis
-            dataKey="is"
+            dataKey="savings"
             type="number"
-            name="IS"
+            name="Saved vs crossing"
             tickFormatter={(v: unknown) =>
               typeof v === "number" ? String(Math.round(v)) : ""
             }
             tick={{ fontSize: 11 }}
             width={38}
             label={{
-              value: "IS (bps)",
+              value: "Saved vs crossing (bps)",
               angle: -90,
               position: "insideLeft",
               offset: 12,
@@ -244,29 +174,17 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
           <Tooltip
             cursor={{ strokeDasharray: "3 3" }}
             content={({ payload }) => {
-              // Three series share this chart; only the dot series carries an
-              // orderId, so the marks never raise a tooltip of their own.
+              // Guard on the dot series' own field so the tooltip cannot fire on
+              // empty chart area or on a future reference series.
               const entries = (payload ?? []) as unknown as ReadonlyArray<{ payload?: unknown }>;
               const d = entries
                 .map((e) => e.payload as Point | undefined)
                 .find((p): p is Point => p !== undefined && typeof p.orderId === "string");
               if (!d) return null;
 
-              const verdict =
-                d.verdict === "beat"
-                  ? {
-                      text: `Beat the crossing cost by ${(d.half - d.is).toFixed(2)} bps`,
-                      tone: "text-emerald-600 dark:text-emerald-400",
-                    }
-                  : d.verdict === "crossed"
-                    ? {
-                        text: `${(d.is - d.half).toFixed(2)} bps worse than crossing`,
-                        tone: "text-amber-600 dark:text-amber-400",
-                      }
-                    : {
-                        text: `${(d.is - d.twas).toFixed(2)} bps worse than the full spread`,
-                        tone: "text-red-500 dark:text-red-400",
-                      };
+              const savedTone = d.beat
+                ? "text-emerald-600 dark:text-emerald-400"
+                : "text-red-500 dark:text-red-400";
 
               return (
                 <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
@@ -288,27 +206,25 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
                     </span>
                   </div>
                   <p className="text-gray-600 dark:text-gray-300">
-                    Spread (TWAS):{" "}
+                    Quoted spread:{" "}
                     <span className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">
                       {d.twas.toFixed(2)} bps
                     </span>
                   </p>
                   <p className="text-gray-600 dark:text-gray-300">
-                    Cost to cross:{" "}
-                    <span className="font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-                      {d.half.toFixed(2)} bps
-                    </span>
-                  </p>
-                  <p className="text-gray-600 dark:text-gray-300">
-                    Slippage (IS):{" "}
+                    Your slippage:{" "}
                     <span className={`font-semibold tabular-nums ${slipToneClass(d.is)}`}>
                       {fmtBps(d.is, 2)}
                     </span>
                   </p>
                   <p
-                    className={`mt-1.5 pt-1.5 border-t border-gray-100 dark:border-gray-700 font-medium ${verdict.tone}`}
+                    className={`mt-1.5 pt-1.5 border-t border-gray-100 dark:border-gray-700 font-medium ${savedTone}`}
                   >
-                    {verdict.text}
+                    {d.beat ? "Saved" : "Cost"}{" "}
+                    <span className="tabular-nums">
+                      {Math.abs(d.savings).toFixed(2)} bps
+                    </span>{" "}
+                    {d.beat ? "vs crossing" : "more than crossing"}
                   </p>
                   <p className="mt-0.5 font-mono text-[10px] text-gray-400 dark:text-gray-500 truncate max-w-[15rem]">
                     {d.orderId}
@@ -317,31 +233,24 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
               );
             }}
           />
-          <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="4 4" />
 
-          {/* Spread marks per order, drawn behind the dots. The full width goes
-              down first so the crossing mark — the one being scored against —
-              sits on top where they are close enough to overlap. */}
-          {showMarkers && (
-            <Scatter
-              data={fullMarkers}
-              shape={<SpreadMarker markerStroke={FULL_MARKER_COLOR} markerDash="2 3" />}
-              isAnimationActive={false}
-              legendType="none"
-            />
-          )}
-          {showMarkers && (
-            <Scatter
-              data={crossMarkers}
-              shape={<SpreadMarker markerStroke={CROSS_MARKER_COLOR} markerDash="3 2" />}
-              isAnimationActive={false}
-              legendType="none"
-            />
-          )}
+          {/* The baseline. This single line replaces the per-order spread marks:
+              at y = 0 the order cost exactly the full quoted width. */}
+          <ReferenceLine
+            y={0}
+            stroke={BASELINE_COLOR}
+            strokeWidth={1.5}
+            label={{
+              value: "cost of crossing the spread",
+              position: "insideTopRight",
+              fontSize: 10,
+              fill: BASELINE_COLOR,
+            }}
+          />
 
           <Scatter data={points} isAnimationActive={false}>
             {points.map((p, i) => (
-              <Cell key={i} fill={VERDICT_COLOR[p.verdict]} fillOpacity={0.8} />
+              <Cell key={i} fill={p.beat ? BEAT_COLOR : MISS_COLOR} fillOpacity={0.8} />
             ))}
           </Scatter>
         </ScatterChart>
@@ -351,33 +260,19 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-gray-500 dark:text-gray-400">
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-full" style={{ background: BEAT_COLOR }} />
-          beat the cost of crossing
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 rounded-full" style={{ background: PART_COLOR }} />
-          crossed, but inside the full spread
+          cost less than crossing
         </span>
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-full" style={{ background: MISS_COLOR }} />
-          paid more than the full spread
+          cost more than crossing
         </span>
-        {showMarkers && (
-          <>
-            <span className="flex items-center gap-1.5">
-              <svg width="18" height="6" aria-hidden>
-                <line x1="0" y1="3" x2="18" y2="3" stroke={CROSS_MARKER_COLOR} strokeWidth="1.5" strokeDasharray="3 2" />
-              </svg>
-              cost of crossing (&frac12; spread)
-            </span>
-            <span className="flex items-center gap-1.5">
-              <svg width="18" height="6" aria-hidden>
-                <line x1="0" y1="3" x2="18" y2="3" stroke={FULL_MARKER_COLOR} strokeWidth="1.5" strokeDasharray="2 3" />
-              </svg>
-              full spread
-            </span>
-          </>
-        )}
       </div>
+
+      {/* Methodology. Inside the card so it is captured into the exported PNG —
+          the baseline is an assumption and should travel with the picture. */}
+      <p className="mt-1.5 text-[10px] text-gray-400 dark:text-gray-500">
+        Baseline: the full quoted spread (TWAS). Slippage measured against the arrival mid.
+      </p>
     </ChartCard>
   );
 }

@@ -13,6 +13,7 @@ import autoTable from "jspdf-autotable";
 import { toPng } from "html-to-image";
 import * as XLSX from "xlsx";
 import type { AggregateRow, AggregationSet, BenchmarkKind, ParentOrderSummary, TCAResult, TradeRecord } from "@/types";
+import { excludeFromCapture } from "@/components/dashboard/dashboardUtils";
 
 // Exported so PrintLayout and SingleOrderDashboard can import the same type.
 export interface ChartImages {
@@ -173,7 +174,11 @@ async function captureChart(id: string): Promise<string | null> {
   const el = document.getElementById(id);
   if (!el) return null;
   try {
-    return await toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 });
+    return await toPng(el, {
+      backgroundColor: "#ffffff",
+      pixelRatio: 2,
+      filter: excludeFromCapture,
+    });
   } catch {
     return null;
   }

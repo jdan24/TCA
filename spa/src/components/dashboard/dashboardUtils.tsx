@@ -118,13 +118,34 @@ export function bpsToHsl(bps: number | null | undefined, absMax: number): string
 
 // ── Shared wrapper components ─────────────────────────────────────────────────
 
+/**
+ * Marks a node as screen-only for chart capture.
+ *
+ * `print:hidden` is a `@media print` rule, and html-to-image serialises the live
+ * DOM, where that query never applies — so interactive controls were being baked
+ * into the exported PNGs and reaching clients in the PDF. Both capture sites
+ * filter on this attribute; see `excludeFromCapture` below.
+ */
+export const EXPORT_HIDE_ATTR = "data-export-hide";
+
+/**
+ * `filter` option for html-to-image's toPng: drops screen-only controls.
+ *
+ * The filter is handed every node, text nodes included, so it feature-checks
+ * rather than assuming an Element.
+ */
+export function excludeFromCapture(node: HTMLElement): boolean {
+  return typeof node.hasAttribute !== "function" || !node.hasAttribute(EXPORT_HIDE_ATTR);
+}
+
 interface ChartCardProps {
   title: string;
   subtitle?: string;
   children: ReactNode;
-  /** Optional DOM id — used by html2canvas to capture the card for PDF export. */
+  /** Optional DOM id — the capture sites look the card up by this id. */
   id?: string;
-  /** Optional controls rendered top-right, e.g. a display toggle. Hidden in print. */
+  /** Optional controls rendered top-right, e.g. a display toggle. Kept out of
+   *  both the print stylesheet and the captured image. */
   actions?: ReactNode;
 }
 
@@ -139,7 +160,9 @@ export function ChartCard({ title, subtitle, children, id, actions }: ChartCardP
           )}
         </div>
         {actions !== undefined && (
-          <div className="shrink-0 print:hidden">{actions}</div>
+          <div className="shrink-0 print:hidden" {...{ [EXPORT_HIDE_ATTR]: "" }}>
+            {actions}
+          </div>
         )}
       </div>
       {children}
