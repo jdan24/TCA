@@ -66,13 +66,15 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function Pill({ children, color }: { children: React.ReactNode; color: "green" | "red" | "gray" }) {
+function Pill({ children, color }: { children: React.ReactNode; color: "green" | "amber" | "red" | "gray" }) {
   const cls =
     color === "green"
       ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400"
-      : color === "red"
-        ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
-        : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300";
+      : color === "amber"
+        ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400"
+        : color === "red"
+          ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
+          : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300";
   return (
     <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded ${cls}`}>
       {children}
@@ -264,12 +266,15 @@ export function FAQModal({ onClose }: FAQModalProps) {
             </Entry>
 
             <Entry name="Spread vs Slippage chart — spread marks" tag="per order">
-              <Row label="Dot" value="One order: its TWAS on X, its IS on Y" />
-              <Row label="Dashed mark" value="Drawn at that same order's TWAS level, directly above or below its dot — the full cost of the spread it traded through" />
-              <Row label="Dot under its mark" value={<Pill color="green">beat the spread</Pill>} />
-              <Row label="Dot over its mark" value={<Pill color="red">paid more than the quoted width</Pill>} />
-              <p>Dots are coloured to say the same thing, so the reading survives turning the marks off — useful on a crowded plot. The subtitle counts how many orders beat their own spread cost.</p>
-              <p>The mark is the <strong>full</strong> quoted spread, which is a generous bar. IS is measured against the arrival mid, so simply crossing to the far touch costs half the spread and lands at roughly half the mark's height — comfortably under it. A dot above its mark paid more than the entire quoted width.</p>
+              <Row label="Dot" value="One order: its TWAS on X, its IS on Y. Hover it for the symbol, side, quantity and the three figures behind the verdict." />
+              <Row label="Crossing mark" value="A dashed mark at TWAS / 2, at that order's own x — the cost of simply crossing the spread at arrival. This is the bar the colours are scored against." />
+              <Row label="Full mark" value="A lighter dashed mark at TWAS — the entire quoted width, kept as an outer bound." />
+              <Row label="Dot under the crossing mark" value={<Pill color="green">beat the cost of crossing</Pill>} />
+              <Row label="Between the two marks" value={<Pill color="amber">crossed, but inside the full spread</Pill>} />
+              <Row label="Dot over the full mark" value={<Pill color="red">paid more than the quoted width</Pill>} />
+              <p>Dots are coloured to say the same thing, so the reading survives turning the marks off — useful on a crowded plot. The subtitle counts how many orders came in under their own crossing cost.</p>
+              <p>Why half the spread is the bar: IS is measured against the arrival <strong>mid</strong>, so lifting the far touch costs half the quoted width, not all of it. Scoring against the full width would call an order that simply crossed a comfortable beat.</p>
+              <p>This is the same yardstick the Spread Savings table uses — its 0% sits at exactly IS = TWAS / 2 — so a green dot here and a positive savings figure there agree.</p>
             </Entry>
 
             <Entry name="Trend Cost" tag="bps · IS decomposition">
