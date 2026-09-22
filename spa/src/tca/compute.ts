@@ -16,7 +16,7 @@ import { computeMarketImpact } from "./marketImpact";
 import { computeReversion } from "./reversion";
 import { computeSlippage } from "./slippage";
 import { dollarSlippage } from "./dollars";
-import { computeTWAS, MIN_ABS_MID } from "./spread";
+import { computeTWAS, MIN_ABS_MID, windowedTicks } from "./spread";
 import { computeTimeToFill } from "./timing";
 import { computeOrderVol } from "./volatility";
 import { computeMarketTWAP, computeTWAPDeviation, computeVWAPDeviation } from "./vwapTwap";
@@ -365,25 +365,9 @@ export function computeParentOrderSummary(
       const windowEnd   = lastFillMs;
       const totalDur    = windowEnd - windowStart;
 
-      const sorted = [...e.bidAskTicks]
-        .sort((a: BidAskTick, b: BidAskTick) => a.time.getTime() - b.time.getTime());
-
-      // The quote in force when the order started: the bridge only emits a pair
-      // when the quote actually changes, so on a market that sits still all day
-      // the only pair can predate orderTime.  Carrying it forward to the window
-      // start is what keeps that case from reading as "no spread data", and it
-      // also closes the gap between orderTime and the first in-window quote.
-      let opening: BidAskTick | null = null;
-      const inWindow: BidAskTick[] = [];
-      for (const tk of sorted) {
-        const ms = tk.time.getTime();
-        if (ms <= windowStart) opening = tk;
-        else if (ms <= windowEnd) inWindow.push(tk);
-      }
-
-      const ticks: BidAskTick[] = opening !== null
-        ? [{ ...opening, time: new Date(windowStart) }, ...inWindow]
-        : inWindow;
+      // Clipping, sorting and carrying the opening quote forward all live in
+      // windowedTicks, shared with computeTWAS so the two paths cannot drift.
+      const ticks: BidAskTick[] = windowedTicks(e.bidAskTicks, windowStart, windowEnd);
 
       if (ticks.length === 0) break;
       bidAskSource = e.bidAskSource;

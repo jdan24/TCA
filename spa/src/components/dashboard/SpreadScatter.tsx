@@ -5,22 +5,26 @@
  * is "what would this have cost me if I'd just hit the bid / lifted the offer?",
  * so the y axis is not slippage but the saving against that alternative:
  *
- *   savings_bps = TWAS_bps − IS_bps        (positive = cheaper than crossing)
+ *   savings_bps = TWAS_bps − 2 × IS_bps    (positive = cheaper than crossing)
  *
- * That puts the baseline on a single flat line at y = 0 — the full quoted width,
- * for the whole chart — instead of a dashed mark per order. Everything above the
- * line cost less than crossing; everything below cost more.
- *
- * On the baseline
+ * On the doubling
  * ───────────────
- * The crossing cost here is the FULL quoted spread. Note that IS is measured
- * against the arrival mid, where lifting the far touch costs half that width, so
- * this is the round-trip cost of the spread rather than one-way touch-taking.
- * The chart states the baseline under the legend rather than leaving it implied.
+ * The quoted spread is a TWO-way quantity — ask minus bid — while IS is ONE-way,
+ * measured from the arrival mid. Comparing them directly flattered every order by
+ * half a spread: a real FVZ6 market order that crossed a one-tick market for
+ * exactly half the width scored +0.37 bps and plotted as a win over market
+ * orders, which is the thing this chart exists to measure against.
  *
- * It follows that this chart's zero (IS = TWAS) and the Spread Savings table's
- * 0% (IS = TWAS / 2, see buildSpreadSavings() in tca/aggregate.ts) are different
- * cut points. The two surfaces answer different questions and do not agree.
+ * So both sides are put on a round trip. Crossing twice costs the full quoted
+ * spread; executing twice at this order's own slippage costs 2 × IS. That order
+ * now scores 0.00, and the full width stays the headline comparator.
+ *
+ * Equivalently this is 2 × TWAS × savingsPct, so the chart and the Spread
+ * Savings table (buildSpreadSavings() in tca/aggregate.ts) share a zero point.
+ *
+ * The baseline is therefore a single flat line at y = 0 for the whole chart,
+ * with a neutral band either side — see NEUTRAL_BAND_FRACTION for why an order
+ * that merely matched the crossing cost must not be coloured on its sign.
  *
  * X keeps TWAS, so the reading holds across tight and wide markets. Because y is
  * derived from x, the points form a wedge bounded above by y = x — reached when
@@ -53,8 +57,27 @@ import { ChartCard, EmptyState, fmtBps, slipToneClass } from "./dashboardUtils";
 export const SPREAD_SCATTER_TITLE = "Cost vs Crossing the Spread";
 
 const BEAT_COLOR = "#10b981"; // emerald — cost less than crossing
+const EVEN_COLOR = "#94a3b8"; // slate   — matched the cost of crossing
 const MISS_COLOR = "#ef4444"; // red     — cost more than crossing
 const BASELINE_COLOR = "#64748b";
+
+/**
+ * Half-width of the neutral band, as a fraction of the quoted spread.
+ *
+ * Without it the colour of an order that merely crossed is decided by rounding
+ * rather than execution: on a one-tick FV market a 1% change in the spread
+ * flips it between green and red. Orders this close to the baseline matched it,
+ * and say so, rather than being scattered into wins and losses at random.
+ */
+const NEUTRAL_BAND_FRACTION = 0.1;
+
+type Verdict = "beat" | "matched" | "miss";
+
+const VERDICT_COLOR: Record<Verdict, string> = {
+  beat: BEAT_COLOR,
+  matched: EVEN_COLOR,
+  miss: MISS_COLOR,
+};
 
 interface SpreadScatterProps {
   /** Needed for the algo filter and the tooltip — algo, symbol, side and qty
@@ -96,12 +119,12 @@ function wholeBpsAxis(values: number[]): { domain: [number, number]; ticks: numb
 
 interface Point {
   twas: number;
-  /** TWAS − IS: bps saved against crossing the full quoted spread. */
+  /** TWAS − 2·IS: bps saved against crossing, round trip against round trip. */
   savings: number;
   /** Kept for the tooltip, which shows the underlying slippage too. */
   is: number;
-  /** Strictly cheaper than crossing — landing exactly on the line is not a win. */
-  beat: boolean;
+  /** Where the order landed relative to the baseline and its neutral band. */
+  verdict: Verdict;
   /** Identity, so a visible outlier is an order you can go and look at. */
   orderId: string;
   symbol: string;
@@ -127,12 +150,17 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
       ) {
         const trade = tradeMap.get(r.orderId);
         if (!trade || !algoFilter.includes(trade)) continue;
-        const savings = r.TWAS_bps - r.IS_bps;
+        // Round trip against round trip: crossing twice costs the full quoted
+        // spread, executing twice at this order's own slippage costs 2 × IS.
+        // Comparing a one-way slippage with a two-way spread was what let a
+        // plain market order read as a win over market orders.
+        const savings = r.TWAS_bps - 2 * r.IS_bps;
+        const band = Math.abs(r.TWAS_bps) * NEUTRAL_BAND_FRACTION;
         pts.push({
           twas: r.TWAS_bps,
           savings,
           is: r.IS_bps,
-          beat: savings > 0,
+          verdict: savings > band ? "beat" : savings < -band ? "miss" : "matched",
           orderId: r.orderId,
           symbol: trade.symbol,
           side: trade.side,
@@ -143,7 +171,7 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
     return pts;
   }, [results, tradeMap, algoFilter]);
 
-  const beatCount = points.filter((p) => p.beat).length;
+  const beatCount = points.filter((p) => p.verdict === "beat").length;
 
   const yAxis = useMemo(
     () => wholeBpsAxis(points.map((p) => p.savings)),
@@ -230,9 +258,12 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
                 .find((p): p is Point => p !== undefined && typeof p.orderId === "string");
               if (!d) return null;
 
-              const savedTone = d.beat
-                ? "text-emerald-600 dark:text-emerald-400"
-                : "text-red-500 dark:text-red-400";
+              const savedTone =
+                d.verdict === "beat"
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : d.verdict === "miss"
+                    ? "text-red-500 dark:text-red-400"
+                    : "text-gray-500 dark:text-gray-400";
 
               return (
                 <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 shadow-lg text-xs">
@@ -265,14 +296,29 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
                       {fmtBps(d.is, 2)}
                     </span>
                   </p>
+                  {/* The doubled figure is shown rather than left implied: it is
+                      the step a sceptical reader will want to check, and this
+                      chart's whole job is to be checked. */}
+                  <p className="text-gray-600 dark:text-gray-300">
+                    Round trip (2&times;):{" "}
+                    <span className={`font-semibold tabular-nums ${slipToneClass(d.is)}`}>
+                      {fmtBps(d.is * 2, 2)}
+                    </span>
+                  </p>
                   <p
                     className={`mt-1.5 pt-1.5 border-t border-gray-100 dark:border-gray-700 font-medium ${savedTone}`}
                   >
-                    {d.beat ? "Saved" : "Cost"}{" "}
-                    <span className="tabular-nums">
-                      {Math.abs(d.savings).toFixed(2)} bps
-                    </span>{" "}
-                    {d.beat ? "vs crossing" : "more than crossing"}
+                    {d.verdict === "matched" ? (
+                      "Matched the cost of crossing"
+                    ) : (
+                      <>
+                        {d.verdict === "beat" ? "Saved" : "Cost"}{" "}
+                        <span className="tabular-nums">
+                          {Math.abs(d.savings).toFixed(2)} bps
+                        </span>{" "}
+                        {d.verdict === "beat" ? "vs crossing" : "more than crossing"}
+                      </>
+                    )}
                   </p>
                   <p className="mt-0.5 font-mono text-[10px] text-gray-400 dark:text-gray-500 truncate max-w-[15rem]">
                     {d.orderId}
@@ -298,7 +344,7 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
 
           <Scatter data={points} isAnimationActive={false}>
             {points.map((p, i) => (
-              <Cell key={i} fill={p.beat ? BEAT_COLOR : MISS_COLOR} fillOpacity={0.8} />
+              <Cell key={i} fill={VERDICT_COLOR[p.verdict]} fillOpacity={0.8} />
             ))}
           </Scatter>
         </ScatterChart>
@@ -311,6 +357,10 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
           cost less than crossing
         </span>
         <span className="flex items-center gap-1.5">
+          <span className="inline-block h-2 w-2 rounded-full" style={{ background: EVEN_COLOR }} />
+          matched crossing (within 10%)
+        </span>
+        <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-full" style={{ background: MISS_COLOR }} />
           cost more than crossing
         </span>
@@ -319,7 +369,8 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
       {/* Methodology. Inside the card so it is captured into the exported PNG —
           the baseline is an assumption and should travel with the picture. */}
       <p className="mt-1.5 text-[10px] text-gray-400 dark:text-gray-500">
-        Baseline: the full quoted spread (TWAS). Slippage measured against the arrival mid.
+        Baseline: the full quoted spread (TWAS), against twice the order&rsquo;s slippage
+        &mdash; a round trip each side. Slippage is measured against the arrival mid.
       </p>
     </ChartCard>
   );

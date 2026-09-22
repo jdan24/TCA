@@ -264,14 +264,16 @@ export function FAQModal({ onClose }: FAQModalProps) {
             </Entry>
 
             <Entry name="Cost vs Crossing the Spread chart" tag="per order">
-              <Formula>Saved vs crossing (bps) = TWAS − IS</Formula>
-              <Row label="Dot" value="One order: the quoted spread it traded through (TWAS) on X, what it saved against crossing on Y. Hover it for the symbol, side, quantity and the figures behind the number." />
-              <Row label="The flat line at zero" value="The baseline — an order that cost exactly the full quoted spread. This single line replaces the per-order spread marks the chart used to draw." />
-              <Row label="Above the line" value={<Pill color="green">cost less than crossing</Pill>} />
-              <Row label="Below the line" value={<Pill color="red">cost more than crossing</Pill>} />
-              <p>Built for the question a client who trades with market orders actually asks: what would this have cost me if I had just hit the bid or lifted the offer? The subtitle counts how many orders came in cheaper than that.</p>
-              <p>The baseline is the <strong>full</strong> quoted spread — the round-trip cost of crossing. Note that IS is measured against the arrival <strong>mid</strong>, where lifting the far touch costs half that width, so this comparison is against a round trip rather than one-way touch-taking. The chart states the baseline beneath its legend.</p>
-              <p>It follows that this chart and the Spread Savings table cut at different points: zero here is IS = TWAS, while the table’s 0% is IS = TWAS / 2. They answer different questions and will not agree.</p>
+              <Formula>Saved vs crossing (bps) = TWAS − 2 × IS</Formula>
+              <Row label="Dot" value="One order: the quoted spread it traded through (TWAS) on X, what it saved against crossing on Y. Hover it for the symbol, side, quantity and every figure behind the result." />
+              <Row label="The flat line at zero" value="The baseline — an order whose round-trip cost equals the full quoted spread, which is what crossing costs." />
+              <Row label="Above the band" value={<Pill color="green">cost less than crossing</Pill>} />
+              <Row label="Inside the band" value={<Pill color="gray">matched crossing</Pill>} />
+              <Row label="Below the band" value={<Pill color="red">cost more than crossing</Pill>} />
+              <p><strong>Why the slippage is doubled.</strong> The quoted spread is a two-way figure — ask minus bid — while IS is one-way, measured from the arrival mid. Comparing them directly flatters every order by half a spread. Putting both sides on a round trip fixes it: crossing twice costs the full spread, and executing twice at the order’s own slippage costs 2 × IS.</p>
+              <p>A worked example. An FVZ6 sell crossed a one-tick market: arrival 104.847656, fill 104.84375 — exactly half a tick, so IS = 0.373 bps against a spread of 0.745 bps. Doubled, that is 0.745 bps, precisely the quoted width, so the order scores <strong>0.00</strong>. Scored without the doubling it would read +0.37 and plot as a win over market orders, which is the comparison the chart exists to make.</p>
+              <Row label="Neutral band" value="±10% of the quoted spread. Without it the colour of an order that merely crossed is decided by rounding rather than execution — on a one-tick market a 1% change in the spread flips it between green and red. Orders inside the band are excluded from the headline count." />
+              <p>This is the same yardstick as the Spread Savings table, which is why the two agree on their zero: TWAS − 2 × IS is exactly 2 × TWAS × savingsPct.</p>
               <p>Because Y is derived from X, points form a wedge bounded above by the line Y = X, which an order reaches when its slippage is zero. Savings are naturally larger where spreads are wider.</p>
             </Entry>
 
