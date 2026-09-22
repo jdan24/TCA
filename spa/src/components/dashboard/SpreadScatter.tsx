@@ -63,6 +63,37 @@ interface SpreadScatterProps {
   results: TCAResult[];
 }
 
+/**
+ * Gridline spacing for a y range, in whole bps.
+ *
+ * Every candidate is an integer, so a tick can never land on a fraction and the
+ * axis cannot print the same rounded label twice — the failure the single-order
+ * charts already guard against with their own snapped-tick helper.
+ */
+function wholeBpsStep(range: number): number {
+  const target = range / 6; // aim for roughly six gridlines
+  const steps = [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000];
+  return steps.find((s) => s >= target) ?? steps[steps.length - 1]!;
+}
+
+/**
+ * Y domain and ticks: whole bps only, always bracketing zero.
+ *
+ * The range is padded to at least ±1 bps so a tight-spread instrument — ES is
+ * ~0.42 bps wide, and every saving on it is sub-1-bps — still draws a whole-bps
+ * line either side of the baseline instead of leaving the baseline alone.
+ */
+function wholeBpsAxis(values: number[]): { domain: [number, number]; ticks: number[] } {
+  const min = Math.min(-1, ...values);
+  const max = Math.max(1, ...values);
+  const step = wholeBpsStep(max - min);
+  const lo = Math.floor(min / step) * step;
+  const hi = Math.ceil(max / step) * step;
+  const ticks: number[] = [];
+  for (let v = lo; v <= hi + step / 2; v += step) ticks.push(v);
+  return { domain: [lo, hi], ticks };
+}
+
 interface Point {
   twas: number;
   /** TWAS − IS: bps saved against crossing the full quoted spread. */
@@ -90,7 +121,10 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
   const points = useMemo<Point[]>(() => {
     const pts: Point[] = [];
     for (const r of results) {
-      if (r.TWAS_bps !== null && r.IS_bps !== null) {
+      if (
+        r.TWAS_bps !== null && isFinite(r.TWAS_bps) &&
+        r.IS_bps !== null && isFinite(r.IS_bps)
+      ) {
         const trade = tradeMap.get(r.orderId);
         if (!trade || !algoFilter.includes(trade)) continue;
         const savings = r.TWAS_bps - r.IS_bps;
@@ -110,6 +144,11 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
   }, [results, tradeMap, algoFilter]);
 
   const beatCount = points.filter((p) => p.beat).length;
+
+  const yAxis = useMemo(
+    () => wholeBpsAxis(points.map((p) => p.savings)),
+    [points],
+  );
 
   const actions = <AlgoFilterMenu filter={algoFilter} />;
 
@@ -139,11 +178,18 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
     >
       <ResponsiveContainer width="100%" height={240}>
         <ScatterChart margin={{ top: 8, right: 16, bottom: 24, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+          {/* Two grids rather than one: the horizontals are dotted and land only
+              on whole bps (they follow the Y axis ticks below), while the
+              verticals keep the dash they have always had. A single
+              CartesianGrid cannot style the two axes differently. */}
+          <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="#e5e7eb" />
+          <CartesianGrid vertical={false} strokeDasharray="1 3" stroke="#e5e7eb" />
           <XAxis
             dataKey="twas"
             type="number"
             name="Quoted spread"
+            axisLine={false}
+            tickLine={false}
             tick={{ fontSize: 11 }}
             label={{
               value: "Quoted spread — TWAS (bps)",
@@ -157,6 +203,8 @@ export function SpreadScatter({ trades, results }: SpreadScatterProps) {
             dataKey="savings"
             type="number"
             name="Saved vs crossing"
+            domain={yAxis.domain}
+            ticks={yAxis.ticks}
             tickFormatter={(v: unknown) =>
               typeof v === "number" ? String(Math.round(v)) : ""
             }
