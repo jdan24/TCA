@@ -25,6 +25,14 @@ export interface TradeRecord {
   orderQty: number;
   avgFillPrice: number;
   arrivalPrice: number | null; // null when Bloomberg bridge is not connected
+  /**
+   * Manual arrival price typed into the Order Detail table, for when the file
+   * or Bloomberg got it wrong. Wins over both; session-only.
+   *
+   * Kept apart from arrivalPrice because the price multiplier scales that field,
+   * and a value the user typed is already in the price they are looking at.
+   */
+  arrivalPriceOverride?: number;
   orderTime: Date;
   firstFillTime: Date;
   lastFillTime: Date;

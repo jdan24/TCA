@@ -49,6 +49,9 @@ interface TableRow {
   orderQty: number;
   avgFillPrice: number;
   arrivalPrice: number | null;
+  /** The file / Bloomberg arrival price a manual override replaced; null when not overridden. */
+  arrivalPriceOriginal: number | null;
+  arrivalOverridden: boolean;
   orderTime: Date;
   firstFillTime: Date;
   lastFillTime: Date;
@@ -83,6 +86,8 @@ function mergeRows(
   return trades.map((t) => {
     const r = resultMap.get(t.orderId);
     const e = enrichment[t.orderId];
+    const sourced = t.arrivalPrice ?? e?.arrivalPrice ?? null;
+    const overridden = t.arrivalPriceOverride !== undefined;
     return {
       orderId: t.orderId,
       symbol: t.symbol,
@@ -90,7 +95,9 @@ function mergeRows(
       side: t.side,
       orderQty: t.orderQty,
       avgFillPrice: t.avgFillPrice,
-      arrivalPrice: t.arrivalPrice ?? e?.arrivalPrice ?? null,
+      arrivalPrice: t.arrivalPriceOverride ?? sourced,
+      arrivalPriceOriginal: overridden ? sourced : null,
+      arrivalOverridden: overridden,
       orderTime: t.orderTime,
       firstFillTime: t.firstFillTime,
       lastFillTime: t.lastFillTime,
@@ -276,6 +283,129 @@ function EditableTimeCellTable({
             d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
         </svg>
       </button>
+    </div>
+  );
+}
+
+function fmtPrice(v: number): string {
+  return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+}
+
+/**
+ * Arrival price cell with a manual override — same pencil-edit pattern as
+ * EditableTimeCellTable. An overridden value is marked in amber, and its
+ * tooltip names the price it replaced; ↺ drops the override.
+ */
+function EditableArrivalCell({
+  value,
+  original,
+  overridden,
+  onChange,
+}: {
+  value: number | null;
+  original: number | null;
+  overridden: boolean;
+  /** undefined clears the override. */
+  onChange: (v: number | undefined) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState("");
+  const [err, setErr] = useState(false);
+
+  function startEdit() {
+    setVal(value !== null ? String(value) : "");
+    setErr(false);
+    setEditing(true);
+  }
+  function confirm() {
+    const n = Number(val.trim().replace(/,/g, ""));
+    if (val.trim() === "" || !Number.isFinite(n) || n <= 0) { setErr(true); return; }
+    onChange(n);
+    setEditing(false);
+    setErr(false);
+  }
+  function cancel() { setEditing(false); setErr(false); }
+
+  if (editing) {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <div className="flex items-center gap-1">
+          <input
+            type="text"
+            inputMode="decimal"
+            value={val}
+            onChange={(e) => { setVal(e.target.value); setErr(false); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") confirm();
+              if (e.key === "Escape") cancel();
+            }}
+            className={[
+              "text-[10px] font-mono tabular-nums rounded border px-1 py-0.5 w-24",
+              "bg-white dark:bg-gray-800 text-gray-900 dark:text-white",
+              "focus:outline-none focus:ring-1 focus:ring-blue-500",
+              err ? "border-red-400" : "border-gray-300 dark:border-gray-600",
+            ].join(" ")}
+            // eslint-disable-next-line jsx-a11y/no-autofocus
+            autoFocus
+          />
+          <button type="button" onClick={confirm} title="Confirm"
+            className="text-green-500 hover:text-green-600 transition-colors">
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </button>
+          <button type="button" onClick={cancel} title="Cancel"
+            className="text-gray-400 hover:text-gray-600 transition-colors">
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        {err && (
+          <span className="text-[9px] text-red-500">Enter a positive decimal price</span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1 group">
+      {value !== null ? (
+        <span
+          className={
+            overridden
+              ? "tabular-nums text-xs font-medium text-amber-600 dark:text-amber-400 border-b border-dotted border-amber-500"
+              : "tabular-nums text-xs text-gray-700 dark:text-gray-300"
+          }
+          title={
+            overridden
+              ? `Manual override — original: ${original !== null ? fmtPrice(original) : "N/A"}`
+              : undefined
+          }
+        >
+          {fmtPrice(value)}
+        </span>
+      ) : (
+        <span className="text-gray-300 dark:text-gray-600 text-xs select-none">N/A</span>
+      )}
+      <button type="button" onClick={startEdit} title="Override arrival price"
+        className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-blue-500 dark:text-gray-600 dark:hover:text-blue-400 transition-all">
+        <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round"
+            d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+        </svg>
+      </button>
+      {overridden && (
+        <button
+          type="button"
+          onClick={() => onChange(undefined)}
+          title={`Revert to ${original !== null ? fmtPrice(original) : "original"}`}
+          className="text-[11px] leading-none text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
+          aria-label="Revert arrival price override"
+        >
+          ↺
+        </button>
+      )}
     </div>
   );
 }
@@ -528,24 +658,6 @@ const PRE_TIME_COLS_NO_SYMBOL = [
     ),
     enableGlobalFilter: false,
   }),
-  col.accessor("arrivalPrice", {
-    header: "Arrival Price",
-    cell: (i) => {
-      const v = i.getValue();
-      return v !== null ? (
-        <span className="tabular-nums text-xs text-gray-700 dark:text-gray-300">
-          {v.toLocaleString(undefined, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 6,
-          })}
-        </span>
-      ) : (
-        <span className="text-gray-300 dark:text-gray-600 text-xs select-none">N/A</span>
-      );
-    },
-    sortingFn: nullableSort,
-    enableGlobalFilter: false,
-  }),
 ];
 
 // firstFillTime stays static (read-only display)
@@ -781,6 +893,20 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
     [rawTrades, setRawTrades],
   );
 
+  // Written to rawTrades beside the file's own arrival price rather than over
+  // it, so a Bloomberg re-fetch leaves the override standing and ↺ can go
+  // back to whatever the file or Bloomberg said.
+  const handleArrivalEdit = useCallback(
+    (orderId: string, price: number | undefined) => {
+      setRawTrades(rawTrades.map((t) => {
+        if (t.orderId !== orderId) return t;
+        const { arrivalPriceOverride: _, ...rest } = t;
+        return price === undefined ? rest : { ...rest, arrivalPriceOverride: price };
+      }));
+    },
+    [rawTrades, setRawTrades],
+  );
+
   // Build the symbol + editable columns inside the component so they capture
   // resolveSymbol and the edit callbacks.
   const allColumns = useMemo(() => {
@@ -822,6 +948,19 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
         />
       ),
       sortingFn: "datetime",
+      enableGlobalFilter: false,
+    });
+    const arrivalCol = col.accessor("arrivalPrice", {
+      header: "Arrival Price",
+      cell: (i) => (
+        <EditableArrivalCell
+          value={i.getValue()}
+          original={i.row.original.arrivalPriceOriginal}
+          overridden={i.row.original.arrivalOverridden}
+          onChange={(v) => handleArrivalEdit(i.row.original.orderId, v)}
+        />
+      ),
+      sortingFn: nullableSort,
       enableGlobalFilter: false,
     });
     const algoCol = col.accessor("algo", {
@@ -883,7 +1022,8 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
       editOrderTime,
       symbolCol,
       genericTickerCol,
-      ...PRE_TIME_COLS_NO_SYMBOL.slice(1), // side, qty, fillPrice, arrivalPrice
+      ...PRE_TIME_COLS_NO_SYMBOL.slice(1), // side, qty, fillPrice
+      arrivalCol,
       algoCol,
       // IS, vs VWAP, vs TWAP, TWAS, TWAS (price), Vol(bps), then rest
       ...POST_TIME_COLS.flatMap((c) => (c === TWAS_BPS_COL ? [c, twasPriceCol] : [c])),
@@ -892,7 +1032,7 @@ export function TradeTable({ trades, results, title = "Trade Detail", hideMetric
       PRE_TIME_COLS_NO_SYMBOL[0]!,         // Order ID — last
       ...deleteCol,
     ];
-  }, [handleTimeEdit, handleAlgoEdit, resolveSymbol, priceFormatterForSymbol, onDeleteOrder]);
+  }, [handleTimeEdit, handleAlgoEdit, handleArrivalEdit, resolveSymbol, priceFormatterForSymbol, onDeleteOrder]);
 
   // Pre-filter rows by aggregation selection
   const filteredIds = useMemo(

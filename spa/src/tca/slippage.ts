@@ -12,9 +12,20 @@
 import type { TradeRecord } from "@/types";
 import { sideSign, toBps } from "./tcaUtils";
 
+/**
+ * The arrival price an order is measured against: a manual override first,
+ * then the file's own column, then Bloomberg's snapshot.
+ */
+export function effectiveArrivalPrice(
+  trade: TradeRecord,
+  enrichmentArrivalPrice?: number | null,
+): number | null {
+  return trade.arrivalPriceOverride ?? trade.arrivalPrice ?? enrichmentArrivalPrice ?? null;
+}
+
 export function computeSlippage(trade: TradeRecord, enrichmentArrivalPrice?: number | null): number | null {
   const { avgFillPrice, side } = trade;
-  const arrivalPrice = trade.arrivalPrice ?? enrichmentArrivalPrice ?? null;
+  const arrivalPrice = effectiveArrivalPrice(trade, enrichmentArrivalPrice);
 
   if (arrivalPrice === null || arrivalPrice === 0) return null;
 

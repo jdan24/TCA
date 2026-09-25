@@ -14,7 +14,7 @@
 import type { BidAskSource, BidAskTick, BloombergEnrichment, ParentOrderSummary, TCAResult, TradeRecord } from "@/types";
 import { computeMarketImpact } from "./marketImpact";
 import { computeReversion } from "./reversion";
-import { computeSlippage } from "./slippage";
+import { computeSlippage, effectiveArrivalPrice } from "./slippage";
 import { dollarSlippage } from "./dollars";
 import { computeTWAS, MIN_ABS_MID, windowedTicks } from "./spread";
 import { computeTimeToFill } from "./timing";
@@ -63,7 +63,7 @@ export function computeAll(
 
     // Cash slippage vs each benchmark, from prices rather than from bps.
     const marketVWAP_price = (e && e.vwap !== 0 ? e.vwap : null) ?? trade.fileVwap ?? null;
-    const arrival = trade.arrivalPrice ?? e?.arrivalPrice ?? null;
+    const arrival = effectiveArrivalPrice(trade, e?.arrivalPrice);
     const pv = pointValueFor(trade.symbol);
     const usd = (benchmark: number | null) =>
       dollarSlippage(trade.avgFillPrice, benchmark, trade.side, trade.orderQty, pv);

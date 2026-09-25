@@ -58,7 +58,7 @@ function buildTradeRows(trades: TradeRecord[], results: TCAResult[]): ExportRow[
       Algo:                t.algo ?? "",
       Qty:                 t.orderQty,
       "Fill Price":        t.avgFillPrice,
-      "Arrival Price":     t.arrivalPrice ?? "",
+      "Arrival Price":     t.arrivalPriceOverride ?? t.arrivalPrice ?? "",
       "Order Time":        t.orderTime.toISOString(),
       "First Fill":        t.firstFillTime.toISOString(),
       "Last Fill":         t.lastFillTime.toISOString(),
