@@ -23,6 +23,7 @@ const initialState = {
   singleOrderFetchWindow:  null as { start: Date; end: Date } | null,
   singleOrderBbgSymbol: null as string | null,
   singleOrderPriceScale: null as number | null,
+  singleOrderArrivalOverride: null as number | null,
   symbolMapDirty: false,
   settleBenchmarks: {} as Record<string, SettleBenchmark>,
   settleReference: {} as Record<string, Record<string, unknown>>,
@@ -48,6 +49,7 @@ export const useTCAStore = create<TCAStore>((set) => ({
   setSingleOrderFetchWindow:  (v) => set({ singleOrderFetchWindow: v }),
   setSingleOrderBbgSymbol: (v) => set({ singleOrderBbgSymbol: v }),
   setSingleOrderPriceScale: (v) => set({ singleOrderPriceScale: v }),
+  setSingleOrderArrivalOverride: (v) => set({ singleOrderArrivalOverride: v }),
   setSymbolMapDirty: (v) => set({ symbolMapDirty: v }),
   setSettleData: (benchmarks, reference) =>
     set({ settleBenchmarks: benchmarks, settleReference: reference }),

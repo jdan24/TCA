@@ -119,7 +119,11 @@ export interface ParentOrderSummary {
   brokerOrderId: string | null;
   totalQty: number;
   fillVwap: number; // qty-weighted avg fill price across all slices
+  /** The arrival price in use — the manual override when one is set. */
   arrivalPrice: number | null;
+  /** The file / Bloomberg arrival price, before any manual override. */
+  arrivalPriceSourced: number | null;
+  arrivalOverridden: boolean;
   IS_bps: number | null;
   orderTime: Date; // earliest orderTime across all slices
   lastFillTime: Date; // latest lastFillTime across all slices
@@ -454,6 +458,9 @@ export interface TCAStore {
   /** Multiplier applied to every fill price from the file before comparing with Bloomberg prices.
    *  null = 1 (no scaling). Use 0.01 if file prices are 100× Bloomberg, 100 for the reverse. */
   singleOrderPriceScale: number | null;
+  /** Manual arrival price for the single-order view, for when Bloomberg's snapshot
+   *  is wrong. Already in the displayed price scale, so never multiplied. null = none. */
+  singleOrderArrivalOverride: number | null;
   /** Benchmarks for the target-settle report, keyed "symbol|nyDate|window". */
   settleBenchmarks: Record<string, SettleBenchmark>;
   /** Raw reference fields per Bloomberg symbol, for point value and currency. */
@@ -486,6 +493,7 @@ export interface TCAStore {
   setSingleOrderFetchWindow: (v: { start: Date; end: Date } | null) => void;
   setSingleOrderBbgSymbol: (v: string | null) => void;
   setSingleOrderPriceScale: (v: number | null) => void;
+  setSingleOrderArrivalOverride: (v: number | null) => void;
   setSymbolMapDirty: (v: boolean) => void;
   reset: () => void;
 }

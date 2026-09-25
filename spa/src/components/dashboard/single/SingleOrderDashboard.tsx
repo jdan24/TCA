@@ -118,6 +118,8 @@ export function SingleOrderDashboard({
   const setSingleOrderBbgSymbol    = useTCAStore((s) => s.setSingleOrderBbgSymbol);
   const singleOrderPriceScale      = useTCAStore((s) => s.singleOrderPriceScale);
   const setSingleOrderPriceScale   = useTCAStore((s) => s.setSingleOrderPriceScale);
+  const singleOrderArrivalOverride    = useTCAStore((s) => s.singleOrderArrivalOverride);
+  const setSingleOrderArrivalOverride = useTCAStore((s) => s.setSingleOrderArrivalOverride);
 
   // Symbol resolver: manual override takes priority over the localStorage symbol map.
   // Mirrors the same priority used in App.tsx when building the Bloomberg fetch resolver.
@@ -240,8 +242,9 @@ export function SingleOrderDashboard({
   const summary = useMemo(
     () => computeParentOrderSummary(
       scaledTrades, enrichment, singleOrderTimeOverride ?? undefined, pointValueFor,
+      singleOrderArrivalOverride,
     ),
-    [scaledTrades, enrichment, singleOrderTimeOverride, pointValueFor],
+    [scaledTrades, enrichment, singleOrderTimeOverride, pointValueFor, singleOrderArrivalOverride],
   );
 
   // Single pass over the first enriched trade's tradeTicks for [orderTime, lastFillTime].
@@ -593,6 +596,7 @@ export function SingleOrderDashboard({
           {...(priceFormatter !== undefined ? { priceFormatter } : {})}
           brokerOrderId={brokerOrderIdOverride}
           onBrokerOrderIdChange={setBrokerOrderIdOverride}
+          onArrivalPriceChange={setSingleOrderArrivalOverride}
           onOrderTimeChange={(d) =>
             setSingleOrderTimeOverride({
               start: d,

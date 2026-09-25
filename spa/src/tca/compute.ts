@@ -110,6 +110,8 @@ export function computeParentOrderSummary(
   timeOverride?: { start: Date; end: Date },
   /** See computeAll. Omitted means the cash figures come back null. */
   pointValueFor: (ric: string) => number | null = () => null,
+  /** Manual arrival price; wins over the file and Bloomberg. Not price-scaled. */
+  arrivalOverride: number | null = null,
 ): ParentOrderSummary | null {
   if (trades.length === 0) return null;
 
@@ -134,8 +136,9 @@ export function computeParentOrderSummary(
   );
   const duration_ms = lastFillTime.getTime() - orderTime.getTime();
 
-  // ── Arrival price: from first trade's field, then first enrichment found ──
-  const arrivalPrice: number | null =
+  // ── Arrival price: manual override, then first trade's field, then first
+  //    enrichment found ──
+  const arrivalPriceSourced: number | null =
     firstTrade.arrivalPrice ??
     (() => {
       for (const t of trades) {
@@ -144,6 +147,7 @@ export function computeParentOrderSummary(
       }
       return null;
     })();
+  const arrivalPrice = arrivalOverride ?? arrivalPriceSourced;
 
   // ── IS bps at parent level ────────────────────────────────────────────────
   const IS_bps =
@@ -442,6 +446,8 @@ export function computeParentOrderSummary(
     totalQty,
     fillVwap,
     arrivalPrice,
+    arrivalPriceSourced,
+    arrivalOverridden: arrivalOverride !== null,
     IS_bps,
     orderTime,
     lastFillTime,

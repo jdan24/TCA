@@ -4,7 +4,8 @@
  * Three-column layout:
  *   Col 1 — Order Details        (factual order data; Order Start / Last Fill are editable)
  *   Col 2 — Market Conditions    (vol, impact, reversion, spread)
- *   Col 3 — Benchmark Performance (avg fill price vs each benchmark, highlighted by algo)
+ *   Col 3 — Benchmark Performance (avg fill price vs each benchmark, highlighted by algo;
+ *                                  Arrival Price is editable)
  */
 
 import { useState } from "react";
@@ -67,6 +68,8 @@ interface ParentSummaryCardProps {
   /** Manual override for the broker/exchange order ID (FIX tag 37). undefined = use summary value. */
   brokerOrderId?: string | null | undefined;
   onBrokerOrderIdChange?: (id: string | null) => void;
+  /** Sets (number) or clears (null) the manual arrival price. Omitted = read-only, as in print. */
+  onArrivalPriceChange?: (v: number | null) => void;
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -284,9 +287,118 @@ function EditableStringRow({
   );
 }
 
+/**
+ * Arrival price with a manual override — same pencil-edit pattern as the rows
+ * above. An override shows in amber with the replaced price on hover; ↺ drops it.
+ * Without onChange (the print layout) only the value and a "Manual" tag remain.
+ */
+function EditableArrivalValue({
+  value,
+  sourced,
+  overridden,
+  onChange,
+}: {
+  value: number | null;
+  sourced: number | null;
+  overridden: boolean;
+  onChange?: ((v: number | null) => void) | undefined;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [inputVal, setInputVal] = useState("");
+  const [error, setError] = useState(false);
+
+  function startEdit() {
+    setInputVal(value !== null ? String(value) : "");
+    setError(false);
+    setEditing(true);
+  }
+  function confirm() {
+    const n = Number(inputVal.trim().replace(/,/g, ""));
+    if (inputVal.trim() === "" || !Number.isFinite(n) || n <= 0) { setError(true); return; }
+    onChange?.(n);
+    setEditing(false);
+    setError(false);
+  }
+  function cancel() { setEditing(false); setError(false); }
+
+  if (editing) {
+    return (
+      <div>
+        <div className="flex items-center gap-1">
+          <input
+            type="text"
+            inputMode="decimal"
+            value={inputVal}
+            onChange={(e) => { setInputVal(e.target.value); setError(false); }}
+            onKeyDown={(e) => { if (e.key === "Enter") confirm(); if (e.key === "Escape") cancel(); }}
+            className={`text-[11px] font-mono tabular-nums rounded border px-1.5 py-0.5 w-28 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-blue-500 ${
+              error ? "border-red-400" : "border-gray-300 dark:border-gray-600"
+            }`}
+            autoFocus
+          />
+          <button type="button" onClick={confirm} title="Confirm"
+            className="p-0.5 text-green-600 hover:text-green-700 dark:text-green-400">
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          </button>
+          <button type="button" onClick={cancel} title="Cancel"
+            className="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        {error && (
+          <p className="text-[10px] text-red-500 mt-0.5">Enter a positive decimal price</p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span
+        className={overridden
+          ? "text-sm font-semibold tabular-nums text-amber-600 dark:text-amber-400 border-b border-dotted border-amber-500"
+          : "text-sm font-semibold tabular-nums text-gray-900 dark:text-white"}
+        title={overridden ? `Manual override — original: ${fmtPrice(sourced)}` : undefined}
+      >
+        {fmtPrice(value)}
+      </span>
+      {overridden && (
+        <span className="text-[9px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-400">
+          Manual
+        </span>
+      )}
+      {onChange && (
+        <button type="button" onClick={startEdit} title="Override arrival price"
+          className="print:hidden p-0.5 text-gray-300 hover:text-blue-500 dark:text-gray-600 dark:hover:text-blue-400 transition-colors">
+          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round"
+              d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+          </svg>
+        </button>
+      )}
+      {onChange && overridden && (
+        <button
+          type="button"
+          onClick={() => onChange(null)}
+          title={`Revert to ${fmtPrice(sourced)}`}
+          aria-label="Revert arrival price override"
+          className="print:hidden text-xs leading-none text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
+        >
+          ↺
+        </button>
+      )}
+    </div>
+  );
+}
+
 interface BenchmarkRowProps {
   benchmarkLabel: string;
-  benchmarkValue: string;
+  /** A formatted price, or an editor for one. */
+  benchmarkValue: React.ReactNode;
   slippageLabel: string;
   slippageBps: number | null;
   /** Same slippage in cash terms; null when no point value is known. */
@@ -326,9 +438,11 @@ function BenchmarkRow({
           <p className="text-[10px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-0.5">
             {benchmarkLabel}
           </p>
-          <p className="text-sm font-semibold tabular-nums text-gray-900 dark:text-white">
-            {benchmarkValue}
-          </p>
+          {typeof benchmarkValue === "string" ? (
+            <p className="text-sm font-semibold tabular-nums text-gray-900 dark:text-white">
+              {benchmarkValue}
+            </p>
+          ) : benchmarkValue}
         </div>
         <div className="text-right shrink-0">
           <p className="text-[10px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-0.5">
@@ -369,6 +483,7 @@ export function ParentSummaryCard({
   priceFormatter,
   brokerOrderId: brokerOrderIdProp,
   onBrokerOrderIdChange,
+  onArrivalPriceChange,
 }: ParentSummaryCardProps) {
   const cash = useCashDisplay();
   // Effective order ID: manual override takes priority over the value from the file
@@ -501,7 +616,14 @@ export function ParentSummaryCard({
           <div className="space-y-2.5">
             <BenchmarkRow
               benchmarkLabel="Arrival Price"
-              benchmarkValue={fmtPrice(summary.arrivalPrice)}
+              benchmarkValue={
+                <EditableArrivalValue
+                  value={summary.arrivalPrice}
+                  sourced={summary.arrivalPriceSourced}
+                  overridden={summary.arrivalOverridden}
+                  onChange={onArrivalPriceChange}
+                />
+              }
               slippageLabel="IS (bps)"
               slippageBps={summary.IS_bps}
               missing={noBloomberg}
