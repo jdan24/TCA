@@ -290,7 +290,8 @@ function EditableStringRow({
 /**
  * Arrival price with a manual override — same pencil-edit pattern as the rows
  * above. An override shows in amber with the replaced price on hover; ↺ drops it.
- * Without onChange (the print layout) only the value and a "Manual" tag remain.
+ * Without onChange (the print layout) it reads as a plain price: the report
+ * shows the figure in use without flagging it as hand-set.
  */
 function EditableArrivalValue({
   value,
@@ -320,6 +321,8 @@ function EditableArrivalValue({
     setError(false);
   }
   function cancel() { setEditing(false); setError(false); }
+
+  const marked = overridden && onChange !== undefined;
 
   if (editing) {
     return (
@@ -359,14 +362,14 @@ function EditableArrivalValue({
   return (
     <div className="flex items-center gap-1.5">
       <span
-        className={overridden
+        className={marked
           ? "text-sm font-semibold tabular-nums text-amber-600 dark:text-amber-400 border-b border-dotted border-amber-500"
           : "text-sm font-semibold tabular-nums text-gray-900 dark:text-white"}
-        title={overridden ? `Manual override — original: ${fmtPrice(sourced)}` : undefined}
+        title={marked ? `Manual override — original: ${fmtPrice(sourced)}` : undefined}
       >
         {fmtPrice(value)}
       </span>
-      {overridden && (
+      {marked && (
         <span className="text-[9px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-400">
           Manual
         </span>
@@ -380,10 +383,10 @@ function EditableArrivalValue({
           </svg>
         </button>
       )}
-      {onChange && overridden && (
+      {marked && (
         <button
           type="button"
-          onClick={() => onChange(null)}
+          onClick={() => onChange?.(null)}
           title={`Revert to ${fmtPrice(sourced)}`}
           aria-label="Revert arrival price override"
           className="print:hidden text-xs leading-none text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
