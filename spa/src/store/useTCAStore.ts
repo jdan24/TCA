@@ -3,6 +3,8 @@ import type {
   AggregationFilter,
   BloombergEnrichment,
   TCAMode,
+  ArrivalQuote,
+  OpenWindowBenchmark,
   SettleBenchmark,
   SettleTolerance,
   TCAResult,
@@ -30,6 +32,9 @@ const initialState = {
   // 30 minutes before a settle, 10 after: orders finish into a settle and only
   // rarely well past it, so the reach is spent on the side it is needed.
   settleTolerance: { beforeMin: 30, afterMin: 10 } as SettleTolerance,
+  azOpenWindow: {} as Record<string, OpenWindowBenchmark>,
+  azOpenArrival: {} as Record<string, ArrivalQuote>,
+  azOpenReference: {} as Record<string, Record<string, unknown>>,
   fxRates: {},
 };
 
@@ -54,6 +59,8 @@ export const useTCAStore = create<TCAStore>((set) => ({
   setSettleData: (benchmarks, reference) =>
     set({ settleBenchmarks: benchmarks, settleReference: reference }),
   setSettleTolerance: (t) => set({ settleTolerance: t }),
+  setAzOpenData: (window, arrival, reference) =>
+    set({ azOpenWindow: window, azOpenArrival: arrival, azOpenReference: reference }),
   setFxRates: (r) => set({ fxRates: r }),
   reset: () => set(initialState),
 }));

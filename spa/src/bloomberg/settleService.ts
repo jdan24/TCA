@@ -51,7 +51,7 @@ import { shiftToUtc } from "./enrichmentService";
  * benchmark request is never stuck behind an unrelated call to the bridge (the
  * /health poll, say) and so never spends its timeout waiting to be sent.
  */
-const MAX_IN_FLIGHT = 4;
+export const MAX_IN_FLIGHT = 4;
 
 /**
  * Run an async job over every item, at most `limit` at a time.
@@ -59,7 +59,7 @@ const MAX_IN_FLIGHT = 4;
  * Workers pull from a shared cursor rather than the list being pre-sliced into
  * chunks, so one slow request cannot idle the others behind it.
  */
-async function mapPooled<T>(
+export async function mapPooled<T>(
   items: readonly T[],
   limit: number,
   job: (item: T) => Promise<void>,

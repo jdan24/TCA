@@ -202,7 +202,16 @@ export async function fetchBidAskTicks(
   start: string,
   end: string,
 ): Promise<BidAskTicksResult> {
-  const payload = await bridgeGet<BidAskTicksPayload>(
+  return (await fetchBidAskTicksOutcome(security, start, end)).data;
+}
+
+/** As fetchBidAskTicks, but reporting whether the request itself failed. */
+export async function fetchBidAskTicksOutcome(
+  security: string,
+  start: string,
+  end: string,
+): Promise<BridgeOutcome<BidAskTicksResult>> {
+  const { data: payload, failed } = await bridgeGetOutcome<BidAskTicksPayload>(
     "/bid-ask-ticks",
     { security, start, end },
     [],
@@ -210,13 +219,16 @@ export async function fetchBidAskTicks(
   );
 
   if (Array.isArray(payload)) {
-    return { ticks: payload, source: payload.length > 0 ? "ticks" : null };
+    return {
+      data: { ticks: payload, source: payload.length > 0 ? "ticks" : null },
+      failed,
+    };
   }
 
   const ticks = Array.isArray(payload.pairs) ? payload.pairs : [];
   const source: BidAskSource =
     payload.source === "ticks" || payload.source === "bars" ? payload.source : null;
-  return { ticks, source: ticks.length > 0 ? source : null };
+  return { data: { ticks, source: ticks.length > 0 ? source : null }, failed };
 }
 
 /**

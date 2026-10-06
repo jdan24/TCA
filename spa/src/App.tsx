@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { enrichAllTrades, enrichSingleOrder, type EnrichProgress } from "@/bloomberg/enrichmentService";
 import { enrichSettleBenchmarks } from "@/bloomberg/settleService";
+import { enrichAzOpenBenchmarks } from "@/bloomberg/azOpenService";
 import { fetchFxRates } from "@/bloomberg/fxService";
 import { toMajorCurrency } from "@/tca/dollars";
 import { Header } from "@/components/layout/Header";
@@ -11,6 +12,7 @@ import { ModeSelector } from "@/components/upload/ModeSelector";
 import { Dashboard } from "@/components/dashboard/Dashboard";
 import { SingleOrderDashboard } from "@/components/dashboard/single/SingleOrderDashboard";
 import { SettleDashboard } from "@/components/dashboard/settle/SettleDashboard";
+import { AzOpenDashboard } from "@/components/dashboard/azopen/AzOpenDashboard";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { CorporateTemplateProvider } from "@/hooks/useCorporateTemplate";
 import { useTCAStore } from "@/store/useTCAStore";
@@ -31,6 +33,8 @@ function App() {
   const setSingleOrderFetchWindow = useTCAStore((s) => s.setSingleOrderFetchWindow);
   const settleBenchmarks  = useTCAStore((s) => s.settleBenchmarks);
   const setSettleData     = useTCAStore((s) => s.setSettleData);
+  const azOpenWindow      = useTCAStore((s) => s.azOpenWindow);
+  const setAzOpenData     = useTCAStore((s) => s.setAzOpenData);
   const setFxRates        = useTCAStore((s) => s.setFxRates);
   const settleTolerance   = useTCAStore((s) => s.settleTolerance);
   const symbolMapDirty = useTCAStore((s) => s.symbolMapDirty);
@@ -135,6 +139,23 @@ function App() {
     setEnrichProgress(null);
   }
 
+  async function handleFetchAzOpen() {
+    if (rawTrades.length === 0 || !bloombergConnected || enrichProgress !== null) return;
+    setEnrichProgress({ done: 0, total: 1 });
+    const { window, arrival, reference } = await enrichAzOpenBenchmarks(
+      scaledTrades,
+      symbolMap.resolve,
+      setEnrichProgress,
+    );
+    setAzOpenData(window, arrival, reference);
+    await refreshFxRates([
+      ...Object.values(reference).map((r) => toMajorCurrency(r["CRNCY"]) ?? ""),
+      ...scaledTrades.map((t) => t.currency),
+    ]);
+    setSymbolMapDirty(false);
+    setEnrichProgress(null);
+  }
+
   async function handleFetchBloomberg() {
     if (rawTrades.length === 0 || !bloombergConnected || enrichProgress !== null) return;
     setEnrichProgress({ done: 0, total: mode === "single" ? 1 : rawTrades.length });
@@ -181,7 +202,7 @@ function App() {
    * Bloomberg tickers is what makes the settle lookup possible at all.
    */
   function handleFileComplete(trades: TradeRecord[]) {
-    if (mode === "multi" || mode === "settle") {
+    if (mode === "multi" || mode === "settle" || mode === "azopen") {
       setWizardTrades(trades);
     } else {
       setRawTrades(trades);
@@ -197,7 +218,11 @@ function App() {
       {symbolMapDirty && rawTrades.length > 0 && wizardTrades === null && (
         <SymbolRefreshBanner
           onRefresh={() => {
-            void (mode === "settle" ? handleFetchSettle() : handleFetchBloomberg());
+            void (mode === "settle"
+              ? handleFetchSettle()
+              : mode === "azopen"
+                ? handleFetchAzOpen()
+                : handleFetchBloomberg());
           }}
           onDismiss={() => setSymbolMapDirty(false)}
           disabled={!bloombergConnected || enrichProgress !== null}
@@ -234,6 +259,17 @@ function App() {
             benchmarkCount={Object.keys(settleBenchmarks).length}
             progress={enrichProgress}
             onFetch={() => { void handleFetchSettle(); }}
+            onReset={reset}
+          />
+        </main>
+      ) : mode === "azopen" ? (
+        <main className="flex-1 overflow-auto">
+          <AzOpenDashboard
+            trades={scaledTrades}
+            bloombergConnected={bloombergConnected}
+            benchmarkCount={Object.keys(azOpenWindow).length}
+            progress={enrichProgress}
+            onFetch={() => { void handleFetchAzOpen(); }}
             onReset={reset}
           />
         </main>

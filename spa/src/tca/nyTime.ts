@@ -70,6 +70,13 @@ export function nyDateOf(d: Date): string {
   return `${w.year}-${p(w.month)}-${p(w.day)}`;
 }
 
+/** NY wall-clock time for an instant, as "HH:MM:SS". */
+export function nyTimeOf(d: Date): string {
+  const w = nyWallClockAt(d);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(w.hour)}:${p(w.minute)}:${p(w.second)}`;
+}
+
 /**
  * The UTC instant of a NY wall-clock time on a given NY calendar date.
  *

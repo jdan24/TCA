@@ -13,7 +13,7 @@ export interface IntradayBar {
 }
 
 // ── Analysis mode ─────────────────────────────────────────────────────────────
-export type TCAMode = "multi" | "single" | "settle";
+export type TCAMode = "multi" | "single" | "settle" | "azopen";
 
 // ── Raw normalized trade record ──────────────────────────────────────────────
 export interface TradeRecord {
@@ -221,6 +221,69 @@ export interface SettleResult {
    * otherwise imply a 3PM print it is not.
    */
   settleTimeMismatch: boolean;
+}
+
+// ── Cash-open report (AZ Open) ────────────────────────────────────────────────
+
+/** A bid/ask pair, as used by the cash-open report's quote benchmarks. */
+export interface QuotePair {
+  bid: number;
+  ask: number;
+}
+
+/**
+ * The 09:30–09:31 NY benchmarks for one instrument on one date, shared by every
+ * order on that symbol and day.
+ */
+export interface OpenWindowBenchmark {
+  /** Σ(price×size)/Σsize over trade prints in [09:30:00, 09:31:00). */
+  vwap: number | null;
+  /** Time-weighted trade price over the same minute. */
+  twap: number | null;
+  /** First quote at or after 09:30:00, or the prevailing one if none changed. */
+  quote: QuotePair | null;
+  /** Real Bloomberg quotes, or spreads estimated from 1-minute bars. */
+  quoteSource: BidAskSource;
+  /** The trade-tick request failed rather than finding no prints. */
+  tradesFailed: boolean;
+  /** The bid/ask request failed rather than finding no quotes. */
+  quoteFailed: boolean;
+}
+
+/** The quote in force when an order was created. */
+export interface ArrivalQuote {
+  quote: QuotePair | null;
+  quoteSource: BidAskSource;
+  failed: boolean;
+}
+
+/** The six benchmarks the cash-open report scores against. */
+export type OpenBenchmarkId =
+  | "vwap"
+  | "twap"
+  | "mid0930"
+  | "midArrival"
+  | "far0930"
+  | "farArrival";
+
+/** One benchmark price and the order's slippage against it. */
+export interface OpenSlip {
+  price: number | null;
+  bps: number | null;
+  usd: number | null;
+  /** The request behind this benchmark failed, rather than answering empty. */
+  failed: boolean;
+}
+
+/** Per-order result for the cash-open report. */
+export interface OpenResult {
+  orderId: string;
+  /** NY date of the first fill — the open the order is scored against. */
+  nyDate: string;
+  bench: Record<OpenBenchmarkId, OpenSlip>;
+  /** True when a quote benchmark came from bar ranges rather than real quotes. */
+  quotesEstimated: boolean;
+  currency: string;
 }
 
 // ── Multi-order aggregation types ─────────────────────────────────────────────
@@ -472,6 +535,17 @@ export interface TCAStore {
   /** Bucketing tolerance for the target-settle report. */
   settleTolerance: SettleTolerance;
   setSettleTolerance: (t: SettleTolerance) => void;
+  /** Cash-open report: 09:30 benchmarks keyed "symbol|nyDate". */
+  azOpenWindow: Record<string, OpenWindowBenchmark>;
+  /** Cash-open report: arrival quotes keyed "symbol|orderTimeMs". */
+  azOpenArrival: Record<string, ArrivalQuote>;
+  /** Raw reference fields per Bloomberg symbol, for point value and currency. */
+  azOpenReference: Record<string, Record<string, unknown>>;
+  setAzOpenData: (
+    window: Record<string, OpenWindowBenchmark>,
+    arrival: Record<string, ArrivalQuote>,
+    reference: Record<string, Record<string, unknown>>,
+  ) => void;
   /** USD rates per currency, as fetched from Bloomberg. Overrides are merged on
    *  read from useFxSettings, so this holds only what the bridge answered. */
   fxRates: FxRateMap;

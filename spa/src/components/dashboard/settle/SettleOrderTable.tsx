@@ -150,7 +150,7 @@ function SignedBps({ v }: { v: number | null }) {
 }
 
 /** Price in the contract's own notation — 32nds for Treasuries, decimal otherwise. */
-function priceText(value: number, bbgSymbol: string): string {
+export function priceText(value: number, bbgSymbol: string): string {
   const precision = getTreasuryPrecision(bbgSymbol);
   return precision
     ? decToTreasuryFrac(value, precision)
@@ -179,7 +179,7 @@ const MIN_PRICE_DECIMALS = 5;
  * states the stored value exactly without inventing precision. toLocaleString is
  * avoided: it applies grouping separators and caps the fraction digits.
  */
-function priceDecimalText(value: number | null): string {
+export function priceDecimalText(value: number | null): string {
   if (value === null || !isFinite(value)) return "N/A";
   // Exponent form appears only for values far outside any price range; toFixed
   // brings those back to plain notation rather than printing "1e-7" in a table.

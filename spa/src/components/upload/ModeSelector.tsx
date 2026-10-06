@@ -5,6 +5,7 @@
  *   • Multi-order TCA (aggregate analytics across a portfolio of orders)
  *   • Single-order TCA (slice-level analysis for one parent order)
  *   • Allianz Target Settle (orders measured against the 3PM / 4PM prints)
+ *   • AZ Open (futures orders measured against the 09:30 NY cash open)
  *
  * The selected card gains a blue ring; the choice is persisted in the store.
  */
@@ -17,11 +18,11 @@ export function ModeSelector() {
   const setMode = useTCAStore((s) => s.setMode);
 
   return (
-    <div className="w-full max-w-3xl">
+    <div className="w-full max-w-4xl">
       <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-3">
         Select analysis mode
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <ModeCard
           mode="single"
           active={mode === "single"}
@@ -58,6 +59,19 @@ export function ModeSelector() {
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round"
                 d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+        />
+        <ModeCard
+          mode="azopen"
+          active={mode === "azopen"}
+          onSelect={setMode}
+          title="AZ Open — Cash Open"
+          subtitle="Futures orders measured against the 09:30 NY open"
+          icon={
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
             </svg>
           }
         />
