@@ -99,6 +99,50 @@ export function buildSettleWindowSummary(
 }
 
 /**
+ * One row per (window, algo), for the two benchmarked windows only.
+ *
+ * Sits under the window summary so the algos can be compared within each print.
+ * Unassigned is left out: those orders have no benchmark, so splitting them by
+ * algo would add rows with nothing to compare — their count is already on the
+ * window summary. Algos are alphabetical within a window, the blank sentinel
+ * last, so the same algo sits at the same position in each window.
+ */
+export function buildSettleWindowAlgo(
+  trades: TradeRecord[],
+  results: SettleResult[],
+  cash: CashTotaller = NATIVE_TOTALLER,
+): SettleGroupRow[] {
+  const tradeById = new Map(trades.map((t) => [t.orderId, t]));
+  const groups = new Map<
+    string,
+    { window: SettleWindow; algo: string; rows: Array<{ result: SettleResult; qty: number }> }
+  >();
+
+  for (const r of results) {
+    if (r.window === "unassigned") continue;
+    const trade = tradeById.get(r.orderId);
+    if (!trade) continue;
+    const algo = algoLabelOf(trade);
+    const key = `${r.window}|${algo}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = { window: r.window, algo, rows: [] };
+      groups.set(key, g);
+    }
+    g.rows.push({ result: r, qty: trade.orderQty });
+  }
+
+  return [...groups.values()]
+    .sort((a, b) => {
+      const wa = WINDOW_ORDER.indexOf(a.window);
+      const wb = WINDOW_ORDER.indexOf(b.window);
+      if (wa !== wb) return wa - wb;
+      return compareAlgo(a.algo, b.algo);
+    })
+    .map((g) => summarise(g.window, g.window, g.algo, g.rows, cash));
+}
+
+/**
  * One row per (window, instrument), so a contract that is persistently poor into
  * a settle separates from one that had a single bad day.
  */
@@ -205,6 +249,13 @@ export function buildSettleBySymbolAlgo(
 
 /** How a blank algo column is labelled everywhere on this report. */
 export const NO_ALGO_LABEL = "(no algo)";
+
+/** Named algos alphabetically, the blank sentinel always last. */
+export function compareAlgo(a: string, b: string): number {
+  if (a === NO_ALGO_LABEL) return 1;
+  if (b === NO_ALGO_LABEL) return -1;
+  return a.localeCompare(b);
+}
 
 function algoLabelOf(trade: TradeRecord): string {
   const algo = trade.algo?.trim();

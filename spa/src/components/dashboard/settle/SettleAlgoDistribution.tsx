@@ -56,7 +56,7 @@ import type { SettleResult, SettleWindow, TradeRecord } from "@/types";
 import { settleWindowLabel } from "@/tca/settle";
 import { toGenericTicker } from "@/tca/genericTicker";
 import { midSpreadBps } from "@/tca/tickSize";
-import { NO_ALGO_LABEL } from "@/tca/settleAggregate";
+import { compareAlgo, NO_ALGO_LABEL } from "@/tca/settleAggregate";
 import { useChartAlgoFilter } from "@/hooks/useChartAlgoFilter";
 import { AlgoFilterMenu } from "@/components/dashboard/AlgoFilterMenu";
 import { ChartCard, EmptyState, fmtBps, safeAvg } from "@/components/dashboard/dashboardUtils";
@@ -195,13 +195,6 @@ function jitterOf(orderId: string): number {
     h = Math.imul(h, 16777619);
   }
   return ((h >>> 0) / 0xffffffff) * 2 - 1;
-}
-
-/** Named algos alphabetically, the blank sentinel always last. */
-function compareAlgo(a: string, b: string): number {
-  if (a === NO_ALGO_LABEL) return 1;
-  if (b === NO_ALGO_LABEL) return -1;
-  return a.localeCompare(b);
 }
 
 /** Axis labels are truncated rather than allowed to collide. */

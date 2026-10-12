@@ -27,6 +27,7 @@ import { computeSettleResults, DEFAULT_SETTLE_TOLERANCE } from "@/tca/settle";
 import {
   buildSettleBySymbol,
   buildSettleBySymbolAlgo,
+  buildSettleWindowAlgo,
   buildSettleWindowSummary,
 } from "@/tca/settleAggregate";
 import { toGenericTicker } from "@/tca/genericTicker";
@@ -41,7 +42,7 @@ import { getTreasuryPrecision } from "@/tca/treasuryFrac";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { useCashDisplay } from "@/hooks/useCashDisplay";
 import { useTCAStore } from "@/store/useTCAStore";
-import { SettleWindowSummary } from "./SettleWindowSummary";
+import { SettleWindowAlgoSummary, SettleWindowSummary } from "./SettleWindowSummary";
 import { SettleAlgoDistribution } from "./SettleAlgoDistribution";
 import { SettleBySymbol, SettleBySymbolAlgo } from "./SettleBySymbol";
 import {
@@ -160,6 +161,11 @@ export function SettleDashboard({
     [trades, results, cash],
   );
 
+  const windowAlgo = useMemo(
+    () => buildSettleWindowAlgo(trades, results, cash),
+    [trades, results, cash],
+  );
+
   const symbolKeyFor = useMemo(
     () => (ric: string) =>
       groupGeneric ? toGenericTicker(resolveSymbol(ric)) : resolveSymbol(ric),
@@ -218,6 +224,7 @@ export function SettleDashboard({
     return (
       <SettlePrintLayout
         windowSummary={windowSummary}
+        windowAlgo={windowAlgo}
         bySymbol={bySymbol}
         bySymbolAlgo={bySymbolAlgo}
         rows={tableRows}
@@ -323,6 +330,7 @@ export function SettleDashboard({
       <ToleranceControl value={tolerance} onChange={setTolerance} />
 
       <SettleWindowSummary rows={windowSummary} />
+      <SettleWindowAlgoSummary rows={windowAlgo} />
 
       {SETTLE_WINDOWS.map((w) => (
         <SettleAlgoDistribution

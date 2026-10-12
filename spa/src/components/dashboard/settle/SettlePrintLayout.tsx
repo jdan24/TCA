@@ -63,6 +63,8 @@ const PRINT_PAGE_WIDTH_PX = 920;
 
 interface SettlePrintLayoutProps {
   windowSummary: SettleGroupRow[];
+  /** Window × algo, benchmarked windows only — printed under the summary on page 1. */
+  windowAlgo: SettleGroupRow[];
   bySymbol: SettleGroupRow[];
   bySymbolAlgo: SettleGroupRow[];
   rows: SettleTableRow[];
@@ -78,6 +80,7 @@ interface SettlePrintLayoutProps {
 
 export function SettlePrintLayout({
   windowSummary,
+  windowAlgo,
   bySymbol,
   bySymbolAlgo,
   rows,
@@ -186,6 +189,14 @@ export function SettlePrintLayout({
         </div>
 
         <PrintGroupTable title="By Settle Window" rows={windowSummary} showWindowColumn={false} />
+        {/* Compact so it stays on page 1 with the summary it splits. */}
+        <PrintGroupTable
+          title="By Settle Window & Algo"
+          rows={windowAlgo}
+          showWindowColumn={false}
+          showAlgoColumn
+          compact
+        />
 
         {/* ── Charts ─────────────────────────────────────────────────────── */}
         {SETTLE_WINDOWS.map((w) => (
@@ -263,11 +274,14 @@ function PrintGroupTable({
   rows,
   showWindowColumn,
   showAlgoColumn = false,
+  compact = false,
 }: {
   title: string;
   rows: SettleGroupRow[];
   showWindowColumn: boolean;
   showAlgoColumn?: boolean;
+  /** Tighter rows, for a table that has to share page 1. */
+  compact?: boolean;
 }) {
   const cash = useCashDisplay();
   if (rows.length === 0) return null;
@@ -281,7 +295,16 @@ function PrintGroupTable({
         "Avg Slip (bps)",
         "Total Slip",
       ]
-    : ["Window", "# Orders", "Total Qty", "Avg Slip (bps)", "Total Slip", "Benchmarked"];
+    : [
+        "Window",
+        ...(showAlgoColumn ? ["Algo"] : []),
+        "# Orders",
+        "Total Qty",
+        "Avg Slip (bps)",
+        "Total Slip",
+        "Benchmarked",
+      ];
+  const py = compact ? "py-1" : "py-1.5";
 
   return (
     <div className="break-inside-avoid">
@@ -308,7 +331,7 @@ function PrintGroupTable({
                 key={`${row.window}|${row.key}|${row.algo ?? ""}`}
                 className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}
               >
-                <td className="px-2 py-1.5 font-medium whitespace-nowrap">
+                <td className={`px-2 ${py} font-medium whitespace-nowrap`}>
                   {settleWindowLabel(row.window)}
                   {/* The window summary carries the count; the per-instrument
                       tables mark the row, matching each screen table. */}
@@ -319,7 +342,7 @@ function PrintGroupTable({
                   )}
                 </td>
                 {showWindowColumn && (
-                  <td className="px-2 py-1.5 text-right font-medium whitespace-nowrap">
+                  <td className={`px-2 ${py} text-right font-medium whitespace-nowrap`}>
                     {row.key}
                     {row.flagged > 0 && (
                       <span className="ml-1 text-amber-600">&#9888;</span>
@@ -327,15 +350,15 @@ function PrintGroupTable({
                   </td>
                 )}
                 {showAlgoColumn && (
-                  <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                  <td className={`px-2 ${py} text-right whitespace-nowrap`}>
                     {row.algo ?? "—"}
                   </td>
                 )}
-                <td className="px-2 py-1.5 text-right tabular-nums">{row.count}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">
+                <td className={`px-2 ${py} text-right tabular-nums`}>{row.count}</td>
+                <td className={`px-2 ${py} text-right tabular-nums`}>
                   {row.totalQty.toLocaleString()}
                 </td>
-                <td className="px-2 py-1.5 text-right tabular-nums">
+                <td className={`px-2 ${py} text-right tabular-nums`}>
                   {row.window === "unassigned" || row.avgSlip_bps === null ? (
                     "—"
                   ) : (
@@ -344,7 +367,7 @@ function PrintGroupTable({
                     </span>
                   )}
                 </td>
-                <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">
+                <td className={`px-2 ${py} text-right tabular-nums whitespace-nowrap`}>
                   {row.totalSlip_usd === null ? (
                     "—"
                   ) : (
@@ -354,7 +377,7 @@ function PrintGroupTable({
                   )}
                 </td>
                 {!showWindowColumn && (
-                  <td className="px-2 py-1.5 text-right tabular-nums">
+                  <td className={`px-2 ${py} text-right tabular-nums`}>
                     {row.window === "unassigned" ? "—" : `${row.withBenchmark} of ${row.count}`}
                   </td>
                 )}
