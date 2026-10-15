@@ -236,10 +236,10 @@ export interface QuotePair {
  * order on that symbol and day.
  */
 export interface OpenWindowBenchmark {
-  /** Σ(price×size)/Σsize over trade prints in [09:30:00, 09:31:00). */
-  vwap: number | null;
-  /** Time-weighted trade price over the same minute. */
-  twap: number | null;
+  /** Σ(price×size)/Σsize over trade prints in [09:30:00, 09:32:00). */
+  vwap2m: number | null;
+  /** The same over [09:30:00, 09:34:00). */
+  vwap4m: number | null;
   /** First quote at or after 09:30:00, or the prevailing one if none changed. */
   quote: QuotePair | null;
   /** Real Bloomberg quotes, or spreads estimated from 1-minute bars. */
@@ -257,14 +257,14 @@ export interface ArrivalQuote {
   failed: boolean;
 }
 
-/** The six benchmarks the cash-open report scores against. */
-export type OpenBenchmarkId =
-  | "vwap"
-  | "twap"
-  | "mid0930"
-  | "midArrival"
-  | "far0930"
-  | "farArrival";
+/** The four benchmarks the cash-open report scores against. */
+export type OpenBenchmarkId = "vwap2m" | "vwap4m" | "mid0930" | "midArrival";
+
+/**
+ * Which half of the cash-open report an order belongs to: market orders are
+ * judged on the mids, TWAP/VWAP algo orders on the VWAPs.
+ */
+export type OpenOrderClass = "market" | "algo";
 
 /** One benchmark price and the order's slippage against it. */
 export interface OpenSlip {
@@ -280,6 +280,8 @@ export interface OpenResult {
   orderId: string;
   /** NY date of the first fill — the open the order is scored against. */
   nyDate: string;
+  /** From the Algo Mapping settings: twap/vwap-mapped algos are "algo". */
+  orderClass: OpenOrderClass;
   bench: Record<OpenBenchmarkId, OpenSlip>;
   /** True when a quote benchmark came from bar ranges rather than real quotes. */
   quotesEstimated: boolean;

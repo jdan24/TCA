@@ -6,28 +6,51 @@
  * about what a figure means. Laid out the way SettlePrintLayout is: landscape
  * letter via an injected @page rule, the body pinned to the printable width,
  * and the `settle-print` class keeping background colours on paper.
+ *
+ * Each order class gets its own summary, instrument and order tables, showing
+ * only that class's benchmarks — which is also what keeps every table inside
+ * the page width. The screen cards' scroll wrappers and minimum widths are
+ * switched off under print (print:overflow-visible / print:min-w-0), so a table
+ * that is still too wide squeezes instead of being clipped at the right edge.
  */
 
 import { useEffect } from "react";
+import type { OpenOrderClass } from "@/types";
 import type { OpenGroupRow } from "@/tca/azOpenAggregate";
+import { OPEN_ORDER_CLASS_LABEL } from "@/tca/azOpen";
 import { useCorporateTemplate } from "@/hooks/useCorporateTemplate";
-import { AZ_OPEN_COLUMNS, renderOpenCell, type OpenColumnId, type OpenTableRow } from "./AzOpenOrderTable";
+import { columnsFor, renderOpenCell, type OpenColumnId, type OpenTableRow } from "./AzOpenOrderTable";
 import { AzOpenBenchmarkSummary, AzOpenBySymbol } from "./AzOpenSummary";
 
 /** Letter landscape less the @page side margins — see SettlePrintLayout. */
 const PRINT_PAGE_WIDTH_PX = 920;
 
-interface AzOpenPrintLayoutProps {
+/**
+ * Above this many columns (Symbol included) the order table drops a point size,
+ * so a user who has switched every price column on still fits the page.
+ */
+const DENSE_COLUMN_COUNT = 12;
+
+const ORDER_CLASSES: readonly OpenOrderClass[] = ["market", "algo"];
+
+/** Everything one order class contributes to the report. */
+export interface OpenClassSection {
   overall: OpenGroupRow;
   bySymbol: OpenGroupRow[];
+  /** This class's orders only. */
+  rows: OpenTableRow[];
+}
+
+interface AzOpenPrintLayoutProps {
+  sections: Record<OpenOrderClass, OpenClassSection>;
+  /** Every order, for the header count and date range. */
   rows: OpenTableRow[];
   visibleColumns: OpenColumnId[];
   onBack: () => void;
 }
 
 export function AzOpenPrintLayout({
-  overall,
-  bySymbol,
+  sections,
   rows,
   visibleColumns,
   onBack,
@@ -43,7 +66,8 @@ export function AzOpenPrintLayout({
     return () => { document.getElementById("azopen-print-layout-page")?.remove(); };
   }, []);
 
-  const cols = AZ_OPEN_COLUMNS.filter((c) => visibleColumns.includes(c.id));
+  // A class with no orders is left off the paper entirely.
+  const present = ORDER_CLASSES.filter((cls) => sections[cls].rows.length > 0);
   const dates = [...new Set(rows.map((r) => r.result.nyDate))].sort();
   const dateRange =
     dates.length === 0
@@ -98,58 +122,46 @@ export function AzOpenPrintLayout({
           </p>
           <div className="grid grid-cols-2 gap-4 text-xs text-gray-600 leading-relaxed">
             <p>
-              <span className="font-semibold text-gray-900">VWAP / TWAP</span> — trade prints
-              from 09:30:00 to 09:31:00 New York on the date of the order&rsquo;s first fill.
-              TWAP weights each print by how long it stood; the last print before 09:30
-              covers the time up to the first print of the minute.
+              <span className="font-semibold text-gray-900">Market orders</span> — judged on
+              the mid. <span className="font-semibold text-gray-900">Mid @ 09:30</span> is the
+              first quote at or after 09:30:00 New York on the date of the order&rsquo;s first
+              fill; <span className="font-semibold text-gray-900">Mid @ Arrival</span> is the
+              quote in force when the order was created.
             </p>
             <p>
-              <span className="font-semibold text-gray-900">Mid / Far touch</span> — at 09:30,
-              the first quote at or after 09:30:00; at arrival, the quote in force when the
-              order was created. Far touch is the ask for a buy and the bid for a sell.
+              <span className="font-semibold text-gray-900">TWAP/VWAP orders</span> — judged on
+              the volume-weighted trade price from 09:30:00 New York over the next
+              2 minutes (<span className="font-semibold text-gray-900">VWAP 2m</span>) and
+              4 minutes (<span className="font-semibold text-gray-900">VWAP 4m</span>).
             </p>
           </div>
           <p className="mt-2 text-xs text-gray-600">
-            Each order&rsquo;s average fill price is measured against every benchmark.
-            Slippage is positive when the execution cost money against the benchmark.
+            An order is a TWAP/VWAP order when its algo maps to TWAP or VWAP in the Algo
+            Mapping settings; every other order, including one with no algo, is a market
+            order. Slippage is positive when the execution cost money against the benchmark.
           </p>
         </div>
 
-        <div className="break-inside-avoid"><AzOpenBenchmarkSummary overall={overall} /></div>
-        <div className="break-inside-avoid"><AzOpenBySymbol rows={bySymbol} /></div>
+        {present.map((cls) => (
+          <div key={`bench-${cls}`} className="break-inside-avoid">
+            <AzOpenBenchmarkSummary cls={cls} overall={sections[cls].overall} />
+          </div>
+        ))}
+        {present.map((cls) => (
+          <div key={`sym-${cls}`} className="break-inside-avoid">
+            <AzOpenBySymbol cls={cls} rows={sections[cls].bySymbol} />
+          </div>
+        ))}
 
         {/* ── Order detail ───────────────────────────────────────────────── */}
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-1.5">
-            Order Detail
-          </p>
-          <div className="border border-gray-200 rounded-lg overflow-hidden">
-            <table className="w-full text-[9px]">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 text-left">
-                  <th className="px-1.5 py-1.5 font-semibold">Symbol</th>
-                  {cols.map((c) => (
-                    <th key={c.id} className="px-1.5 py-1.5 font-semibold">
-                      {c.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 text-gray-700">
-                {rows.map((row, i) => (
-                  <tr key={row.orderId} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
-                    <td className="px-1.5 py-1 font-semibold whitespace-nowrap">{row.bbgSymbol}</td>
-                    {cols.map((c) => (
-                      <td key={c.id} className="px-1.5 py-1">
-                        {renderOpenCell(row, c)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        {present.map((cls) => (
+          <PrintOrderTable
+            key={`orders-${cls}`}
+            cls={cls}
+            rows={sections[cls].rows}
+            visibleColumns={visibleColumns}
+          />
+        ))}
 
         {/* ── Footer ─────────────────────────────────────────────────────── */}
         {(contactName || contactEmail || contactPhone) && (
@@ -160,6 +172,56 @@ export function AzOpenPrintLayout({
         {disclaimerText && (
           <p className="text-[9px] leading-relaxed text-gray-400">{disclaimerText}</p>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One class's orders. Not break-inside-avoid: a long list runs on across pages,
+ * and the <thead> repeats at the top of each.
+ */
+function PrintOrderTable({
+  cls,
+  rows,
+  visibleColumns,
+}: {
+  cls: OpenOrderClass;
+  rows: OpenTableRow[];
+  visibleColumns: OpenColumnId[];
+}) {
+  const cols = columnsFor(cls, visibleColumns);
+  const dense = cols.length + 1 > DENSE_COLUMN_COUNT;
+  return (
+    <div>
+      <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-1.5">
+        Order Detail — {OPEN_ORDER_CLASS_LABEL[cls]}
+      </p>
+      <div className="border border-gray-200 rounded-lg overflow-hidden">
+        <table className={`w-full ${dense ? "text-[8px]" : "text-[9px]"}`}>
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 text-left align-bottom">
+              <th className="px-1.5 py-1.5 font-semibold">Symbol</th>
+              {cols.map((c) => (
+                <th key={c.id} className="px-1.5 py-1.5 font-semibold">
+                  {c.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 text-gray-700">
+            {rows.map((row, i) => (
+              <tr key={row.orderId} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
+                <td className="px-1.5 py-1 font-semibold whitespace-nowrap">{row.bbgSymbol}</td>
+                {cols.map((c) => (
+                  <td key={c.id} className="px-1.5 py-1">
+                    {renderOpenCell(row, c)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

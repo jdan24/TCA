@@ -1,14 +1,17 @@
 /**
  * Cash-open metrics (AZ Open report).
  *
- * Futures orders worked into the 09:30 NY equity cash open, judged against six
- * benchmarks taken around that instant and around the order's own creation:
+ * Futures orders worked into the 09:30 NY equity cash open. The report splits
+ * orders in two, by what their algo maps to in the Algo Mapping settings:
  *
- *   VWAP / TWAP  — trade prints over [09:30:00, 09:31:00) NY.
- *   Mid @ 09:30  — first quote at or after 09:30:00.
- *   Mid @ arrival — the quote in force at the order's creation time.
- *   Far touch    — the same two quotes, taking the side an aggressive order
- *                  would pay: the ask for a buy, the bid for a sell.
+ *   Market orders (arrival-mapped, unmapped or blank algo) are judged on
+ *     Mid @ 09:30   — first quote at or after 09:30:00.
+ *     Mid @ arrival — the quote in force at the order's creation time.
+ *   TWAP/VWAP orders are judged on
+ *     VWAP 2m / 4m  — trade prints over [09:30:00, 09:32:00) and [09:30, 09:34).
+ *
+ * Every order is still priced against all four, so the CSV is complete; the
+ * tables show each class only its own benchmarks.
  *
  * Every order is scored against the open on the NY date of its first fill, so an
  * order entered the evening before still lands on the open it traded into.
@@ -17,8 +20,10 @@
 
 import type {
   ArrivalQuote,
+  BenchmarkKind,
   BidAskTick,
   OpenBenchmarkId,
+  OpenOrderClass,
   OpenResult,
   OpenSlip,
   OpenWindowBenchmark,
@@ -32,13 +37,14 @@ import { computeSettleSlippage } from "./settle";
 
 export const OPEN_HOUR = 9;
 export const OPEN_MINUTE = 30;
-/** Length of the VWAP/TWAP window after the open. */
-export const OPEN_WINDOW_MIN = 1;
+/** Length of each VWAP window after the open, in minutes. */
+export const OPEN_VWAP_MINUTES = { vwap2m: 2, vwap4m: 4 } as const;
+/** Length of the fetched window after the open — the longest VWAP. */
+export const OPEN_WINDOW_MIN = OPEN_VWAP_MINUTES.vwap4m;
 /**
- * How far before 09:30 the window fetch starts. The print and quote in force
- * going into the open come from this lead-in: the TWAP carries the last print
- * forward to 09:30, and a market whose quote does not change in the first minute
- * still has one.
+ * How far before 09:30 the window fetch starts. The quote in force going into
+ * the open comes from this lead-in, so a market whose quote does not change
+ * after 09:30 still has one.
  */
 export const OPEN_LEAD_IN_MIN = 1;
 /** How far before the order's creation the arrival-quote fetch starts. */
@@ -49,14 +55,37 @@ export const OPEN_BENCHMARKS: ReadonlyArray<{
   id: OpenBenchmarkId;
   label: string;
   title: string;
+  /** The order class this benchmark scores. */
+  group: OpenOrderClass;
 }> = [
-  { id: "vwap",       label: "VWAP",            title: "Volume-weighted trade price, 09:30:00–09:31:00 NY" },
-  { id: "twap",       label: "TWAP",            title: "Time-weighted trade price, 09:30:00–09:31:00 NY — each print counts for as long as it stood" },
-  { id: "mid0930",    label: "Mid @ 09:30",     title: "Bid/ask midpoint of the first quote at or after 09:30:00 NY" },
-  { id: "midArrival", label: "Mid @ Arrival",   title: "Bid/ask midpoint in force when the order was created" },
-  { id: "far0930",    label: "Far Touch @ 09:30", title: "First quote at or after 09:30:00 NY — the ask for a buy, the bid for a sell" },
-  { id: "farArrival", label: "Far Touch @ Arrival", title: "Quote in force when the order was created — the ask for a buy, the bid for a sell" },
+  { id: "mid0930",    label: "Mid @ 09:30",   title: "Bid/ask midpoint of the first quote at or after 09:30:00 NY", group: "market" },
+  { id: "midArrival", label: "Mid @ Arrival", title: "Bid/ask midpoint in force when the order was created",        group: "market" },
+  { id: "vwap2m",     label: "VWAP 2m",       title: "Volume-weighted trade price, 09:30:00–09:32:00 NY",           group: "algo" },
+  { id: "vwap4m",     label: "VWAP 4m",       title: "Volume-weighted trade price, 09:30:00–09:34:00 NY",           group: "algo" },
 ];
+
+/** The benchmarks one order class is judged on, in display order. */
+export function benchmarksFor(cls: OpenOrderClass) {
+  return OPEN_BENCHMARKS.filter((b) => b.group === cls);
+}
+
+export const OPEN_ORDER_CLASS_LABEL: Record<OpenOrderClass, string> = {
+  market: "Market Orders",
+  algo: "TWAP/VWAP Orders",
+};
+
+/**
+ * An order's class from its algo, via the Algo Mapping settings: algos mapped to
+ * TWAP or VWAP are algo orders, everything else (arrival, unmapped, blank) is a
+ * market order. The resolver is passed in so this module stays pure.
+ */
+export function orderClassOf(
+  algo: string | null,
+  resolve: (algo: string | null) => BenchmarkKind,
+): OpenOrderClass {
+  const kind = resolve(algo);
+  return kind === "twap" || kind === "vwap" ? "algo" : "market";
+}
 
 // ── Dates and keys ────────────────────────────────────────────────────────────
 
@@ -65,7 +94,7 @@ export function openDateOf(trade: TradeRecord): string {
   return nyDateOf(trade.firstFillTime);
 }
 
-/** [09:30, 09:31) NY on a date, as UTC instants; null for an unparseable date. */
+/** [09:30, 09:34) NY on a date, as UTC instants; null for an unparseable date. */
 export function openWindowOf(nyDate: string): { start: Date; end: Date } | null {
   const start = nyWallClockToUtc(nyDate, OPEN_HOUR, OPEN_MINUTE);
   if (start === null) return null;
@@ -145,51 +174,6 @@ export function tickVwap(ticks: TradeTick[], from: Date, to: Date): number | nul
 }
 
 /**
- * Time-weighted trade price over [from, to).
- *
- * Each print stands from its own time until the next print or the window end.
- * The last print before `from` covers the stretch up to the first print inside
- * the window, so a quiet first few seconds are not simply dropped. A window
- * with no prints of its own returns null, matching the VWAP — a price carried
- * in from before the open is not a measurement of the open.
- */
-export function tickTwap(ticks: TradeTick[], from: Date, to: Date): number | null {
-  const a = from.getTime();
-  const b = to.getTime();
-  const sorted = ticks
-    .filter((t) => isFinite(t.price))
-    .sort((x, y) => x.time.getTime() - y.time.getTime());
-
-  let opening: TradeTick | null = null;
-  const inWindow: TradeTick[] = [];
-  for (const t of sorted) {
-    const ms = t.time.getTime();
-    if (ms < a) opening = t;
-    else if (ms < b) inWindow.push(t);
-  }
-  if (inWindow.length === 0) return null;
-
-  const points: Array<{ ms: number; price: number }> = [];
-  if (opening !== null) points.push({ ms: a, price: opening.price });
-  for (const t of inWindow) points.push({ ms: t.time.getTime(), price: t.price });
-
-  let weighted = 0;
-  let span = 0;
-  for (let i = 0; i < points.length; i++) {
-    const p = points[i]!;
-    const until = i + 1 < points.length ? points[i + 1]!.ms : b;
-    const dt = until - p.ms;
-    if (dt <= 0) continue;
-    weighted += p.price * dt;
-    span += dt;
-  }
-  // Every print shares one instant (or sits at the window end): fall back to
-  // their plain mean rather than reporting nothing.
-  if (span === 0) return inWindow.reduce((s, t) => s + t.price, 0) / inWindow.length;
-  return weighted / span;
-}
-
-/**
  * The first quote at or after `t` and before `until`; failing that, the quote
  * already in force at `t`.
  *
@@ -225,17 +209,11 @@ export function midOf(q: QuotePair | null): number | null {
   return q === null ? null : (q.bid + q.ask) / 2;
 }
 
-/** The side an aggressive order pays: the ask for a buy, the bid for a sell. */
-export function farTouch(side: "BUY" | "SELL", q: QuotePair | null): number | null {
-  if (q === null) return null;
-  return side === "BUY" ? q.ask : q.bid;
-}
-
 // ── Per-order results ─────────────────────────────────────────────────────────
 
 /**
- * Assemble the report's per-order rows: every loaded order, each scored against
- * all six benchmarks. A missing benchmark leaves that order's slippage null
+ * Assemble the report's per-order rows: every loaded order, classed by its algo
+ * and scored against all four benchmarks. A missing benchmark leaves that order's slippage null
  * rather than dropping the order.
  */
 export function computeOpenResults(
@@ -244,6 +222,7 @@ export function computeOpenResults(
   arrivals: Record<string, ArrivalQuote>,
   resolveSymbol: (ric: string) => string,
   pointValueFor: (ric: string) => number | null,
+  resolveAlgo: (algo: string | null) => BenchmarkKind,
   currencyFor: (ric: string) => string | null = () => null,
 ): OpenResult[] {
   return trades.map((trade) => {
@@ -275,13 +254,12 @@ export function computeOpenResults(
     return {
       orderId: trade.orderId,
       nyDate,
+      orderClass: orderClassOf(trade.algo, resolveAlgo),
       bench: {
-        vwap:       slip(win?.vwap ?? null, tradesFailed),
-        twap:       slip(win?.twap ?? null, tradesFailed),
+        vwap2m:     slip(win?.vwap2m ?? null, tradesFailed),
+        vwap4m:     slip(win?.vwap4m ?? null, tradesFailed),
         mid0930:    slip(midOf(quote0930), winQuoteFailed),
         midArrival: slip(midOf(quoteArr), arrFailed),
-        far0930:    slip(farTouch(trade.side, quote0930), winQuoteFailed),
-        farArrival: slip(farTouch(trade.side, quoteArr), arrFailed),
       },
       quotesEstimated:
         (quote0930 !== null && win?.quoteSource === "bars") ||

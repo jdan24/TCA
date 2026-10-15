@@ -9,11 +9,11 @@
  *
  * Three kinds of call:
  *
- *   window  — trade ticks and bid/ask ticks over [09:29, 09:31) NY, once per
- *             (symbol, date). The minute before the open supplies the print and
- *             quote in force going into it.
+ *   window  — trade ticks and bid/ask ticks over [09:29, 09:34) NY, once per
+ *             (symbol, date), for the 2- and 4-minute VWAPs and the 09:30 mid.
+ *             The minute before the open supplies the quote in force going in.
  *   arrival — bid/ask ticks over the two minutes up to each distinct
- *             (symbol, order creation time), for the arrival mid and far touch.
+ *             (symbol, order creation time), for the arrival mid.
  *   reference — point value, currency and tick size, once per symbol.
  */
 
@@ -29,11 +29,11 @@ import {
   arrivalKey,
   firstQuoteAtOrAfter,
   OPEN_LEAD_IN_MIN,
+  OPEN_VWAP_MINUTES,
   openWindowKey,
   openWindowOf,
   requiredArrivalQuotes,
   requiredOpenWindows,
-  tickTwap,
   tickVwap,
   toQuotePair,
   type ArrivalRequest,
@@ -104,7 +104,7 @@ async function fetchOpenWindow({
   const win = openWindowOf(nyDate);
   // An unparseable date is our problem, not a failed request — nothing to retry.
   if (win === null) {
-    return { vwap: null, twap: null, quote: null, quoteSource: null, tradesFailed: false, quoteFailed: false };
+    return { vwap2m: null, vwap4m: null, quote: null, quoteSource: null, tradesFailed: false, quoteFailed: false };
   }
   const from = new Date(win.start.getTime() - OPEN_LEAD_IN_MIN * 60_000);
 
@@ -114,9 +114,11 @@ async function fetchOpenWindow({
   const quotes = await fetchQuotes(bbgSymbol, from, win.end);
   const quote = toQuotePair(firstQuoteAtOrAfter(quotes.ticks, win.start, win.end));
 
+  const after = (min: number) => new Date(win.start.getTime() + min * 60_000);
+
   return {
-    vwap: tickVwap(trades.ticks, win.start, win.end),
-    twap: tickTwap(trades.ticks, win.start, win.end),
+    vwap2m: tickVwap(trades.ticks, win.start, after(OPEN_VWAP_MINUTES.vwap2m)),
+    vwap4m: tickVwap(trades.ticks, win.start, after(OPEN_VWAP_MINUTES.vwap4m)),
     quote,
     quoteSource: quote === null ? null : quotes.source,
     tradesFailed: trades.failed,
@@ -189,7 +191,7 @@ export async function enrichAzOpenBenchmarks(
   // might be retryable. Progress is not stepped — the bar has already finished.
   const missingWindows = windows.filter((req) => {
     const w = window[openWindowKey(req.bbgSymbol, req.nyDate)];
-    return w === undefined || w.vwap === null || w.quote === null;
+    return w === undefined || w.vwap4m === null || w.quote === null;
   });
   if (missingWindows.length > 0) {
     await mapPooled(missingWindows, MAX_IN_FLIGHT, async (req) => {
@@ -201,9 +203,10 @@ export async function enrichAzOpenBenchmarks(
         prev === undefined
           ? next
           : {
-              vwap: prev.vwap ?? next.vwap,
-              twap: prev.vwap !== null ? prev.twap : next.twap,
-              tradesFailed: prev.vwap !== null ? false : next.tradesFailed,
+              // Both VWAPs come from one trade fetch: keep or replace them together.
+              vwap2m: prev.vwap4m !== null ? prev.vwap2m : next.vwap2m,
+              vwap4m: prev.vwap4m ?? next.vwap4m,
+              tradesFailed: prev.vwap4m !== null ? false : next.tradesFailed,
               quote: prev.quote ?? next.quote,
               quoteSource: prev.quote !== null ? prev.quoteSource : next.quoteSource,
               quoteFailed: prev.quote !== null ? false : next.quoteFailed,

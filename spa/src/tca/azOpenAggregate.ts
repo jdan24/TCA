@@ -1,5 +1,7 @@
 /**
- * Aggregations for the cash-open report: one overall row and one per instrument.
+ * Aggregations for the cash-open report: one overall row and one per instrument,
+ * each built for one order class (market or TWAP/VWAP). Every benchmark is
+ * summarised; the tables read only the ones that class is judged on.
  *
  * bps figures are quantity-weighted — Σ(bps × qty) / Σqty over the orders that
  * have the benchmark — so a large order counts for what it cost. Cash figures
@@ -7,7 +9,7 @@
  * total rather than summing across FX, as everywhere else in the app.
  */
 
-import type { OpenBenchmarkId, OpenResult, TradeRecord } from "@/types";
+import type { OpenBenchmarkId, OpenOrderClass, OpenResult, TradeRecord } from "@/types";
 import { NATIVE_TOTALLER, type CashTotaller } from "./fx";
 import { OPEN_BENCHMARKS } from "./azOpen";
 
@@ -83,30 +85,35 @@ function summarise(
   };
 }
 
-/** One row across every order in the report. */
+/** One row across every order of one class. */
 export function buildOpenOverall(
   trades: TradeRecord[],
   results: OpenResult[],
+  cls: OpenOrderClass,
   cash: CashTotaller = NATIVE_TOTALLER,
 ): OpenGroupRow {
   const qtyById = new Map(trades.map((t) => [t.orderId, t.orderQty]));
   return summarise(
     "All orders",
-    results.map((r) => ({ result: r, qty: qtyById.get(r.orderId) ?? 0 })),
+    results
+      .filter((r) => r.orderClass === cls)
+      .map((r) => ({ result: r, qty: qtyById.get(r.orderId) ?? 0 })),
     cash,
   );
 }
 
-/** One row per instrument, the contracts that carry the report first. */
+/** One row per instrument within one class, the contracts that carry it first. */
 export function buildOpenBySymbol(
   trades: TradeRecord[],
   results: OpenResult[],
+  cls: OpenOrderClass,
   symbolKeyFor: (ric: string) => string,
   cash: CashTotaller = NATIVE_TOTALLER,
 ): OpenGroupRow[] {
   const tradeById = new Map(trades.map((t) => [t.orderId, t]));
   const groups = new Map<string, Array<{ result: OpenResult; qty: number }>>();
   for (const r of results) {
+    if (r.orderClass !== cls) continue;
     const trade = tradeById.get(r.orderId);
     if (!trade) continue;
     const label = symbolKeyFor(trade.symbol);

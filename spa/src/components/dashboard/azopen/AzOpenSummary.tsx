@@ -1,16 +1,18 @@
 /**
- * AzOpenSummary — the cash-open report's summary tables.
+ * AzOpenSummary — the cash-open report's summary tables, one of each per order
+ * class: market orders against the mids, TWAP/VWAP orders against the VWAPs.
  *
- *   By Benchmark  — every order, one row per benchmark.
- *   By Instrument — one row per contract (or generic), every benchmark across.
+ *   By Benchmark  — every order of the class, one row per benchmark.
+ *   By Instrument — one row per contract (or generic), the class's benchmarks across.
  *
  * bps are quantity-weighted; cash figures are group totals in whichever
  * currency the report is being read in.
  */
 
 import type { ReactNode } from "react";
+import type { OpenBenchmarkId, OpenOrderClass } from "@/types";
 import type { OpenGroupRow } from "@/tca/azOpenAggregate";
-import { OPEN_BENCHMARKS } from "@/tca/azOpen";
+import { benchmarksFor, OPEN_ORDER_CLASS_LABEL } from "@/tca/azOpen";
 import {
   ChartCard,
   EmptyState,
@@ -42,15 +44,29 @@ function UsdCell({ v, currency }: { v: number | null; currency: string | null })
   );
 }
 
-export function AzOpenBenchmarkSummary({ overall }: { overall: OpenGroupRow }) {
+export function AzOpenBenchmarkSummary({
+  cls,
+  overall,
+}: {
+  cls: OpenOrderClass;
+  overall: OpenGroupRow;
+}) {
   const cash = useCashDisplay();
+  const title = `By Benchmark — ${OPEN_ORDER_CLASS_LABEL[cls]}`;
+  if (overall.count === 0) {
+    return (
+      <ChartCard title={title}>
+        <EmptyState message={`No ${OPEN_ORDER_CLASS_LABEL[cls].toLowerCase()}`} />
+      </ChartCard>
+    );
+  }
   return (
     <ChartCard
-      title="By Benchmark"
+      title={title}
       subtitle={`${overall.count.toLocaleString()} order${overall.count !== 1 ? "s" : ""} · ${overall.totalQty.toLocaleString()} lots · quantity-weighted bps, total cash`}
     >
-      <div className="overflow-x-auto -mx-4 px-4">
-        <table className="w-full text-xs min-w-[480px]">
+      <div className="overflow-x-auto -mx-4 px-4 print:overflow-visible">
+        <table className="w-full text-xs min-w-[480px] print:min-w-0">
           <thead>
             <tr className="border-b border-gray-100 dark:border-gray-800">
               <th className={TH}>Benchmark</th>
@@ -60,7 +76,7 @@ export function AzOpenBenchmarkSummary({ overall }: { overall: OpenGroupRow }) {
             </tr>
           </thead>
           <tbody>
-            {OPEN_BENCHMARKS.map((b) => {
+            {benchmarksFor(cls).map((b) => {
               const s = overall.bench[b.id];
               return (
                 <tr key={b.id} className="border-b border-gray-50 dark:border-gray-800/50">
@@ -81,39 +97,43 @@ export function AzOpenBenchmarkSummary({ overall }: { overall: OpenGroupRow }) {
           </tbody>
         </table>
       </div>
-      <Legend />
+      <Legend cls={cls} />
       <FxNote text={cash.disclosureFor([overall.currency ?? "USD"])} />
     </ChartCard>
   );
 }
 
 export function AzOpenBySymbol({
+  cls,
   rows,
   actions,
 }: {
+  cls: OpenOrderClass;
   rows: OpenGroupRow[];
   actions?: ReactNode;
 }) {
   const cash = useCashDisplay();
+  const title = `By Instrument — ${OPEN_ORDER_CLASS_LABEL[cls]}`;
+  const benches = benchmarksFor(cls);
   if (rows.length === 0) {
     return (
-      <ChartCard title="By Instrument" actions={actions}>
-        <EmptyState message="No orders to show" />
+      <ChartCard title={title} actions={actions}>
+        <EmptyState message={`No ${OPEN_ORDER_CLASS_LABEL[cls].toLowerCase()}`} />
       </ChartCard>
     );
   }
   return (
     <ChartCard
-      title="By Instrument"
+      title={title}
       subtitle="Quantity-weighted slippage (bps) and total cash slippage against each benchmark"
       actions={actions}
     >
-      <div className="overflow-x-auto -mx-4 px-4">
-        <table className="w-full text-xs min-w-[880px]">
+      <div className="overflow-x-auto -mx-4 px-4 print:overflow-visible">
+        <table className="w-full text-xs min-w-[560px] print:min-w-0">
           <thead>
             <tr>
               <th className={TH} colSpan={3} />
-              {OPEN_BENCHMARKS.map((b) => (
+              {benches.map((b) => (
                 <th
                   key={b.id}
                   colSpan={2}
@@ -128,7 +148,7 @@ export function AzOpenBySymbol({
               <th className={TH}>Instrument</th>
               <th className={TH}>Orders</th>
               <th className={TH}>Qty</th>
-              {OPEN_BENCHMARKS.map((b) => (
+              {benches.map((b) => (
                 <SubHeads key={b.id} />
               ))}
             </tr>
@@ -143,7 +163,7 @@ export function AzOpenBySymbol({
                 <td className="py-2 pr-3 tabular-nums text-gray-600 dark:text-gray-400">
                   {row.totalQty.toLocaleString()}
                 </td>
-                {OPEN_BENCHMARKS.map((b) => (
+                {benches.map((b) => (
                   <BenchPair key={b.id} row={row} id={b.id} />
                 ))}
               </tr>
@@ -151,7 +171,7 @@ export function AzOpenBySymbol({
           </tbody>
         </table>
       </div>
-      <Legend />
+      <Legend cls={cls} />
       <FxNote text={cash.disclosureFor(rows.map((r) => r.currency ?? "USD"))} />
     </ChartCard>
   );
@@ -166,7 +186,7 @@ function SubHeads() {
   );
 }
 
-function BenchPair({ row, id }: { row: OpenGroupRow; id: (typeof OPEN_BENCHMARKS)[number]["id"] }) {
+function BenchPair({ row, id }: { row: OpenGroupRow; id: OpenBenchmarkId }) {
   const s = row.bench[id];
   return (
     <>
@@ -178,13 +198,17 @@ function BenchPair({ row, id }: { row: OpenGroupRow; id: (typeof OPEN_BENCHMARKS
   );
 }
 
-function Legend() {
+function Legend({ cls }: { cls: OpenOrderClass }) {
   return (
     <div className="mt-3 pt-2.5 border-t border-gray-100 dark:border-gray-800 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-gray-400 dark:text-gray-500">
-      <span>VWAP / TWAP over 09:30:00–09:31:00 NY trade prints</span>
-      <span>09:30 quote: first at or after 09:30:00</span>
-      <span>Arrival quote: in force at order creation</span>
-      <span>Far touch: ask for buys, bid for sells</span>
+      {cls === "market" ? (
+        <>
+          <span>09:30 mid: first quote at or after 09:30:00 NY</span>
+          <span>Arrival mid: quote in force at order creation</span>
+        </>
+      ) : (
+        <span>VWAP over trade prints from 09:30:00 NY for 2 and 4 minutes</span>
+      )}
       <span>Positive slippage is a cost.</span>
     </div>
   );

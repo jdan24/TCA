@@ -1,12 +1,12 @@
 /**
  * AzOpenDashboard — the AZ Open report.
  *
- * Futures orders worked into the 09:30 NY cash open, each order's average fill
- * scored against VWAP and TWAP over the first minute, the mid and far touch at
- * 09:30, and the mid and far touch when the order was created. See tca/azOpen.ts
- * for the exact definitions.
+ * Futures orders worked into the 09:30 NY cash open, split by the Algo Mapping
+ * settings: market orders scored against the mid at 09:30 and at creation,
+ * TWAP/VWAP orders against the 2- and 4-minute VWAP from 09:30. See
+ * tca/azOpen.ts for the exact definitions.
  *
- * Layout:
+ * Layout (each table once per class, market first):
  *   Toolbar (counts, fetch, print, reset)
  *   By Benchmark
  *   By Instrument
@@ -14,9 +14,9 @@
  */
 
 import { useMemo, useState } from "react";
-import type { TradeRecord } from "@/types";
+import type { OpenOrderClass, TradeRecord } from "@/types";
 import type { SettleProgress } from "@/bloomberg/settleService";
-import { computeOpenResults, OPEN_BENCHMARKS } from "@/tca/azOpen";
+import { benchmarksFor, computeOpenResults, OPEN_ORDER_CLASS_LABEL } from "@/tca/azOpen";
 import { buildOpenBySymbol, buildOpenOverall } from "@/tca/azOpenAggregate";
 import { toGenericTicker } from "@/tca/genericTicker";
 import { buildPointValueResolver } from "@/tca/pointValue";
@@ -27,6 +27,7 @@ import {
 } from "@/tca/dollars";
 import { getTreasuryPrecision } from "@/tca/treasuryFrac";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
+import { useAlgoMap } from "@/hooks/useAlgoMap";
 import { useCashDisplay } from "@/hooks/useCashDisplay";
 import { useTCAStore } from "@/store/useTCAStore";
 import { AzOpenBenchmarkSummary, AzOpenBySymbol } from "./AzOpenSummary";
@@ -39,7 +40,9 @@ import {
   saveOpenCols,
   type OpenColumnId,
 } from "./AzOpenOrderTable";
-import { AzOpenPrintLayout } from "./AzOpenPrintLayout";
+import { AzOpenPrintLayout, type OpenClassSection } from "./AzOpenPrintLayout";
+
+const ORDER_CLASSES: readonly OpenOrderClass[] = ["market", "algo"];
 
 interface AzOpenDashboardProps {
   trades: TradeRecord[];
@@ -70,6 +73,9 @@ export function AzOpenDashboard({
   onReset,
 }: AzOpenDashboardProps) {
   const symbolMap = useSymbolMap();
+  // Market vs TWAP/VWAP follows the Algo Mapping settings; editing a mapping
+  // reclassifies orders live.
+  const { resolve: resolveAlgo } = useAlgoMap();
   const cash = useCashDisplay();
   const windows = useTCAStore((s) => s.azOpenWindow);
   const arrivals = useTCAStore((s) => s.azOpenArrival);
@@ -122,11 +128,18 @@ export function AzOpenDashboard({
   );
 
   const results = useMemo(
-    () => computeOpenResults(trades, windows, arrivals, resolveSymbol, pointValueFor, currencyFor),
-    [trades, windows, arrivals, resolveSymbol, pointValueFor, currencyFor],
+    () =>
+      computeOpenResults(
+        trades,
+        windows,
+        arrivals,
+        resolveSymbol,
+        pointValueFor,
+        resolveAlgo,
+        currencyFor,
+      ),
+    [trades, windows, arrivals, resolveSymbol, pointValueFor, resolveAlgo, currencyFor],
   );
-
-  const overall = useMemo(() => buildOpenOverall(trades, results, cash), [trades, results, cash]);
 
   const symbolKeyFor = useMemo(
     () => (ric: string) =>
@@ -134,14 +147,25 @@ export function AzOpenDashboard({
     [groupGeneric, resolveSymbol],
   );
 
-  const bySymbol = useMemo(
-    () => buildOpenBySymbol(trades, results, symbolKeyFor, cash),
-    [trades, results, symbolKeyFor, cash],
-  );
-
   const tableRows = useMemo(
     () => buildOpenRows(trades, results, resolveSymbol),
     [trades, results, resolveSymbol],
+  );
+
+  // One section per order class: its summary, per-instrument rows and orders.
+  const sections = useMemo(
+    () =>
+      Object.fromEntries(
+        ORDER_CLASSES.map((cls): [OpenOrderClass, OpenClassSection] => [
+          cls,
+          {
+            overall: buildOpenOverall(trades, results, cls, cash),
+            bySymbol: buildOpenBySymbol(trades, results, cls, symbolKeyFor, cash),
+            rows: tableRows.filter((r) => r.result.orderClass === cls),
+          },
+        ]),
+      ) as Record<OpenOrderClass, OpenClassSection>,
+    [trades, results, symbolKeyFor, cash, tableRows],
   );
 
   function handleExportCsv() {
@@ -152,9 +176,11 @@ export function AzOpenDashboard({
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const lines = [
-      ["Symbol", ...cols.map((c) => c.label)].map(esc).join(","),
+      ["Symbol", "Order Type", ...cols.map((c) => c.label)].map(esc).join(","),
       ...tableRows.map((r) =>
-        [r.bbgSymbol, ...cols.map((c) => openCellText(r, c))].map(esc).join(","),
+        [r.bbgSymbol, OPEN_ORDER_CLASS_LABEL[r.result.orderClass], ...cols.map((c) => openCellText(r, c))]
+          .map(esc)
+          .join(","),
       ),
     ];
     const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
@@ -171,14 +197,33 @@ export function AzOpenDashboard({
   if (showPrint) {
     return (
       <AzOpenPrintLayout
-        overall={overall}
-        bySymbol={bySymbol}
+        sections={sections}
         rows={tableRows}
         visibleColumns={visibleColumns}
         onBack={() => setShowPrint(false)}
       />
     );
   }
+
+  const groupToggle = (
+    <div className="flex items-center gap-2 print:hidden">
+      <span className="text-[11px] text-gray-400 dark:text-gray-500">Group by</span>
+      <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <ToggleButton
+          label="Generic"
+          title="Collapse expiries onto the instrument — ESZ6 and ESH7 both count as ES Index"
+          active={groupGeneric}
+          onClick={() => changeGroupGeneric(true)}
+        />
+        <ToggleButton
+          label="Expiry"
+          title="One row per contract"
+          active={!groupGeneric}
+          onClick={() => changeGroupGeneric(false)}
+        />
+      </div>
+    </div>
+  );
 
   const isFetching = progress !== null;
   const pct = isFetching && progress.total > 0
@@ -187,8 +232,9 @@ export function AzOpenDashboard({
 
   // Orders with at least one benchmark whose request failed, as opposed to
   // Bloomberg answering that there was nothing — worth a re-fetch.
+  // Only the benchmarks the order is judged on count.
   const failed = results.filter((r) =>
-    OPEN_BENCHMARKS.some((b) => r.bench[b.id].failed),
+    benchmarksFor(r.orderClass).some((b) => r.bench[b.id].failed),
   ).length;
   const estimated = results.filter((r) => r.quotesEstimated).length;
 
@@ -268,37 +314,30 @@ export function AzOpenDashboard({
         </div>
       </div>
 
-      <AzOpenBenchmarkSummary overall={overall} />
+      {ORDER_CLASSES.map((cls) => (
+        <AzOpenBenchmarkSummary key={cls} cls={cls} overall={sections[cls].overall} />
+      ))}
 
-      <AzOpenBySymbol
-        rows={bySymbol}
-        actions={
-          <div className="flex items-center gap-2 print:hidden">
-            <span className="text-[11px] text-gray-400 dark:text-gray-500">Group by</span>
-            <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-              <ToggleButton
-                label="Generic"
-                title="Collapse expiries onto the instrument — ESZ6 and ESH7 both count as ES Index"
-                active={groupGeneric}
-                onClick={() => changeGroupGeneric(true)}
-              />
-              <ToggleButton
-                label="Expiry"
-                title="One row per contract"
-                active={!groupGeneric}
-                onClick={() => changeGroupGeneric(false)}
-              />
-            </div>
-          </div>
-        }
-      />
+      {ORDER_CLASSES.map((cls) => (
+        <AzOpenBySymbol
+          key={cls}
+          cls={cls}
+          rows={sections[cls].bySymbol}
+          // One toggle drives both tables; it sits on the first.
+          {...(cls === "market" ? { actions: groupToggle } : {})}
+        />
+      ))}
 
-      <AzOpenOrderTable
-        rows={tableRows}
-        visibleColumns={visibleColumns}
-        onVisibleColumnsChange={changeColumns}
-        onExportCsv={handleExportCsv}
-      />
+      {ORDER_CLASSES.map((cls) => (
+        <AzOpenOrderTable
+          key={cls}
+          cls={cls}
+          rows={sections[cls].rows}
+          visibleColumns={visibleColumns}
+          onVisibleColumnsChange={changeColumns}
+          onExportCsv={handleExportCsv}
+        />
+      ))}
     </div>
   );
 }

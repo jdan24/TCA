@@ -1,6 +1,6 @@
 /**
- * AzOpenOrderTable — one row per order, scored against the six cash-open
- * benchmarks.
+ * AzOpenOrderTable — one row per order, for one order class: market orders
+ * against the two mids, TWAP/VWAP orders against the two VWAPs.
  *
  * Columns are selectable and the selection drives CSV and the print layout. The
  * column registry and cell renderer are exported so the print view renders from
@@ -9,8 +9,8 @@
  */
 
 import { createPortal } from "react-dom";
-import type { OpenBenchmarkId, OpenResult, OpenSlip, TradeRecord } from "@/types";
-import { OPEN_BENCHMARKS } from "@/tca/azOpen";
+import type { OpenBenchmarkId, OpenOrderClass, OpenResult, OpenSlip, TradeRecord } from "@/types";
+import { OPEN_BENCHMARKS, OPEN_ORDER_CLASS_LABEL } from "@/tca/azOpen";
 import { nyTimeOf } from "@/tca/nyTime";
 import { usePortalMenu } from "@/hooks/usePortalMenu";
 import { useCashDisplay } from "@/hooks/useCashDisplay";
@@ -121,7 +121,9 @@ const DEFAULT_HIDDEN: OpenColumnId[] = [
   ...AZ_OPEN_COLUMNS.filter((c) => c.bench?.unit === "px").map((c) => c.id),
 ];
 
-const HIDDEN_KEY = "tca_azopen_cols_hidden_v1";
+// v2: the benchmark set changed, so the v1 hidden list no longer names the
+// price columns — starting over puts them back to hidden by default.
+const HIDDEN_KEY = "tca_azopen_cols_hidden_v2";
 
 export function loadOpenCols(): OpenColumnId[] {
   const defaults = ALL_COLUMN_IDS.filter((id) => !DEFAULT_HIDDEN.includes(id));
@@ -147,6 +149,25 @@ export function saveOpenCols(ids: OpenColumnId[]): void {
   } catch {
     // localStorage unavailable (private browsing) — the setting just won't persist
   }
+}
+
+/**
+ * The visible columns one class's table shows: every non-benchmark column plus
+ * that class's own benchmarks. Shared by the screen and print tables.
+ */
+export function columnsFor(cls: OpenOrderClass, visibleColumns: OpenColumnId[]): OpenColumn[] {
+  return AZ_OPEN_COLUMNS.filter(
+    (c) => visibleColumns.includes(c.id) && (c.bench === undefined || benchGroup(c.bench.id) === cls),
+  );
+}
+
+/** Every column one class's table can show, visible or not — for the picker. */
+function selectableFor(cls: OpenOrderClass): OpenColumn[] {
+  return AZ_OPEN_COLUMNS.filter((c) => c.bench === undefined || benchGroup(c.bench.id) === cls);
+}
+
+function benchGroup(id: OpenBenchmarkId): OpenOrderClass {
+  return OPEN_BENCHMARKS.find((b) => b.id === id)!.group;
 }
 
 // ── Cells ─────────────────────────────────────────────────────────────────────
@@ -280,6 +301,8 @@ export function openCellText(row: OpenTableRow, col: OpenColumn): string | numbe
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface AzOpenOrderTableProps {
+  cls: OpenOrderClass;
+  /** This class's orders only. */
   rows: OpenTableRow[];
   visibleColumns: OpenColumnId[];
   onVisibleColumnsChange: (ids: OpenColumnId[]) => void;
@@ -287,6 +310,7 @@ interface AzOpenOrderTableProps {
 }
 
 export function AzOpenOrderTable({
+  cls,
   rows,
   visibleColumns,
   onVisibleColumnsChange,
@@ -294,7 +318,8 @@ export function AzOpenOrderTable({
 }: AzOpenOrderTableProps) {
   const { open, btnRef, menuRef, pos, toggle } = usePortalMenu("right");
   const cash = useCashDisplay();
-  const cols = AZ_OPEN_COLUMNS.filter((c) => visibleColumns.includes(c.id));
+  const cols = columnsFor(cls, visibleColumns);
+  const title = `Order Detail — ${OPEN_ORDER_CLASS_LABEL[cls]}`;
 
   function toggleColumn(id: OpenColumnId) {
     const next = visibleColumns.includes(id)
@@ -326,7 +351,7 @@ export function AzOpenOrderTable({
           style={{ position: "fixed", top: pos.top, right: pos.right }}
           className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-2 z-50 min-w-[200px] max-h-[70vh] overflow-y-auto"
         >
-          {AZ_OPEN_COLUMNS.map((c) => (
+          {selectableFor(cls).map((c) => (
             <label
               key={c.id}
               className="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer text-xs text-gray-700 dark:text-gray-300 select-none"
@@ -352,7 +377,7 @@ export function AzOpenOrderTable({
 
   if (rows.length === 0) {
     return (
-      <ChartCard title="Order Detail" actions={actions}>
+      <ChartCard title={title} actions={actions}>
         <EmptyState message="No orders to show" />
       </ChartCard>
     );
@@ -360,12 +385,16 @@ export function AzOpenOrderTable({
 
   return (
     <ChartCard
-      title="Order Detail"
-      subtitle="Slippage of each order's average fill against the 09:30 open and arrival benchmarks"
+      title={title}
+      subtitle={
+        cls === "market"
+          ? "Slippage of each order's average fill against the 09:30 and arrival mids"
+          : "Slippage of each order's average fill against the 2- and 4-minute VWAP from 09:30"
+      }
       actions={actions}
     >
-      <div className="overflow-x-auto -mx-4 px-4">
-        <table className="w-full text-xs min-w-[720px]">
+      <div className="overflow-x-auto -mx-4 px-4 print:overflow-visible">
+        <table className="w-full text-xs min-w-[720px] print:min-w-0">
           <thead>
             <tr className="border-b border-gray-100 dark:border-gray-800">
               <th className="pb-2 pr-3 text-left text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide whitespace-nowrap">
@@ -389,7 +418,8 @@ export function AzOpenOrderTable({
               <tr key={row.orderId} className="border-b border-gray-50 dark:border-gray-800/50">
                 <td className="py-2 pr-3 font-semibold text-gray-900 dark:text-white whitespace-nowrap">
                   {row.bbgSymbol}
-                  {row.result.quotesEstimated && (
+                  {/* Only the mids use quotes, so only the market table flags it. */}
+                  {cls === "market" && row.result.quotesEstimated && (
                     <span
                       className="ml-1 text-amber-600 dark:text-amber-400"
                       title="No real Bloomberg quotes for at least one quote benchmark — its bid/ask was estimated from 1-minute bar ranges"
