@@ -127,18 +127,18 @@ export function AzOpenBySymbol({
   return (
     <ChartCard
       title={title}
-      subtitle="Quantity-weighted slippage (bps) and total cash slippage against each benchmark"
+      subtitle="Quantity-weighted and simple average slippage (bps), and total cash slippage, against each benchmark"
       actions={actions}
     >
       <div className="overflow-x-auto -mx-4 px-4 print:overflow-visible">
-        <table className="w-full text-xs min-w-[560px] print:min-w-0">
+        <table className="w-full text-xs min-w-[680px] print:min-w-0">
           <thead>
             <tr>
               <th className={TH} colSpan={3} />
               {benches.map((b) => (
                 <th
                   key={b.id}
-                  colSpan={2}
+                  colSpan={3}
                   title={b.title}
                   className={`${TH} text-center border-l border-gray-100 dark:border-gray-800 pl-3 cursor-help`}
                 >
@@ -226,7 +226,13 @@ export function AzOpenSlippageNote() {
 function SubHeads() {
   return (
     <>
-      <th className={`${TH} border-l border-gray-100 dark:border-gray-800 pl-3`}>bps</th>
+      <th
+        className={`${TH} border-l border-gray-100 dark:border-gray-800 pl-3`}
+        title="Each order weighted by its quantity"
+      >
+        Wtd bps
+      </th>
+      <th className={TH} title="Every order counted once, whatever its size">Avg bps</th>
       <th className={TH}>$</th>
     </>
   );
@@ -239,6 +245,7 @@ function BenchPair({ row, id }: { row: OpenGroupRow; id: OpenBenchmarkId }) {
       <td className="py-2 pr-3 pl-3 border-l border-gray-50 dark:border-gray-800/50">
         <BpsCell v={s.wAvg_bps} />
       </td>
+      <td className="py-2 pr-3"><BpsCell v={s.avg_bps} /></td>
       <td className="py-2 pr-3"><UsdCell v={s.total_usd} currency={row.currency} /></td>
     </>
   );
