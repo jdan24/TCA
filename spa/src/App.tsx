@@ -14,6 +14,7 @@ import { SingleOrderDashboard } from "@/components/dashboard/single/SingleOrderD
 import { SettleDashboard } from "@/components/dashboard/settle/SettleDashboard";
 import { AzOpenDashboard } from "@/components/dashboard/azopen/AzOpenDashboard";
 import { useSymbolMap } from "@/hooks/useSymbolMap";
+import { useAlgoMap } from "@/hooks/useAlgoMap";
 import { CorporateTemplateProvider } from "@/hooks/useCorporateTemplate";
 import { useTCAStore } from "@/store/useTCAStore";
 import { computeAll } from "@/tca/compute";
@@ -42,6 +43,8 @@ function App() {
   const reset = useTCAStore((s) => s.reset);
 
   const symbolMap = useSymbolMap();
+  // AZ Open fetches each order's data by its class, which the algo map decides.
+  const { resolve: resolveAlgo } = useAlgoMap();
 
   // Fetch the privileged sym_mapping.csv from bridge on startup.
   // Uses "base" strategy so existing user mappings always win on conflict.
@@ -145,6 +148,7 @@ function App() {
     const { window, arrival, reference } = await enrichAzOpenBenchmarks(
       scaledTrades,
       symbolMap.resolve,
+      resolveAlgo,
       setEnrichProgress,
     );
     setAzOpenData(window, arrival, reference);

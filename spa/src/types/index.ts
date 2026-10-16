@@ -248,6 +248,14 @@ export interface OpenWindowBenchmark {
   tradesFailed: boolean;
   /** The bid/ask request failed rather than finding no quotes. */
   quoteFailed: boolean;
+  /**
+   * Which halves were requested at all. Trade prints are fetched only for a
+   * (symbol, date) with TWAP/VWAP orders, the quote only for one with market
+   * orders — so an order whose class changed since the fetch can tell its
+   * benchmark was never asked for, rather than that Bloomberg had none.
+   */
+  tradesFetched: boolean;
+  quoteFetched: boolean;
 }
 
 /** The quote in force when an order was created. */
@@ -285,6 +293,11 @@ export interface OpenResult {
   bench: Record<OpenBenchmarkId, OpenSlip>;
   /** True when a quote benchmark came from bar ranges rather than real quotes. */
   quotesEstimated: boolean;
+  /**
+   * The data this order's own benchmarks need was never fetched — its class
+   * changed in the Algo Mapping since the last fetch. Re-fetching fixes it.
+   */
+  needsRefetch: boolean;
   currency: string;
 }
 

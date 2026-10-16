@@ -42,13 +42,19 @@ export const OPEN_VWAP_MINUTES = { vwap2m: 2, vwap4m: 4 } as const;
 /** Length of the fetched window after the open — the longest VWAP. */
 export const OPEN_WINDOW_MIN = OPEN_VWAP_MINUTES.vwap4m;
 /**
- * How far before 09:30 the window fetch starts. The quote in force going into
+ * How far before 09:30 the quote fetch starts. The quote in force going into
  * the open comes from this lead-in, so a market whose quote does not change
  * after 09:30 still has one.
  */
 export const OPEN_LEAD_IN_MIN = 1;
 /** How far before the order's creation the arrival-quote fetch starts. */
 export const ARRIVAL_LEAD_IN_MIN = 2;
+/**
+ * How long after 09:30 the quote fetch runs. Mid @ 09:30 is the first quote
+ * change in [09:30, 09:31), else the quote standing at 09:30 — the minute is
+ * only there to find that first change.
+ */
+export const OPEN_QUOTE_WINDOW_MIN = 1;
 
 /** Display labels, shared by every surface that names a benchmark. */
 export const OPEN_BENCHMARKS: ReadonlyArray<{
@@ -94,11 +100,19 @@ export function openDateOf(trade: TradeRecord): string {
   return nyDateOf(trade.firstFillTime);
 }
 
-/** [09:30, 09:34) NY on a date, as UTC instants; null for an unparseable date. */
-export function openWindowOf(nyDate: string): { start: Date; end: Date } | null {
+/**
+ * The open on a date, as UTC instants; null for an unparseable date.
+ * `end` closes the VWAP window [09:30, 09:34); `quoteEnd` closes the 09:30
+ * quote search [09:30, 09:31).
+ */
+export function openWindowOf(nyDate: string): { start: Date; end: Date; quoteEnd: Date } | null {
   const start = nyWallClockToUtc(nyDate, OPEN_HOUR, OPEN_MINUTE);
   if (start === null) return null;
-  return { start, end: new Date(start.getTime() + OPEN_WINDOW_MIN * 60_000) };
+  return {
+    start,
+    end: new Date(start.getTime() + OPEN_WINDOW_MIN * 60_000),
+    quoteEnd: new Date(start.getTime() + OPEN_QUOTE_WINDOW_MIN * 60_000),
+  };
 }
 
 export function openWindowKey(bbgSymbol: string, nyDate: string): string {
@@ -112,6 +126,10 @@ export function arrivalKey(bbgSymbol: string, orderTime: Date): string {
 export interface OpenWindowRequest {
   bbgSymbol: string;
   nyDate: string;
+  /** Some TWAP/VWAP order trades this open: fetch trade prints for the VWAPs. */
+  needTrades: boolean;
+  /** Some market order trades this open: fetch the 09:30 quote. */
+  needQuote: boolean;
 }
 
 export interface ArrivalRequest {
@@ -119,32 +137,45 @@ export interface ArrivalRequest {
   orderTime: Date;
 }
 
-/** The distinct (symbol, date) pairs a set of trades needs fetched. */
+/**
+ * The distinct (symbol, date) pairs a set of trades needs fetched, and which
+ * half of each: trade prints only where TWAP/VWAP orders traded, the quote only
+ * where market orders did. A pair with both kinds of order fetches both.
+ */
 export function requiredOpenWindows(
   trades: TradeRecord[],
   resolveSymbol: (ric: string) => string,
+  classOf: (trade: TradeRecord) => OpenOrderClass,
 ): OpenWindowRequest[] {
-  const seen = new Set<string>();
-  const out: OpenWindowRequest[] = [];
+  const byKey = new Map<string, OpenWindowRequest>();
   for (const t of trades) {
     const bbgSymbol = resolveSymbol(t.symbol);
     const nyDate = openDateOf(t);
     const key = openWindowKey(bbgSymbol, nyDate);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ bbgSymbol, nyDate });
+    let req = byKey.get(key);
+    if (!req) {
+      req = { bbgSymbol, nyDate, needTrades: false, needQuote: false };
+      byKey.set(key, req);
+    }
+    if (classOf(t) === "algo") req.needTrades = true;
+    else req.needQuote = true;
   }
-  return out;
+  return [...byKey.values()];
 }
 
-/** The distinct (symbol, creation time) pairs a set of trades needs fetched. */
+/**
+ * The distinct (symbol, creation time) pairs a set of trades needs fetched —
+ * market orders only, the arrival mid being a market-order benchmark.
+ */
 export function requiredArrivalQuotes(
   trades: TradeRecord[],
   resolveSymbol: (ric: string) => string,
+  classOf: (trade: TradeRecord) => OpenOrderClass,
 ): ArrivalRequest[] {
   const seen = new Set<string>();
   const out: ArrivalRequest[] = [];
   for (const t of trades) {
+    if (classOf(t) !== "market") continue;
     if (isNaN(t.orderTime.getTime())) continue;
     const bbgSymbol = resolveSymbol(t.symbol);
     const key = arrivalKey(bbgSymbol, t.orderTime);
@@ -245,6 +276,7 @@ export function computeOpenResults(
       return { price, bps: s.bps, usd: s.usd, failed: price === null && failed };
     };
 
+    const orderClass = orderClassOf(trade.algo, resolveAlgo);
     const quote0930 = win?.quote ?? null;
     const quoteArr = arr?.quote ?? null;
     const tradesFailed = win?.tradesFailed === true;
@@ -254,7 +286,7 @@ export function computeOpenResults(
     return {
       orderId: trade.orderId,
       nyDate,
-      orderClass: orderClassOf(trade.algo, resolveAlgo),
+      orderClass,
       bench: {
         vwap2m:     slip(win?.vwap2m ?? null, tradesFailed),
         vwap4m:     slip(win?.vwap4m ?? null, tradesFailed),
@@ -264,6 +296,14 @@ export function computeOpenResults(
       quotesEstimated:
         (quote0930 !== null && win?.quoteSource === "bars") ||
         (quoteArr !== null && arr?.quoteSource === "bars"),
+      // Fetched data exists for this open, but not the half this order's class
+      // is scored on — its class changed since the fetch. An order with no
+      // window at all is the symbol-mapping banner's case, not this one.
+      needsRefetch:
+        win !== undefined &&
+        (orderClass === "algo"
+          ? !win.tradesFetched
+          : !win.quoteFetched || (!isNaN(trade.orderTime.getTime()) && arr === undefined)),
       // Bloomberg's quote currency when known, else the file's — the point value
       // is denominated in it.
       currency: currencyFor(trade.symbol) ?? trade.currency,

@@ -237,6 +237,9 @@ export function AzOpenDashboard({
     benchmarksFor(r.orderClass).some((b) => r.bench[b.id].failed),
   ).length;
   const estimated = results.filter((r) => r.quotesEstimated).length;
+  // Orders whose class changed in the Algo Mapping since the fetch, so the data
+  // their benchmarks need was never requested.
+  const needsRefetch = results.filter((r) => r.needsRefetch).length;
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 py-6 space-y-4">
@@ -265,6 +268,15 @@ export function AzOpenDashboard({
               title="Bloomberg had no real quotes for these orders' 09:30 or arrival instant, so the bid/ask was estimated from 1-minute bar ranges"
             >
               &middot; {estimated} with estimated quotes
+            </span>
+          )}
+          {needsRefetch > 0 && (
+            <span
+              className="text-amber-600 dark:text-amber-400"
+              title="The fetch only pulls what each order is scored on — trade prints for TWAP/VWAP orders, quotes for market orders. These orders changed class in the Algo Mapping since then, so their benchmarks show N/A until you re-fetch."
+            >
+              &middot; {needsRefetch} order{needsRefetch !== 1 ? "s" : ""} changed class since
+              the last fetch — re-fetch to score {needsRefetch !== 1 ? "them" : "it"}
             </span>
           )}
         </div>

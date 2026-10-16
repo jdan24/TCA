@@ -9,16 +9,23 @@
  *
  * Three kinds of call:
  *
- *   window  — trade ticks and bid/ask ticks over [09:29, 09:34) NY, once per
- *             (symbol, date), for the 2- and 4-minute VWAPs and the 09:30 mid.
- *             The minute before the open supplies the quote in force going in.
+ *   window  — once per (symbol, date), and only the halves its orders use:
+ *             trade ticks over [09:30, 09:34) NY for the 2- and 4-minute VWAPs
+ *             when TWAP/VWAP orders traded that open, and bid/ask ticks over
+ *             [09:29, 09:31) for the 09:30 mid when market orders did. The
+ *             minute before the open supplies the quote in force going in.
  *   arrival — bid/ask ticks over the two minutes up to each distinct
- *             (symbol, order creation time), for the arrival mid.
+ *             (symbol, order creation time) of a market order, for the arrival
+ *             mid. TWAP/VWAP orders are not scored on it and skip it.
+ *
+ * Which orders are which comes from the Algo Mapping at fetch time; an order
+ * reclassified afterwards is flagged for a re-fetch (OpenResult.needsRefetch).
  *   reference — point value, currency and tick size, once per symbol.
  */
 
 import type {
   ArrivalQuote,
+  BenchmarkKind,
   BidAskTick,
   OpenWindowBenchmark,
   TradeRecord,
@@ -32,6 +39,7 @@ import {
   OPEN_VWAP_MINUTES,
   openWindowKey,
   openWindowOf,
+  orderClassOf,
   requiredArrivalQuotes,
   requiredOpenWindows,
   tickVwap,
@@ -100,30 +108,42 @@ async function fetchTrades(
 async function fetchOpenWindow({
   bbgSymbol,
   nyDate,
+  needTrades,
+  needQuote,
 }: OpenWindowRequest): Promise<OpenWindowBenchmark> {
+  const empty: OpenWindowBenchmark = {
+    vwap2m: null,
+    vwap4m: null,
+    quote: null,
+    quoteSource: null,
+    tradesFailed: false,
+    quoteFailed: false,
+    tradesFetched: needTrades,
+    quoteFetched: needQuote,
+  };
   const win = openWindowOf(nyDate);
   // An unparseable date is our problem, not a failed request — nothing to retry.
-  if (win === null) {
-    return { vwap2m: null, vwap4m: null, quote: null, quoteSource: null, tradesFailed: false, quoteFailed: false };
-  }
-  const from = new Date(win.start.getTime() - OPEN_LEAD_IN_MIN * 60_000);
+  if (win === null) return empty;
+  const out = { ...empty };
 
   // Sequential within one key: the pool already keeps four keys in flight, and
   // doubling up here would put the browser's per-host connection cap back in play.
-  const trades = await fetchTrades(bbgSymbol, from, win.end);
-  const quotes = await fetchQuotes(bbgSymbol, from, win.end);
-  const quote = toQuotePair(firstQuoteAtOrAfter(quotes.ticks, win.start, win.end));
-
-  const after = (min: number) => new Date(win.start.getTime() + min * 60_000);
-
-  return {
-    vwap2m: tickVwap(trades.ticks, win.start, after(OPEN_VWAP_MINUTES.vwap2m)),
-    vwap4m: tickVwap(trades.ticks, win.start, after(OPEN_VWAP_MINUTES.vwap4m)),
-    quote,
-    quoteSource: quote === null ? null : quotes.source,
-    tradesFailed: trades.failed,
-    quoteFailed: quotes.failed,
-  };
+  if (needTrades) {
+    const trades = await fetchTrades(bbgSymbol, win.start, win.end);
+    const after = (min: number) => new Date(win.start.getTime() + min * 60_000);
+    out.vwap2m = tickVwap(trades.ticks, win.start, after(OPEN_VWAP_MINUTES.vwap2m));
+    out.vwap4m = tickVwap(trades.ticks, win.start, after(OPEN_VWAP_MINUTES.vwap4m));
+    out.tradesFailed = trades.failed;
+  }
+  if (needQuote) {
+    const from = new Date(win.start.getTime() - OPEN_LEAD_IN_MIN * 60_000);
+    const quotes = await fetchQuotes(bbgSymbol, from, win.quoteEnd);
+    const quote = toQuotePair(firstQuoteAtOrAfter(quotes.ticks, win.start, win.quoteEnd));
+    out.quote = quote;
+    out.quoteSource = quote === null ? null : quotes.source;
+    out.quoteFailed = quotes.failed;
+  }
+  return out;
 }
 
 async function fetchArrival({ bbgSymbol, orderTime }: ArrivalRequest): Promise<ArrivalQuote> {
@@ -137,14 +157,16 @@ async function fetchArrival({ bbgSymbol, orderTime }: ArrivalRequest): Promise<A
 export async function enrichAzOpenBenchmarks(
   trades: TradeRecord[],
   resolveSymbol: (ric: string) => string,
+  resolveAlgo: (algo: string | null) => BenchmarkKind,
   onProgress?: (p: SettleProgress) => void,
 ): Promise<AzOpenEnrichment> {
   const window: Record<string, OpenWindowBenchmark> = {};
   const arrival: Record<string, ArrivalQuote> = {};
   const reference: Record<string, Record<string, unknown>> = {};
 
-  const windows = requiredOpenWindows(trades, resolveSymbol);
-  const arrivals = requiredArrivalQuotes(trades, resolveSymbol);
+  const classOf = (t: TradeRecord) => orderClassOf(t.algo, resolveAlgo);
+  const windows = requiredOpenWindows(trades, resolveSymbol, classOf);
+  const arrivals = requiredArrivalQuotes(trades, resolveSymbol, classOf);
   const symbols = [...new Set(trades.map((t) => resolveSymbol(t.symbol)))];
 
   const total = symbols.length + windows.length + arrivals.length;
@@ -191,26 +213,34 @@ export async function enrichAzOpenBenchmarks(
   // might be retryable. Progress is not stepped — the bar has already finished.
   const missingWindows = windows.filter((req) => {
     const w = window[openWindowKey(req.bbgSymbol, req.nyDate)];
-    return w === undefined || w.vwap4m === null || w.quote === null;
+    return (
+      w === undefined ||
+      (req.needTrades && w.vwap4m === null) ||
+      (req.needQuote && w.quote === null)
+    );
   });
   if (missingWindows.length > 0) {
     await mapPooled(missingWindows, MAX_IN_FLIGHT, async (req) => {
       const key = openWindowKey(req.bbgSymbol, req.nyDate);
       const prev = window[key];
-      const next = await fetchOpenWindow(req);
-      // Keep whichever half the first pass already got right.
-      window[key] =
-        prev === undefined
-          ? next
-          : {
-              // Both VWAPs come from one trade fetch: keep or replace them together.
-              vwap2m: prev.vwap4m !== null ? prev.vwap2m : next.vwap2m,
-              vwap4m: prev.vwap4m ?? next.vwap4m,
-              tradesFailed: prev.vwap4m !== null ? false : next.tradesFailed,
-              quote: prev.quote ?? next.quote,
-              quoteSource: prev.quote !== null ? prev.quoteSource : next.quoteSource,
-              quoteFailed: prev.quote !== null ? false : next.quoteFailed,
-            };
+      if (prev === undefined) {
+        window[key] = await fetchOpenWindow(req);
+        return;
+      }
+      // Re-request only the half that came back empty; keep the other as is.
+      const redoTrades = req.needTrades && prev.vwap4m === null;
+      const redoQuote = req.needQuote && prev.quote === null;
+      const next = await fetchOpenWindow({ ...req, needTrades: redoTrades, needQuote: redoQuote });
+      window[key] = {
+        ...(redoTrades
+          ? { vwap2m: next.vwap2m, vwap4m: next.vwap4m, tradesFailed: next.tradesFailed }
+          : { vwap2m: prev.vwap2m, vwap4m: prev.vwap4m, tradesFailed: prev.tradesFailed }),
+        ...(redoQuote
+          ? { quote: next.quote, quoteSource: next.quoteSource, quoteFailed: next.quoteFailed }
+          : { quote: prev.quote, quoteSource: prev.quoteSource, quoteFailed: prev.quoteFailed }),
+        tradesFetched: req.needTrades,
+        quoteFetched: req.needQuote,
+      };
     });
   }
 
