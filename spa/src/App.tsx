@@ -145,13 +145,13 @@ function App() {
   async function handleFetchAzOpen() {
     if (rawTrades.length === 0 || !bloombergConnected || enrichProgress !== null) return;
     setEnrichProgress({ done: 0, total: 1 });
-    const { window, arrival, reference } = await enrichAzOpenBenchmarks(
+    const { window, arrival, reference, rollLeg } = await enrichAzOpenBenchmarks(
       scaledTrades,
       symbolMap.resolve,
       resolveAlgo,
       setEnrichProgress,
     );
-    setAzOpenData(window, arrival, reference);
+    setAzOpenData(window, arrival, reference, rollLeg);
     await refreshFxRates([
       ...Object.values(reference).map((r) => toMajorCurrency(r["CRNCY"]) ?? ""),
       ...scaledTrades.map((t) => t.currency),

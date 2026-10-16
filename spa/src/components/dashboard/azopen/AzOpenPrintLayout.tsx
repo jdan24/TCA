@@ -17,10 +17,16 @@
 import { useEffect } from "react";
 import type { OpenOrderClass } from "@/types";
 import type { OpenGroupRow } from "@/tca/azOpenAggregate";
-import { OPEN_ORDER_CLASS_LABEL } from "@/tca/azOpen";
+import { OPEN_ORDER_CLASS_LABEL, OPEN_REPORT_TITLE } from "@/tca/azOpen";
 import { useCorporateTemplate } from "@/hooks/useCorporateTemplate";
 import { columnsFor, renderOpenCell, type OpenColumnId, type OpenTableRow } from "./AzOpenOrderTable";
-import { AzOpenBenchmarkSummary, AzOpenBySymbol, AzOpenSlippageNote } from "./AzOpenSummary";
+import {
+  AzOpenBenchmarkSummary,
+  AzOpenByMonth,
+  AzOpenBySymbol,
+  AzOpenSlippageNote,
+  AzOpenTopBottom,
+} from "./AzOpenSummary";
 
 /** Letter landscape less the @page side margins — see SettlePrintLayout. */
 const PRINT_PAGE_WIDTH_PX = 920;
@@ -37,12 +43,17 @@ const ORDER_CLASSES: readonly OpenOrderClass[] = ["market", "algo"];
 export interface OpenClassSection {
   overall: OpenGroupRow;
   bySymbol: OpenGroupRow[];
+  /** Best and worst orders by cash slippage vs the class's primary benchmark. */
+  topBottom: { best: OpenTableRow[]; worst: OpenTableRow[] };
   /** This class's orders only. */
   rows: OpenTableRow[];
 }
 
 interface AzOpenPrintLayoutProps {
   sections: Record<OpenOrderClass, OpenClassSection>;
+  byMonth: OpenGroupRow[];
+  /** Whether roll trades are in the report — stated on the paper. */
+  includeRolls: boolean;
   /** Every order, for the header count and date range. */
   rows: OpenTableRow[];
   visibleColumns: OpenColumnId[];
@@ -51,6 +62,8 @@ interface AzOpenPrintLayoutProps {
 
 export function AzOpenPrintLayout({
   sections,
+  byMonth,
+  includeRolls,
   rows,
   visibleColumns,
   onBack,
@@ -75,12 +88,24 @@ export function AzOpenPrintLayout({
       : dates.length === 1
         ? dates[0]!
         : `${dates[0]} to ${dates[dates.length - 1]}`;
+  const rollsText = includeRolls ? "Rolls included" : "Rolls excluded";
+
+  // The browser names a saved PDF after the document title, so set it while
+  // this view is up and put the previous one back on the way out.
+  const pdfTitle = [OPEN_REPORT_TITLE, dateRange, `(${rollsText.toLowerCase()})`]
+    .filter(Boolean)
+    .join(" ");
+  useEffect(() => {
+    const previous = document.title;
+    document.title = pdfTitle;
+    return () => { document.title = previous; };
+  }, [pdfTitle]);
 
   return (
     <div className="settle-print bg-white text-gray-900">
       {/* ── Screen-only controls ─────────────────────────────────────────── */}
       <div className="print:hidden sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-gray-200 bg-white px-6 py-3">
-        <p className="text-sm font-semibold">Print Layout — AZ Open</p>
+        <p className="text-sm font-semibold">Print Layout — {OPEN_REPORT_TITLE}</p>
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -106,10 +131,11 @@ export function AzOpenPrintLayout({
             <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500">
               {reportTitle || "Transaction Cost Analysis"}
             </p>
-            <h1 className="mt-1 text-xl font-semibold">AZ Open — 09:30 Cash Open</h1>
+            <h1 className="mt-1 text-xl font-semibold">{OPEN_REPORT_TITLE}</h1>
             <p className="mt-1 text-xs text-gray-500">
               {rows.length.toLocaleString()} order{rows.length !== 1 ? "s" : ""}
               {dateRange && <> &middot; {dateRange}</>}
+              {" "}&middot; {rollsText}
             </p>
           </div>
           {logoDataUrl && <img src={logoDataUrl} alt="" className="h-10 w-auto object-contain" />}
@@ -140,6 +166,13 @@ export function AzOpenPrintLayout({
             Mapping settings; every other order, including one with no algo, is a market
             order. Slippage is positive when the execution cost money against the benchmark.
           </p>
+          <p className="mt-2 text-xs text-gray-600">
+            <span className="font-semibold text-gray-900">Amount</span> is the notional traded:
+            quantity &times; price &times; contract point value.{" "}
+            <span className="font-semibold text-gray-900">Rolls</span> are calendar-spread
+            orders; their notional uses the front-month contract&rsquo;s price at the open.
+            This report has {rollsText.toLowerCase()}.
+          </p>
         </div>
 
         {present.map((cls) => (
@@ -153,7 +186,19 @@ export function AzOpenPrintLayout({
           </div>
         ))}
 
+        <div className="break-inside-avoid"><AzOpenByMonth rows={byMonth} /></div>
+
         <div className="break-inside-avoid"><AzOpenSlippageNote /></div>
+
+        {present.map((cls) => (
+          <div key={`top-${cls}`} className="break-inside-avoid">
+            <AzOpenTopBottom
+              cls={cls}
+              best={sections[cls].topBottom.best}
+              worst={sections[cls].topBottom.worst}
+            />
+          </div>
+        ))}
 
         {/* ── Order detail ───────────────────────────────────────────────── */}
         {present.map((cls) => (

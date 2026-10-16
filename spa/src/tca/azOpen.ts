@@ -24,6 +24,7 @@ import type {
   BidAskTick,
   OpenBenchmarkId,
   OpenOrderClass,
+  OpenRollLegPrice,
   OpenResult,
   OpenSlip,
   OpenWindowBenchmark,
@@ -34,6 +35,9 @@ import type {
 import { nyDateOf, nyWallClockToUtc } from "./nyTime";
 import { quoteAtOrBefore } from "./spread";
 import { computeSettleSlippage } from "./settle";
+
+/** The report's client-facing name (AIM = Allianz Investment Management). */
+export const OPEN_REPORT_TITLE = "AIM LLC Trades — 09:30 Cash Open";
 
 export const OPEN_HOUR = 9;
 export const OPEN_MINUTE = 30;
@@ -75,6 +79,12 @@ export function benchmarksFor(cls: OpenOrderClass) {
   return OPEN_BENCHMARKS.filter((b) => b.group === cls);
 }
 
+/** The benchmark each class is ranked on for the Top/Bottom 5 tables. */
+export const PRIMARY_BENCHMARK: Record<OpenOrderClass, OpenBenchmarkId> = {
+  market: "midArrival",
+  algo: "vwap4m",
+};
+
 export const OPEN_ORDER_CLASS_LABEL: Record<OpenOrderClass, string> = {
   market: "Market Orders",
   algo: "TWAP/VWAP Orders",
@@ -91,6 +101,62 @@ export function orderClassOf(
 ): OpenOrderClass {
   const kind = resolve(algo);
   return kind === "twap" || kind === "vwap" ? "algo" : "market";
+}
+
+// ── Rolls ─────────────────────────────────────────────────────────────────────
+
+/** Same root, two month/year codes: "ESZ6ESH7". Groups: root, front, back. */
+const ROLL_TICKER_RE = /^([A-Z0-9]+?)([FGHJKMNQUVXZ]\d{1,2})\1([FGHJKMNQUVXZ]\d{1,2})$/;
+
+/**
+ * A roll is a calendar-spread order. Returns its front-month leg as a Bloomberg
+ * symbol ("ESZ6ESH7 Index" → "ESZ6 Index"), or null for an outright.
+ */
+export function rollLegsOf(bbgSymbol: string): { front: string } | null {
+  const [ticker = "", ...rest] = bbgSymbol.trim().split(/\s+/);
+  const m = ROLL_TICKER_RE.exec(ticker.toUpperCase());
+  if (m === null) return null;
+  return { front: [`${m[1]}${m[2]}`, ...rest].join(" ") };
+}
+
+export function isRollSymbol(bbgSymbol: string): boolean {
+  return rollLegsOf(bbgSymbol) !== null;
+}
+
+export interface RollLegRequest {
+  /** The front-month leg's Bloomberg symbol. */
+  bbgSymbol: string;
+  nyDate: string;
+}
+
+export function rollLegKey(frontSymbol: string, nyDate: string): string {
+  return `${frontSymbol}|${nyDate}`;
+}
+
+/** The distinct (front leg, date) pairs the roll orders need priced. */
+export function requiredRollLegs(
+  trades: TradeRecord[],
+  resolveSymbol: (ric: string) => string,
+): RollLegRequest[] {
+  const byKey = new Map<string, RollLegRequest>();
+  for (const t of trades) {
+    const legs = rollLegsOf(resolveSymbol(t.symbol));
+    if (legs === null) continue;
+    const nyDate = openDateOf(t);
+    byKey.set(rollLegKey(legs.front, nyDate), { bbgSymbol: legs.front, nyDate });
+  }
+  return [...byKey.values()];
+}
+
+/** "2026-04" → "April 2026". */
+export function monthLabel(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  if (!y || !m) return month;
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 // ── Dates and keys ────────────────────────────────────────────────────────────
@@ -255,6 +321,7 @@ export function computeOpenResults(
   pointValueFor: (ric: string) => number | null,
   resolveAlgo: (algo: string | null) => BenchmarkKind,
   currencyFor: (ric: string) => string | null = () => null,
+  rollLegs: Record<string, OpenRollLegPrice> = {},
 ): OpenResult[] {
   return trades.map((trade) => {
     const bbgSymbol = resolveSymbol(trade.symbol);
@@ -277,6 +344,15 @@ export function computeOpenResults(
     };
 
     const orderClass = orderClassOf(trade.algo, resolveAlgo);
+    const legs = rollLegsOf(bbgSymbol);
+    // A roll's own price is the gap between its months; its size is the front
+    // leg's. Notional is unsigned: it says how much was traded, not which way.
+    const notionalPrice =
+      legs === null ? trade.avgFillPrice : rollLegs[rollLegKey(legs.front, nyDate)]?.price ?? null;
+    const notional =
+      pointValue === null || notionalPrice === null || !isFinite(notionalPrice)
+        ? null
+        : Math.abs(trade.orderQty * notionalPrice * pointValue);
     const quote0930 = win?.quote ?? null;
     const quoteArr = arr?.quote ?? null;
     const tradesFailed = win?.tradesFailed === true;
@@ -286,6 +362,9 @@ export function computeOpenResults(
     return {
       orderId: trade.orderId,
       nyDate,
+      month: nyDate.slice(0, 7),
+      isRoll: legs !== null,
+      notional,
       orderClass,
       bench: {
         vwap2m:     slip(win?.vwap2m ?? null, tradesFailed),

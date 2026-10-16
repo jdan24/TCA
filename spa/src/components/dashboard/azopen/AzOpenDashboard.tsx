@@ -16,8 +16,19 @@
 import { useMemo, useState } from "react";
 import type { OpenOrderClass, TradeRecord } from "@/types";
 import type { SettleProgress } from "@/bloomberg/settleService";
-import { benchmarksFor, computeOpenResults, OPEN_ORDER_CLASS_LABEL } from "@/tca/azOpen";
-import { buildOpenBySymbol, buildOpenOverall } from "@/tca/azOpenAggregate";
+import {
+  benchmarksFor,
+  computeOpenResults,
+  isRollSymbol,
+  OPEN_ORDER_CLASS_LABEL,
+  OPEN_REPORT_TITLE,
+} from "@/tca/azOpen";
+import {
+  buildOpenByMonth,
+  buildOpenBySymbol,
+  buildOpenOverall,
+  buildTopBottom,
+} from "@/tca/azOpenAggregate";
 import { toGenericTicker } from "@/tca/genericTicker";
 import { buildPointValueResolver } from "@/tca/pointValue";
 import {
@@ -30,7 +41,13 @@ import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { useAlgoMap } from "@/hooks/useAlgoMap";
 import { useCashDisplay } from "@/hooks/useCashDisplay";
 import { useTCAStore } from "@/store/useTCAStore";
-import { AzOpenBenchmarkSummary, AzOpenBySymbol, AzOpenSlippageNote } from "./AzOpenSummary";
+import {
+  AzOpenBenchmarkSummary,
+  AzOpenByMonth,
+  AzOpenBySymbol,
+  AzOpenSlippageNote,
+  AzOpenTopBottom,
+} from "./AzOpenSummary";
 import {
   AZ_OPEN_COLUMNS,
   AzOpenOrderTable,
@@ -54,6 +71,16 @@ interface AzOpenDashboardProps {
 }
 
 const GROUP_GENERIC_KEY = "tca_azopen_generic_v1";
+const INCLUDE_ROLLS_KEY = "tca_azopen_include_rolls_v1";
+
+/** Rolls are included unless the user has switched them off. */
+function loadIncludeRolls(): boolean {
+  try {
+    return localStorage.getItem(INCLUDE_ROLLS_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
 
 function loadGroupGeneric(): boolean {
   try {
@@ -80,14 +107,24 @@ export function AzOpenDashboard({
   const windows = useTCAStore((s) => s.azOpenWindow);
   const arrivals = useTCAStore((s) => s.azOpenArrival);
   const reference = useTCAStore((s) => s.azOpenReference);
+  const rollLegs = useTCAStore((s) => s.azOpenRollLeg);
 
   const [showPrint, setShowPrint] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<OpenColumnId[]>(loadOpenCols);
   const [groupGeneric, setGroupGeneric] = useState<boolean>(loadGroupGeneric);
+  const [includeRolls, setIncludeRolls] = useState<boolean>(loadIncludeRolls);
 
   function changeColumns(ids: OpenColumnId[]) {
     setVisibleColumns(ids);
     saveOpenCols(ids);
+  }
+  function changeIncludeRolls(v: boolean) {
+    setIncludeRolls(v);
+    try {
+      localStorage.setItem(INCLUDE_ROLLS_KEY, String(v));
+    } catch {
+      // localStorage unavailable — the setting just won't persist
+    }
   }
   function changeGroupGeneric(v: boolean) {
     setGroupGeneric(v);
@@ -127,18 +164,30 @@ export function AzOpenDashboard({
     [reference, resolveSymbol],
   );
 
+  // Rolls (calendar-spread orders) can be taken out of the whole report — every
+  // table, the print view and the CSV — to see how much they move the figures.
+  const rollCount = useMemo(
+    () => trades.filter((t) => isRollSymbol(resolveSymbol(t.symbol))).length,
+    [trades, resolveSymbol],
+  );
+  const reportTrades = useMemo(
+    () => (includeRolls ? trades : trades.filter((t) => !isRollSymbol(resolveSymbol(t.symbol)))),
+    [trades, includeRolls, resolveSymbol],
+  );
+
   const results = useMemo(
     () =>
       computeOpenResults(
-        trades,
+        reportTrades,
         windows,
         arrivals,
         resolveSymbol,
         pointValueFor,
         resolveAlgo,
         currencyFor,
+        rollLegs,
       ),
-    [trades, windows, arrivals, resolveSymbol, pointValueFor, resolveAlgo, currencyFor],
+    [reportTrades, windows, arrivals, resolveSymbol, pointValueFor, resolveAlgo, currencyFor, rollLegs],
   );
 
   const symbolKeyFor = useMemo(
@@ -148,8 +197,8 @@ export function AzOpenDashboard({
   );
 
   const tableRows = useMemo(
-    () => buildOpenRows(trades, results, resolveSymbol),
-    [trades, results, resolveSymbol],
+    () => buildOpenRows(reportTrades, results, resolveSymbol),
+    [reportTrades, results, resolveSymbol],
   );
 
   // One section per order class: its summary, per-instrument rows and orders.
@@ -159,17 +208,30 @@ export function AzOpenDashboard({
         ORDER_CLASSES.map((cls): [OpenOrderClass, OpenClassSection] => [
           cls,
           {
-            overall: buildOpenOverall(trades, results, cls, cash),
-            bySymbol: buildOpenBySymbol(trades, results, cls, symbolKeyFor, cash),
+            overall: buildOpenOverall(reportTrades, results, cls, cash),
+            bySymbol: buildOpenBySymbol(reportTrades, results, cls, symbolKeyFor, cash),
+            topBottom: buildTopBottom(tableRows, cls, cash),
             rows: tableRows.filter((r) => r.result.orderClass === cls),
           },
         ]),
       ) as Record<OpenOrderClass, OpenClassSection>,
-    [trades, results, symbolKeyFor, cash, tableRows],
+    [reportTrades, results, symbolKeyFor, cash, tableRows],
+  );
+
+  const byMonth = useMemo(
+    () => buildOpenByMonth(reportTrades, results, cash),
+    [reportTrades, results, cash],
   );
 
   function handleExportCsv() {
-    const cols = AZ_OPEN_COLUMNS.filter((c) => visibleColumns.includes(c.id));
+    // Month, Roll and Amount always lead, so the file sorts for top/bottom
+    // trades whatever columns are on screen; they are not repeated after.
+    const fixed = new Set<OpenColumnId>(["month", "isRoll", "amount"]);
+    const lead = AZ_OPEN_COLUMNS.filter((c) => fixed.has(c.id));
+    const cols = [
+      ...lead,
+      ...AZ_OPEN_COLUMNS.filter((c) => visibleColumns.includes(c.id) && !fixed.has(c.id)),
+    ];
     const esc = (v: string | number | null): string => {
       if (v === null) return "";
       const s = String(v);
@@ -187,7 +249,7 @@ export function AzOpenDashboard({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `az-open_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `aim-llc-trades_${includeRolls ? "rolls-included" : "rolls-excluded"}_${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -198,6 +260,8 @@ export function AzOpenDashboard({
     return (
       <AzOpenPrintLayout
         sections={sections}
+        byMonth={byMonth}
+        includeRolls={includeRolls}
         rows={tableRows}
         visibleColumns={visibleColumns}
         onBack={() => setShowPrint(false)}
@@ -246,8 +310,9 @@ export function AzOpenDashboard({
       {/* ── Toolbar ─────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="font-semibold text-gray-900 dark:text-white">
-            {trades.length.toLocaleString()} order{trades.length !== 1 ? "s" : ""}
+          <span className="font-semibold text-gray-900 dark:text-white">{OPEN_REPORT_TITLE}</span>
+          <span className="text-gray-500 dark:text-gray-400">
+            &middot; {reportTrades.length.toLocaleString()} order{reportTrades.length !== 1 ? "s" : ""}
           </span>
           {benchmarkCount > 0 && (
             <span className="text-gray-400 dark:text-gray-500">
@@ -308,6 +373,31 @@ export function AzOpenDashboard({
             </span>
           )}
 
+          {rollCount > 0 && (
+            <div className="flex items-center gap-2">
+              <span
+                className="text-[11px] text-gray-400 dark:text-gray-500"
+                title="Roll trades are calendar-spread orders. Excluding them takes them out of every table, the print layout and the CSV."
+              >
+                Rolls ({rollCount})
+              </span>
+              <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <ToggleButton
+                  label="Included"
+                  title="Count roll trades in every table"
+                  active={includeRolls}
+                  onClick={() => changeIncludeRolls(true)}
+                />
+                <ToggleButton
+                  label="Excluded"
+                  title="Leave roll trades out of every table"
+                  active={!includeRolls}
+                  onClick={() => changeIncludeRolls(false)}
+                />
+              </div>
+            </div>
+          )}
+
           <button
             type="button"
             onClick={() => setShowPrint(true)}
@@ -340,7 +430,18 @@ export function AzOpenDashboard({
         />
       ))}
 
+      <AzOpenByMonth rows={byMonth} />
+
       <AzOpenSlippageNote />
+
+      {ORDER_CLASSES.map((cls) => (
+        <AzOpenTopBottom
+          key={cls}
+          cls={cls}
+          best={sections[cls].topBottom.best}
+          worst={sections[cls].topBottom.worst}
+        />
+      ))}
 
       {ORDER_CLASSES.map((cls) => (
         <AzOpenOrderTable

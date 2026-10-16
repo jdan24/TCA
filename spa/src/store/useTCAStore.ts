@@ -4,6 +4,7 @@ import type {
   BloombergEnrichment,
   TCAMode,
   ArrivalQuote,
+  OpenRollLegPrice,
   OpenWindowBenchmark,
   SettleBenchmark,
   SettleTolerance,
@@ -35,6 +36,7 @@ const initialState = {
   azOpenWindow: {} as Record<string, OpenWindowBenchmark>,
   azOpenArrival: {} as Record<string, ArrivalQuote>,
   azOpenReference: {} as Record<string, Record<string, unknown>>,
+  azOpenRollLeg: {} as Record<string, OpenRollLegPrice>,
   fxRates: {},
 };
 
@@ -59,8 +61,13 @@ export const useTCAStore = create<TCAStore>((set) => ({
   setSettleData: (benchmarks, reference) =>
     set({ settleBenchmarks: benchmarks, settleReference: reference }),
   setSettleTolerance: (t) => set({ settleTolerance: t }),
-  setAzOpenData: (window, arrival, reference) =>
-    set({ azOpenWindow: window, azOpenArrival: arrival, azOpenReference: reference }),
+  setAzOpenData: (window, arrival, reference, rollLeg) =>
+    set({
+      azOpenWindow: window,
+      azOpenArrival: arrival,
+      azOpenReference: reference,
+      azOpenRollLeg: rollLeg,
+    }),
   setFxRates: (r) => set({ fxRates: r }),
   reset: () => set(initialState),
 }));

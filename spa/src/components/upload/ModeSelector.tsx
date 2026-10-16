@@ -5,7 +5,7 @@
  *   • Multi-order TCA (aggregate analytics across a portfolio of orders)
  *   • Single-order TCA (slice-level analysis for one parent order)
  *   • Allianz Target Settle (orders measured against the 3PM / 4PM prints)
- *   • AZ Open (futures orders measured against the 09:30 NY cash open)
+ *   • AIM LLC Trades — AZ Open (futures orders measured against the 09:30 NY cash open)
  *
  * The selected card gains a blue ring; the choice is persisted in the store.
  */
@@ -66,7 +66,7 @@ export function ModeSelector() {
           mode="azopen"
           active={mode === "azopen"}
           onSelect={setMode}
-          title="AZ Open — Cash Open"
+          title="AIM LLC Trades — 09:30 Cash Open"
           subtitle="Futures orders measured against the 09:30 NY open"
           icon={
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>

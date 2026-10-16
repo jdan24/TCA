@@ -21,11 +21,15 @@
  * Which orders are which comes from the Algo Mapping at fetch time; an order
  * reclassified afterwards is flagged for a re-fetch (OpenResult.needsRefetch).
  *   reference — point value, currency and tick size, once per symbol.
+ *   roll leg  — trade ticks for a roll's front-month leg over [09:30, 09:34),
+ *               once per (leg, date), to price the roll's notional. A file with
+ *               no calendar-spread orders makes none of these calls.
  */
 
 import type {
   ArrivalQuote,
   BenchmarkKind,
+  OpenRollLegPrice,
   BidAskTick,
   OpenWindowBenchmark,
   TradeRecord,
@@ -42,10 +46,13 @@ import {
   orderClassOf,
   requiredArrivalQuotes,
   requiredOpenWindows,
+  requiredRollLegs,
+  rollLegKey,
   tickVwap,
   toQuotePair,
   type ArrivalRequest,
   type OpenWindowRequest,
+  type RollLegRequest,
 } from "@/tca/azOpen";
 import { quoteAtOrBefore } from "@/tca/spread";
 import {
@@ -63,6 +70,8 @@ export interface AzOpenEnrichment {
   arrival: Record<string, ArrivalQuote>;
   /** Raw reference fields per resolved Bloomberg symbol. */
   reference: Record<string, Record<string, unknown>>;
+  /** Keyed by rollLegKey(frontSymbol, nyDate). */
+  rollLeg: Record<string, OpenRollLegPrice>;
 }
 
 /** Bid/ask ticks over [from, to], timestamps corrected to UTC. */
@@ -153,6 +162,24 @@ async function fetchArrival({ bbgSymbol, orderTime }: ArrivalRequest): Promise<A
   return { quote, quoteSource: quote === null ? null : source, failed };
 }
 
+/**
+ * A roll front leg's price at the open: its VWAP over [09:30, 09:34), or the
+ * last print in that window when the prints carry no size.
+ */
+async function fetchRollLeg({ bbgSymbol, nyDate }: RollLegRequest): Promise<OpenRollLegPrice> {
+  const win = openWindowOf(nyDate);
+  if (win === null) return { price: null, failed: false };
+  const { ticks, failed } = await fetchTrades(bbgSymbol, win.start, win.end);
+  let price = tickVwap(ticks, win.start, win.end);
+  if (price === null) {
+    const inWindow = ticks
+      .filter((t) => isFinite(t.price) && t.time >= win.start && t.time < win.end)
+      .sort((a, b) => a.time.getTime() - b.time.getTime());
+    price = inWindow.length > 0 ? inWindow[inWindow.length - 1]!.price : null;
+  }
+  return { price, failed };
+}
+
 /** Fetch every benchmark the given trades need. */
 export async function enrichAzOpenBenchmarks(
   trades: TradeRecord[],
@@ -163,16 +190,18 @@ export async function enrichAzOpenBenchmarks(
   const window: Record<string, OpenWindowBenchmark> = {};
   const arrival: Record<string, ArrivalQuote> = {};
   const reference: Record<string, Record<string, unknown>> = {};
+  const rollLeg: Record<string, OpenRollLegPrice> = {};
 
   const classOf = (t: TradeRecord) => orderClassOf(t.algo, resolveAlgo);
   const windows = requiredOpenWindows(trades, resolveSymbol, classOf);
   const arrivals = requiredArrivalQuotes(trades, resolveSymbol, classOf);
+  const rollLegs = requiredRollLegs(trades, resolveSymbol);
   const symbols = [...new Set(trades.map((t) => resolveSymbol(t.symbol)))];
 
-  const total = symbols.length + windows.length + arrivals.length;
+  const total = symbols.length + windows.length + arrivals.length + rollLegs.length;
   if (total === 0) {
     onProgress?.({ done: 0, total: 0 });
-    return { window, arrival, reference };
+    return { window, arrival, reference, rollLeg };
   }
 
   let done = 0;
@@ -205,6 +234,13 @@ export async function enrichAzOpenBenchmarks(
   });
   await mapPooled(arrivals, MAX_IN_FLIGHT, async (req) => {
     await doArrival(req);
+    step();
+  });
+  const doRollLeg = async (req: RollLegRequest) => {
+    rollLeg[rollLegKey(req.bbgSymbol, req.nyDate)] = await fetchRollLeg(req);
+  };
+  await mapPooled(rollLegs, MAX_IN_FLIGHT, async (req) => {
+    await doRollLeg(req);
     step();
   });
 
@@ -251,5 +287,12 @@ export async function enrichAzOpenBenchmarks(
     await mapPooled(missingArrivals, MAX_IN_FLIGHT, doArrival);
   }
 
-  return { window, arrival, reference };
+  const missingRollLegs = rollLegs.filter(
+    (req) => rollLeg[rollLegKey(req.bbgSymbol, req.nyDate)]?.price == null,
+  );
+  if (missingRollLegs.length > 0) {
+    await mapPooled(missingRollLegs, MAX_IN_FLIGHT, doRollLeg);
+  }
+
+  return { window, arrival, reference, rollLeg };
 }

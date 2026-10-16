@@ -10,7 +10,7 @@
 
 import { createPortal } from "react-dom";
 import type { OpenBenchmarkId, OpenOrderClass, OpenResult, OpenSlip, TradeRecord } from "@/types";
-import { OPEN_BENCHMARKS, OPEN_ORDER_CLASS_LABEL } from "@/tca/azOpen";
+import { monthLabel, OPEN_BENCHMARKS, OPEN_ORDER_CLASS_LABEL } from "@/tca/azOpen";
 import { nyTimeOf } from "@/tca/nyTime";
 import { usePortalMenu } from "@/hooks/usePortalMenu";
 import { useCashDisplay } from "@/hooks/useCashDisplay";
@@ -72,12 +72,15 @@ type Unit = "px" | "bps" | "usd";
 
 export type OpenColumnId =
   | "nyDate"
+  | "month"
+  | "isRoll"
   | "algo"
   | "side"
   | "orderQty"
   | "orderTime"
   | "avgFillPrice"
   | "avgFillPriceDec"
+  | "amount"
   | `${OpenBenchmarkId}_${Unit}`
   | "orderId";
 
@@ -93,12 +96,15 @@ const UNIT_LABEL: Record<Unit, string> = { px: "px", bps: "bps", usd: "$" };
 
 export const AZ_OPEN_COLUMNS: ReadonlyArray<OpenColumn> = [
   { id: "nyDate",       label: "Date", title: "NY date of the first fill — the open the order is scored against" },
+  { id: "month",        label: "Month", title: "Month of the first fill — the By Month grouping" },
+  { id: "isRoll",       label: "Roll", title: "Calendar-spread (roll) order" },
   { id: "algo",         label: "Algo", title: "Algo policy as it appeared in the imported file" },
   { id: "side",         label: "Side" },
   { id: "orderQty",     label: "Qty" },
   { id: "orderTime",    label: "Created (NY)", title: "Order creation time, New York — the arrival instant" },
   { id: "avgFillPrice", label: "Fill Price", title: "In the contract's own notation — 32nds for Treasuries" },
   { id: "avgFillPriceDec", label: "Fill Price (dec)", title: "The average fill price exactly as imported, unrounded" },
+  { id: "amount",       label: "Amount", title: "Notional traded: quantity × price × contract point value. A roll uses its front-month leg's price." },
   ...OPEN_BENCHMARKS.flatMap((b) =>
     (["px", "bps", "usd"] as const).map((unit): OpenColumn => ({
       id: `${b.id}_${unit}`,
@@ -121,9 +127,10 @@ const DEFAULT_HIDDEN: OpenColumnId[] = [
   ...AZ_OPEN_COLUMNS.filter((c) => c.bench?.unit === "px").map((c) => c.id),
 ];
 
-// v2: the benchmark set changed, so the v1 hidden list no longer names the
-// price columns — starting over puts them back to hidden by default.
-const HIDDEN_KEY = "tca_azopen_cols_hidden_v2";
+// Bumped whenever the column set changes enough that a stored selection would
+// mislead (v2: new benchmarks; v3: Month, Roll and Amount) — starting over puts
+// every column back to its default.
+const HIDDEN_KEY = "tca_azopen_cols_hidden_v3";
 
 export function loadOpenCols(): OpenColumnId[] {
   const defaults = ALL_COLUMN_IDS.filter((id) => !DEFAULT_HIDDEN.includes(id));
@@ -199,6 +206,19 @@ function SlipUsdCell({ slip, currency }: { slip: OpenSlip; currency: string }) {
   );
 }
 
+function NotionalCell({ row }: { row: OpenTableRow }) {
+  const cash = useCashDisplay();
+  const v = row.result.notional;
+  if (v === null) return <NaCell />;
+  const c = row.result.currency;
+  return (
+    <span className="tabular-nums text-gray-700 dark:text-gray-300 whitespace-nowrap">
+      {cash.formatCash(v, c)}
+      {cash.isUnconverted(v, c) && <UnconvertedMark />}
+    </span>
+  );
+}
+
 function renderBenchCell(row: OpenTableRow, bench: OpenBenchmarkId, unit: Unit) {
   const slip = row.result.bench[bench];
   switch (unit) {
@@ -227,6 +247,22 @@ export function renderOpenCell(row: OpenTableRow, col: OpenColumn) {
   switch (col.id) {
     case "nyDate":
       return <span className="tabular-nums text-gray-600 dark:text-gray-400">{row.result.nyDate}</span>;
+    case "month":
+      return (
+        <span className="text-gray-600 dark:text-gray-400 whitespace-nowrap">
+          {monthLabel(row.result.month)}
+        </span>
+      );
+    case "isRoll":
+      return row.result.isRoll ? (
+        <span className="rounded bg-purple-50 dark:bg-purple-950 px-1.5 py-0.5 text-[10px] font-semibold text-purple-700 dark:text-purple-300">
+          Roll
+        </span>
+      ) : (
+        <span className="text-gray-300 dark:text-gray-600 select-none">&mdash;</span>
+      );
+    case "amount":
+      return <NotionalCell row={row} />;
     case "algo":
       return row.algo === null || row.algo.trim() === "" ? (
         <span className="text-gray-300 dark:text-gray-600 select-none">&mdash;</span>
@@ -287,6 +323,9 @@ export function openCellText(row: OpenTableRow, col: OpenColumn): string | numbe
   }
   switch (col.id) {
     case "nyDate":          return row.result.nyDate;
+    case "month":           return row.result.month;
+    case "isRoll":          return row.result.isRoll ? "Y" : "N";
+    case "amount":          return row.result.notional;
     case "algo":            return row.algo;
     case "side":            return row.side;
     case "orderQty":        return row.orderQty;

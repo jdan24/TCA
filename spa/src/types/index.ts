@@ -265,6 +265,17 @@ export interface ArrivalQuote {
   failed: boolean;
 }
 
+/**
+ * The price of a roll's front-month leg at the open, for the roll's notional —
+ * a calendar spread's own price is the gap between the months, not a contract
+ * value. Keyed "frontLegSymbol|nyDate".
+ */
+export interface OpenRollLegPrice {
+  /** VWAP of the front leg over [09:30, 09:34), else its last print there. */
+  price: number | null;
+  failed: boolean;
+}
+
 /** The four benchmarks the cash-open report scores against. */
 export type OpenBenchmarkId = "vwap2m" | "vwap4m" | "mid0930" | "midArrival";
 
@@ -288,6 +299,15 @@ export interface OpenResult {
   orderId: string;
   /** NY date of the first fill — the open the order is scored against. */
   nyDate: string;
+  /** "YYYY-MM" of nyDate, for the By Month breakdown. */
+  month: string;
+  /** A calendar-spread (roll) order. */
+  isRoll: boolean;
+  /**
+   * Notional traded, in `currency`: qty × price × point value. A roll uses its
+   * front-month leg's price. null when the point value or that price is missing.
+   */
+  notional: number | null;
   /** From the Algo Mapping settings: twap/vwap-mapped algos are "algo". */
   orderClass: OpenOrderClass;
   bench: Record<OpenBenchmarkId, OpenSlip>;
@@ -556,10 +576,13 @@ export interface TCAStore {
   azOpenArrival: Record<string, ArrivalQuote>;
   /** Raw reference fields per Bloomberg symbol, for point value and currency. */
   azOpenReference: Record<string, Record<string, unknown>>;
+  /** Cash-open report: roll front-leg prices keyed "frontLegSymbol|nyDate". */
+  azOpenRollLeg: Record<string, OpenRollLegPrice>;
   setAzOpenData: (
     window: Record<string, OpenWindowBenchmark>,
     arrival: Record<string, ArrivalQuote>,
     reference: Record<string, Record<string, unknown>>,
+    rollLeg: Record<string, OpenRollLegPrice>,
   ) => void;
   /** USD rates per currency, as fetched from Bloomberg. Overrides are merged on
    *  read from useFxSettings, so this holds only what the bridge answered. */
