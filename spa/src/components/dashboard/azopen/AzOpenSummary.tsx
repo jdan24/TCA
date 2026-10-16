@@ -70,7 +70,8 @@ export function AzOpenBenchmarkSummary({
           <thead>
             <tr className="border-b border-gray-100 dark:border-gray-800">
               <th className={TH}>Benchmark</th>
-              <th className={TH}>Wtd Avg Slip</th>
+              <th className={TH} title="Each order weighted by its quantity">Wtd Avg Slip</th>
+              <th className={TH} title="Every order counted once, whatever its size">Avg Slip</th>
               <th className={TH}>Total Slip</th>
               <th className={TH}>Benchmarked</th>
             </tr>
@@ -87,6 +88,7 @@ export function AzOpenBenchmarkSummary({
                     {b.label}
                   </td>
                   <td className="py-2 pr-3"><BpsCell v={s.wAvg_bps} /></td>
+                  <td className="py-2 pr-3"><BpsCell v={s.avg_bps} /></td>
                   <td className="py-2 pr-3"><UsdCell v={s.total_usd} currency={overall.currency} /></td>
                   <td className="py-2 pr-3 tabular-nums text-gray-600 dark:text-gray-400">
                     {s.withBenchmark} of {overall.count}
@@ -173,6 +175,50 @@ export function AzOpenBySymbol({
       </div>
       <Legend cls={cls} />
       <FxNote text={cash.disclosureFor(rows.map((r) => r.currency ?? "USD"))} />
+    </ChartCard>
+  );
+}
+
+/**
+ * Plain-language explanation of slippage and its colours, for readers new to
+ * TCA. Sits between the summary tables and the order detail, on screen and in
+ * print.
+ */
+export function AzOpenSlippageNote() {
+  return (
+    <ChartCard title="What Is Slippage?">
+      <div className="space-y-2 text-xs leading-relaxed text-gray-600 dark:text-gray-400">
+        <p>
+          Slippage is how far each order&rsquo;s average fill price landed from a reference
+          price (the benchmark), in basis points (1 bp = 0.01%) and in dollars. It measures
+          what the execution cost, or saved, versus that benchmark.
+        </p>
+        <ul className="space-y-1">
+          <li className="flex items-start gap-2">
+            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-red-500" aria-hidden />
+            <span>
+              <span className="font-semibold text-red-500 dark:text-red-400">Red (positive)</span>{" "}
+              &mdash; a cost: bought above, or sold below, the benchmark.
+            </span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-green-600" aria-hidden />
+            <span>
+              <span className="font-semibold text-green-600 dark:text-green-400">
+                Green (zero or negative)
+              </span>{" "}
+              &mdash; no cost or a saving: bought at or below, or sold at or above, the
+              benchmark.
+            </span>
+          </li>
+        </ul>
+        <p>
+          <span className="font-semibold text-gray-800 dark:text-gray-200">Wtd Avg Slip</span>{" "}
+          weights each order by its size;{" "}
+          <span className="font-semibold text-gray-800 dark:text-gray-200">Avg Slip</span>{" "}
+          counts every order equally.
+        </p>
+      </div>
     </ChartCard>
   );
 }

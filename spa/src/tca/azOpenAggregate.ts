@@ -4,7 +4,8 @@
  * summarised; the tables read only the ones that class is judged on.
  *
  * bps figures are quantity-weighted — Σ(bps × qty) / Σqty over the orders that
- * have the benchmark — so a large order counts for what it cost. Cash figures
+ * have the benchmark — so a large order counts for what it cost. A simple mean
+ * over the same orders sits alongside, where every order counts once. Cash figures
  * are group totals, and a group whose currencies cannot be totalled reports no
  * total rather than summing across FX, as everywhere else in the app.
  */
@@ -16,6 +17,8 @@ import { OPEN_BENCHMARKS } from "./azOpen";
 export interface OpenBenchSummary {
   /** Quantity-weighted mean slippage, in bps. */
   wAvg_bps: number | null;
+  /** Simple mean slippage over the orders with the benchmark, in bps. */
+  avg_bps: number | null;
   /** Group total cash slippage. null when the group's currencies cannot total. */
   total_usd: number | null;
   /** How many orders in the group have this benchmark. */
@@ -44,10 +47,15 @@ function summarise(
     let wSum = 0;
     let qSum = 0;
     let withBenchmark = 0;
+    let sSum = 0;
+    let sCount = 0;
     for (const { result, qty } of rows) {
       const s = result.bench[id];
       if (s.price !== null) withBenchmark += 1;
-      if (s.bps === null || !isFinite(s.bps) || qty <= 0) continue;
+      if (s.bps === null || !isFinite(s.bps)) continue;
+      sSum += s.bps;
+      sCount += 1;
+      if (qty <= 0) continue;
       wSum += s.bps * qty;
       qSum += qty;
     }
@@ -71,6 +79,7 @@ function summarise(
 
     bench[id] = {
       wAvg_bps: qSum > 0 ? wSum / qSum : null,
+      avg_bps: sCount > 0 ? sSum / sCount : null,
       total_usd,
       withBenchmark,
     };

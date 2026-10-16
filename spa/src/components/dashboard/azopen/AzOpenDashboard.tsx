@@ -30,7 +30,7 @@ import { useSymbolMap } from "@/hooks/useSymbolMap";
 import { useAlgoMap } from "@/hooks/useAlgoMap";
 import { useCashDisplay } from "@/hooks/useCashDisplay";
 import { useTCAStore } from "@/store/useTCAStore";
-import { AzOpenBenchmarkSummary, AzOpenBySymbol } from "./AzOpenSummary";
+import { AzOpenBenchmarkSummary, AzOpenBySymbol, AzOpenSlippageNote } from "./AzOpenSummary";
 import {
   AZ_OPEN_COLUMNS,
   AzOpenOrderTable,
@@ -339,6 +339,8 @@ export function AzOpenDashboard({
           {...(cls === "market" ? { actions: groupToggle } : {})}
         />
       ))}
+
+      <AzOpenSlippageNote />
 
       {ORDER_CLASSES.map((cls) => (
         <AzOpenOrderTable

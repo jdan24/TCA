@@ -20,7 +20,7 @@ import type { OpenGroupRow } from "@/tca/azOpenAggregate";
 import { OPEN_ORDER_CLASS_LABEL } from "@/tca/azOpen";
 import { useCorporateTemplate } from "@/hooks/useCorporateTemplate";
 import { columnsFor, renderOpenCell, type OpenColumnId, type OpenTableRow } from "./AzOpenOrderTable";
-import { AzOpenBenchmarkSummary, AzOpenBySymbol } from "./AzOpenSummary";
+import { AzOpenBenchmarkSummary, AzOpenBySymbol, AzOpenSlippageNote } from "./AzOpenSummary";
 
 /** Letter landscape less the @page side margins — see SettlePrintLayout. */
 const PRINT_PAGE_WIDTH_PX = 920;
@@ -152,6 +152,8 @@ export function AzOpenPrintLayout({
             <AzOpenBySymbol cls={cls} rows={sections[cls].bySymbol} />
           </div>
         ))}
+
+        <div className="break-inside-avoid"><AzOpenSlippageNote /></div>
 
         {/* ── Order detail ───────────────────────────────────────────────── */}
         {present.map((cls) => (
